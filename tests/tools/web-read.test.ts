@@ -27,6 +27,21 @@ describe("web_read tool", () => {
     expect(text).toContain("Full content here");
   });
 
+  it("falls back to URL when title is missing", async () => {
+    const store = new ContentStore(() => {});
+    const id = store.store({
+      url: "https://example.com/no-title",
+      text: "Content without title",
+      source: "web_fetch",
+    });
+
+    const tool = createWebReadTool(store);
+    const ctx = makeCtx();
+    const result = await tool.execute("call-1", { contentId: id }, undefined, undefined, ctx);
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toMatch(/^# https:\/\/example\.com\/no-title/);
+  });
+
   it("returns error for unknown content ID", async () => {
     const store = new ContentStore(() => {});
     const tool = createWebReadTool(store);

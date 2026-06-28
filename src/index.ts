@@ -6,6 +6,19 @@ import type { SearchProvider } from "./providers/types.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
 
+function isStoredContent(data: unknown): data is StoredContent {
+  if (typeof data !== "object" || data === null) return false;
+  const d = data as Record<string, unknown>;
+  return (
+    typeof d.id === "string" &&
+    typeof d.url === "string" &&
+    typeof d.text === "string" &&
+    typeof d.chars === "number" &&
+    typeof d.storedAt === "string" &&
+    (d.source === "web_fetch" || d.source === "web_search")
+  );
+}
+
 export default function createExtension(pi: ExtensionAPI): void {
   const _config = loadConfig();
   const store = new ContentStore((customType, data) =>
@@ -23,7 +36,8 @@ export default function createExtension(pi: ExtensionAPI): void {
     const entries = ctx.sessionManager.getEntries();
     const restored = entries
       .filter((e) => e.type === "custom" && e.customType === "pi-tools-content" && e.data)
-      .map((e) => (e as { data: StoredContent }).data);
+      .map((e) => (e as { data: unknown }).data)
+      .filter(isStoredContent);
     if (restored.length > 0) {
       store.restore(restored);
     }
