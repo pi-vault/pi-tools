@@ -55,8 +55,8 @@ describe("DuckDuckGoProvider", () => {
     // Verify -m flag is passed to ddgs
     const args = execStub.lastArgs();
     expect(args).toContain("-m");
-    const mIdx = args!.indexOf("-m");
-    expect(args![mIdx + 1]).toBe("2");
+    const mIdx = args?.indexOf("-m") ?? -1;
+    expect(args?.[mIdx + 1]).toBe("2");
   });
 
   it("throws on ddgs CLI failure", async () => {
