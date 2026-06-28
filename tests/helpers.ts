@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import type { execFile as ExecFileType } from "node:child_process";
+import type { ExecFileFn } from "../src/providers/duckduckgo.ts";
 import { vi } from "vitest";
 import type {
   ExtensionContext,
@@ -128,7 +128,7 @@ export function stubFetch(): FetchStub {
 
 export interface ExecStub {
   /** The mock execFile function to pass to DuckDuckGoProvider's constructor. */
-  fn: typeof ExecFileType;
+  fn: ExecFileFn;
   /** Set the JSON data that ddgs will "return" via the output file. */
   setOutput(data: unknown): void;
   /** Set a non-zero exit code to simulate CLI failure. */
@@ -149,20 +149,20 @@ export function stubExec(): ExecStub {
 
   // Mock execFile function — passed to DuckDuckGoProvider via constructor injection.
   // This avoids monkey-patching the non-configurable Node built-in module namespace.
-  const mockFn: typeof ExecFileType = (
+  const mockFn: ExecFileFn = (
     cmd: string,
     args: string[],
-    _opts: unknown,
+    _opts: { timeout?: number },
     callback: (err: Error | null, stdout: string, stderr: string) => void,
   ) => {
-    capturedArgs = args as string[];
+    capturedArgs = args;
 
     if (unavailable) {
       const err = Object.assign(new Error(`spawn ${cmd} ENOENT`), {
         code: "ENOENT",
       });
-      (callback as (err: Error | null, stdout: string, stderr: string) => void)(err, "", "");
-      return { kill: vi.fn() } as any;
+      callback(err, "", "");
+      return { kill: vi.fn() };
     }
 
     if (errorConfig) {
@@ -170,22 +170,22 @@ export function stubExec(): ExecStub {
         new Error(errorConfig.message ?? "ddgs failed"),
         { code: errorConfig.code ?? 1 },
       );
-      (callback as (err: Error | null, stdout: string, stderr: string) => void)(err, "", errorConfig.message ?? "");
-      return { kill: vi.fn() } as any;
+      callback(err, "", errorConfig.message ?? "");
+      return { kill: vi.fn() };
     }
 
     // Write fixture JSON to the output file path extracted from args (-o <path>)
-    const oIdx = (args as string[]).indexOf("-o");
-    if (oIdx !== -1 && oIdx + 1 < (args as string[]).length) {
-      fs.writeFileSync((args as string[])[oIdx + 1], JSON.stringify(outputData));
+    const oIdx = args.indexOf("-o");
+    if (oIdx !== -1 && oIdx + 1 < args.length) {
+      fs.writeFileSync(args[oIdx + 1], JSON.stringify(outputData));
     }
 
-    (callback as (err: Error | null, stdout: string, stderr: string) => void)(null, "", "");
-    return { kill: vi.fn() } as any;
+    callback(null, "", "");
+    return { kill: vi.fn() };
   };
 
   return {
-    fn: mockFn as typeof ExecFileType,
+    fn: mockFn,
     setOutput(data: unknown) {
       outputData = data;
       errorConfig = null;

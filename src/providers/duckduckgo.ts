@@ -11,7 +11,14 @@ interface DDGSResult {
   body: string;
 }
 
-type ExecFileFn = typeof defaultExecFile;
+// Narrow type covering only the execFile overload we actually call.
+// Using typeof defaultExecFile would require __promisify__, making mocks complex.
+export type ExecFileFn = (
+  command: string,
+  args: string[],
+  options: { timeout?: number },
+  callback: (error: Error | null, stdout: string, stderr: string) => void,
+) => { kill(): boolean | undefined };
 
 const EXEC_TIMEOUT_MS = 15_000;
 
@@ -21,7 +28,7 @@ export class DuckDuckGoProvider implements SearchProvider {
 
   private readonly execFile: ExecFileFn;
 
-  constructor(execFileFn: ExecFileFn = defaultExecFile) {
+  constructor(execFileFn: ExecFileFn = defaultExecFile as unknown as ExecFileFn) {
     this.execFile = execFileFn;
   }
 
