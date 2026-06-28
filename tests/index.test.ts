@@ -13,4 +13,11 @@ describe("tools extension", () => {
     createExtension(pi as any);
     expect(pi.tools.some((t) => t.name === "web_search")).toBe(true);
   });
+
+  it("registers web_read tool", () => {
+    const pi = createMockPi();
+    // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
+    createExtension(pi as any);
+    expect(pi.tools.some((t) => t.name === "web_read")).toBe(true);
+  });
 });
