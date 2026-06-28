@@ -57,7 +57,15 @@ export class DuckDuckGoProvider implements SearchProvider {
         throw new Error("Failed to parse ddgs output: output file not created");
       }
 
-      const data: DDGSResult[] = JSON.parse(raw);
+      let data: DDGSResult[];
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsed)) throw new Error("not an array");
+        data = parsed as DDGSResult[];
+      } catch {
+        throw new Error("Failed to parse ddgs output: malformed JSON");
+      }
+
       return data.slice(0, maxResults).map((r) => ({
         title: r.title,
         url: r.href,
@@ -75,11 +83,17 @@ export class DuckDuckGoProvider implements SearchProvider {
     signal?: AbortSignal,
   ): Promise<void> {
     return new Promise((resolve, reject) => {
+      const onAbort = () => {
+        child.kill();
+        reject(new Error("Search aborted"));
+      };
+
       const child = this.execFile(
         "ddgs",
         ["text", "-q", query, "-m", String(maxResults), "-o", outPath],
         { timeout: EXEC_TIMEOUT_MS },
         (error, _stdout, stderr) => {
+          if (signal) signal.removeEventListener("abort", onAbort);
           if (error) {
             // ENOENT from execFile means the ddgs binary is missing
             if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -100,14 +114,7 @@ export class DuckDuckGoProvider implements SearchProvider {
       );
 
       if (signal) {
-        signal.addEventListener(
-          "abort",
-          () => {
-            child.kill();
-            reject(new Error("Search aborted"));
-          },
-          { once: true },
-        );
+        signal.addEventListener("abort", onAbort, { once: true });
       }
     });
   }

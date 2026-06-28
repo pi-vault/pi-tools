@@ -13,7 +13,7 @@ This refactor changes the `DuckDuckGoProvider` internals while preserving the `S
 - **Execution model**: CLI subprocess via `child_process.execFile`. No long-running server, no MCP client. Simplest option with acceptable latency (~200-500ms overhead per call).
 - **Provider identity**: Replaces the existing `duckduckgo` provider. Same name, better results. Not a new provider.
 - **Installation**: `ddgs` must be pre-installed on the user's system. The extension checks for it in PATH and disables the provider with a helpful error if missing.
-- **Backend**: Always uses `--backend auto`. No user-configurable backend selection.
+- **Backend**: Relies on ddgs default (`auto`). No explicit `--backend` flag passed, no user-configurable backend selection.
 
 ## DuckDuckGoProvider Implementation
 

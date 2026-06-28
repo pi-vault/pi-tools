@@ -51,7 +51,7 @@ describe("DuckDuckGoProvider", () => {
 
   it("respects maxResults", async () => {
     const results = await provider.search("test", 2);
-    expect(results.length).toBeLessThanOrEqual(2);
+    expect(results.length).toBe(2);
     // Verify -m flag is passed to ddgs
     const args = execStub.lastArgs();
     expect(args).toContain("-m");
@@ -92,5 +92,25 @@ describe("DuckDuckGoProvider", () => {
   it("includes stderr in error on CLI failure", async () => {
     execStub.setError({ code: 1, message: "rate limited" });
     await expect(provider.search("test", 5)).rejects.toThrow(/rate limited/i);
+  });
+
+  it("returns empty array when ddgs has no results", async () => {
+    execStub.setOutput([]);
+    const results = await provider.search("obscure query", 5);
+    expect(results).toEqual([]);
+  });
+
+  it("throws contextual error on malformed JSON", async () => {
+    execStub.setOutput("not valid json" as unknown);
+    await expect(provider.search("test", 5)).rejects.toThrow(
+      /failed to parse ddgs output/i,
+    );
+  });
+
+  it("throws contextual error when output is not an array", async () => {
+    execStub.setOutput({ unexpected: "object" });
+    await expect(provider.search("test", 5)).rejects.toThrow(
+      /failed to parse ddgs output/i,
+    );
   });
 });
