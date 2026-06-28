@@ -6,18 +6,20 @@ import type {
 
 // Simplified mock interface — avoids inheriting ExtensionAPI's 30+ overloaded
 // `on()` signatures which cannot be satisfied by a generic implementation.
+type EventHandler = (...args: unknown[]) => unknown;
+
 export interface MockPi {
   tools: ToolDefinition[];
-  events: Map<string, Function[]>;
+  events: Map<string, EventHandler[]>;
   entries: Array<{ customType: string; data: unknown }>;
   registerTool(tool: ToolDefinition): void;
-  on(event: string, handler: Function): void;
+  on(event: string, handler: EventHandler): void;
   appendEntry(customType: string, data?: unknown): void;
 }
 
 export function createMockPi(): MockPi {
   const tools: ToolDefinition[] = [];
-  const events = new Map<string, Function[]>();
+  const events = new Map<string, EventHandler[]>();
   const entries: Array<{ customType: string; data: unknown }> = [];
 
   return {
@@ -27,9 +29,9 @@ export function createMockPi(): MockPi {
     registerTool(tool: ToolDefinition) {
       tools.push(tool);
     },
-    on(event: string, handler: Function) {
+    on(event: string, handler: EventHandler) {
       if (!events.has(event)) events.set(event, []);
-      events.get(event)!.push(handler);
+      events.get(event)?.push(handler);
     },
     appendEntry(customType: string, data?: unknown) {
       entries.push({ customType, data });

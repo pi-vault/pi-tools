@@ -21,12 +21,12 @@ describe("ContentStore", () => {
     expect(id).toMatch(/^wc-/);
     const retrieved = store.get(id);
     expect(retrieved).toBeDefined();
-    expect(retrieved!.text).toBe("Hello world");
-    expect(retrieved!.url).toBe("https://example.com");
-    expect(retrieved!.title).toBe("Example");
-    expect(retrieved!.source).toBe("web_fetch");
-    expect(retrieved!.chars).toBe(11);
-    expect(retrieved!.storedAt).toBeDefined();
+    expect(retrieved?.text).toBe("Hello world");
+    expect(retrieved?.url).toBe("https://example.com");
+    expect(retrieved?.title).toBe("Example");
+    expect(retrieved?.source).toBe("web_fetch");
+    expect(retrieved?.chars).toBe(11);
+    expect(retrieved?.storedAt).toBeDefined();
   });
 
   it("returns undefined for unknown content ID", () => {
@@ -58,6 +58,6 @@ describe("ContentStore", () => {
     store.restore([entry]);
     const retrieved = store.get("wc-restored-1");
     expect(retrieved).toBeDefined();
-    expect(retrieved!.text).toBe("restored content");
+    expect(retrieved?.text).toBe("restored content");
   });
 });

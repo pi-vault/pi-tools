@@ -1,5 +1,5 @@
 const SECRETS_PATTERN =
-  /(bearer|token|api[-_]?key|authorization|secret|password)\s*[:=]?\s*[\w.\/-]{8,}/gi;
+  /(bearer|token|api[-_]?key|authorization|secret|password)\s*[:=]?\s*[\w./-]{8,}/gi;
 const MAX_LENGTH = 300;
 
 export function sanitizeError(error: unknown): string {

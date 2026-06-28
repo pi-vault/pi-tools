@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type {
-  CodeSearchProvider,
   CodeSearchResult,
-  FetchProvider,
   FetchResult,
   ProviderMeta,
-  SearchProvider,
   SearchResult,
 } from "../../src/providers/types.ts";
 
