@@ -194,11 +194,22 @@ describe("DuckDuckGoProvider", () => {
   });
 
   it("cleans up temp file after success", async () => {
-    const results = await provider.search("test", 5);
-    expect(results.length).toBeGreaterThan(0);
-    // Temp file should have been deleted -- verify by checking
-    // no ddgs-*.json files remain in os.tmpdir()
-    // (implementation detail: provider calls fs.unlink in finally)
+    const os = await import("node:os");
+    const fsSync = await import("node:fs");
+    const before = fsSync
+      .readdirSync(os.tmpdir())
+      .filter((f) => f.startsWith("ddgs-") && f.endsWith(".json"));
+    await provider.search("test", 5);
+    const after = fsSync
+      .readdirSync(os.tmpdir())
+      .filter((f) => f.startsWith("ddgs-") && f.endsWith(".json"));
+    // No new ddgs temp files should remain
+    expect(after.length).toBeLessThanOrEqual(before.length);
+  });
+
+  it("includes stderr in error on CLI failure", async () => {
+    execStub.setError({ code: 1, message: "rate limited" });
+    await expect(provider.search("test", 5)).rejects.toThrow(/rate limited/i);
   });
 });
 ```
@@ -243,21 +254,22 @@ export class DuckDuckGoProvider implements SearchProvider {
     const tmpFile = path.join(os.tmpdir(), `ddgs-${crypto.randomUUID()}.json`);
 
     try {
+      // runDdgs catches ENOENT from execFile and rethrows with install hint
       await this.runDdgs(query, maxResults, tmpFile, signal);
-      const raw = await fs.readFile(tmpFile, "utf-8");
+
+      let raw: string;
+      try {
+        raw = await fs.readFile(tmpFile, "utf-8");
+      } catch {
+        throw new Error("Failed to parse ddgs output: output file not created");
+      }
+
       const data: DDGSResult[] = JSON.parse(raw);
       return data.slice(0, maxResults).map((r) => ({
         title: r.title,
         url: r.href,
         snippet: r.body,
       }));
-    } catch (error: any) {
-      if (error?.code === "ENOENT") {
-        throw new Error(
-          "ddgs CLI not found. Install with: pip install ddgs (or: uv tool install ddgs)",
-        );
-      }
-      throw error;
     } finally {
       await fs.unlink(tmpFile).catch(() => {});
     }
@@ -276,7 +288,22 @@ export class DuckDuckGoProvider implements SearchProvider {
         { timeout: EXEC_TIMEOUT_MS },
         (error, _stdout, stderr) => {
           if (error) {
-            reject(error);
+            // ENOENT from execFile means the ddgs binary is missing
+            if ((error as any).code === "ENOENT") {
+              reject(
+                new Error(
+                  "ddgs CLI not found. Install with: pip install ddgs (or: uv tool install ddgs)",
+                ),
+              );
+              return;
+            }
+            // Include stderr in the error message when available
+            const detail = stderr?.trim();
+            reject(
+              detail
+                ? new Error(`ddgs failed: ${detail}`)
+                : error,
+            );
           } else {
             resolve();
           }

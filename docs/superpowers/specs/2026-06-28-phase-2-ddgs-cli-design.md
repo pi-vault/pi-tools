@@ -49,9 +49,15 @@ This refactor changes the `DuckDuckGoProvider` internals while preserving the `S
 
 ### Binary Discovery
 
-On construction, check for `ddgs` in PATH. Store an `available` flag. If `ddgs` is not found, `search()` throws:
+Detected lazily on first `search()` call. If `execFile` returns ENOENT (binary not found), `runDdgs` throws:
 
 > `ddgs CLI not found. Install with: pip install ddgs (or: uv tool install ddgs)`
+
+ENOENT from `execFile` (binary missing) is distinguished from ENOENT from `fs.readFile` (output file missing) by handling them in separate try/catch blocks. The former produces the install hint; the latter produces "Failed to parse ddgs output".
+
+### Error Reporting
+
+When `ddgs` exits non-zero, stderr is included in the thrown error message (e.g., `"ddgs failed: rate limited"`). This surfaces ddgs-specific error details instead of a generic execFile error.
 
 ### Timeout and Abort
 
@@ -81,7 +87,8 @@ Tests mock `execFile` and filesystem calls via `stubExec()`:
 4. **`throws on ddgs CLI failure`** -- mock execFile with non-zero exit code, expect thrown error
 5. **`throws when ddgs not found`** -- construct provider with ddgs unavailable, expect error with pip/uv install hint
 6. **`respects abort signal`** -- pass already-aborted signal, verify child process is killed
-7. **`cleans up temp file`** -- verify `unlink` is called after read, even on parse failure
+7. **`cleans up temp file`** -- verify no `ddgs-*.json` files remain in tmpdir after search completes
+8. **`includes stderr in error on CLI failure`** -- mock execFile with error message, verify it appears in thrown error
 
 ### Tool Tests (`tests/tools/web-search.test.ts`)
 
