@@ -58,8 +58,11 @@ export function validateUrl(url: string): URL {
     throw new SSRFError("URLs with credentials are not allowed");
   }
 
-  // Hostname checks
+  // Hostname checks (guaranteed non-empty for http/https, but guard explicitly)
   const hostname = parsed.hostname;
+  if (!hostname) {
+    throw new SSRFError("URL has no hostname");
+  }
 
   if (isBlockedHostname(hostname)) {
     throw new SSRFError(`Blocked hostname: ${hostname}`);
