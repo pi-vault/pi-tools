@@ -19,6 +19,7 @@
 ## Task 1.1: Provider Interfaces and Result Types
 
 **Files:**
+
 - Create: `src/providers/types.ts`
 - Test: `tests/providers/types.test.ts`
 
@@ -183,6 +184,7 @@ git commit -m "feat: add provider interfaces and result types"
 ## Task 1.2: Error Sanitization
 
 **Files:**
+
 - Create: `src/utils/errors.ts`
 - Test: `tests/utils/errors.test.ts`
 
@@ -306,6 +308,7 @@ git commit -m "feat: add error sanitization utility"
 ## Task 1.3: Configuration Loading
 
 **Files:**
+
 - Create: `src/config.ts`
 - Test: `tests/config.test.ts`
 
@@ -314,7 +317,11 @@ git commit -m "feat: add error sanitization utility"
 ```typescript
 // tests/config.test.ts
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadConfig, resolveApiKey, type PiToolsConfig } from "../src/config.ts";
+import {
+  loadConfig,
+  resolveApiKey,
+  type PiToolsConfig,
+} from "../src/config.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -445,13 +452,7 @@ const DEFAULT_CONFIG: PiToolsConfig = {
 };
 
 export function getConfigPath(): string {
-  return path.join(
-    os.homedir(),
-    ".pi",
-    "agent",
-    "extensions",
-    "pi-tools.json",
-  );
+  return path.join(os.homedir(), ".pi", "agent", "extensions", "pi-tools.json");
 }
 
 export function loadConfig(configPath?: string): PiToolsConfig {
@@ -478,7 +479,10 @@ export function resolveApiKey(apiKey: string | undefined): string | undefined {
   if (apiKey.startsWith(SHELL_CMD_PREFIX)) {
     try {
       const cmd = apiKey.slice(SHELL_CMD_PREFIX.length);
-      return execSync(cmd, { timeout: SHELL_TIMEOUT_MS, encoding: "utf-8" }).trim();
+      return execSync(cmd, {
+        timeout: SHELL_TIMEOUT_MS,
+        encoding: "utf-8",
+      }).trim();
     } catch {
       return undefined;
     }
@@ -509,6 +513,7 @@ git commit -m "feat: add configuration loading with env var and shell command re
 ## Task 1.4: Test Utilities
 
 **Files:**
+
 - Create: `tests/helpers.ts`
 
 - [ ] **Step 1: Create test helper utilities**
@@ -519,18 +524,19 @@ The spec calls for `createMockPi()` (captures registered tools, commands, events
 // tests/helpers.ts
 import { vi } from "vitest";
 import type {
-  ExtensionAPI,
   ExtensionContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 
+// Simplified mock interface — avoids inheriting ExtensionAPI's 30+ overloaded
+// `on()` signatures which cannot be satisfied by a generic implementation.
 export interface MockPi {
   tools: ToolDefinition[];
   events: Map<string, Function[]>;
   entries: Array<{ customType: string; data: unknown }>;
-  registerTool: ExtensionAPI["registerTool"];
-  on: ExtensionAPI["on"];
-  appendEntry: ExtensionAPI["appendEntry"];
+  registerTool(tool: ToolDefinition): void;
+  on(event: string, handler: Function): void;
+  appendEntry(customType: string, data?: unknown): void;
 }
 
 export function createMockPi(): MockPi {
@@ -552,10 +558,12 @@ export function createMockPi(): MockPi {
     appendEntry(customType: string, data?: unknown) {
       entries.push({ customType, data });
     },
-  } as MockPi;
+  };
 }
 
-export function makeCtx(overrides?: Partial<ExtensionContext>): ExtensionContext {
+export function makeCtx(
+  overrides?: Partial<ExtensionContext>,
+): ExtensionContext {
   return {
     ui: {
       notify: vi.fn(),
@@ -585,11 +593,14 @@ export function makeCtx(overrides?: Partial<ExtensionContext>): ExtensionContext
 }
 
 export interface FetchStub {
-  addResponse(urlPattern: string | RegExp, response: {
-    status?: number;
-    body?: string | object;
-    headers?: Record<string, string>;
-  }): void;
+  addResponse(
+    urlPattern: string | RegExp,
+    response: {
+      status?: number;
+      body?: string | object;
+      headers?: Record<string, string>;
+    },
+  ): void;
   restore(): void;
 }
 
@@ -600,22 +611,24 @@ export function stubFetch(): FetchStub {
   }> = [];
   const originalFetch = globalThis.fetch;
 
-  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : input.toString();
-    for (const route of routes) {
-      const matches =
-        typeof route.pattern === "string"
-          ? url.includes(route.pattern)
-          : route.pattern.test(url);
-      if (matches) {
-        return new Response(route.response.body, {
-          status: route.response.status,
-          headers: route.response.headers,
-        });
+  globalThis.fetch = vi.fn(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      for (const route of routes) {
+        const matches =
+          typeof route.pattern === "string"
+            ? url.includes(route.pattern)
+            : route.pattern.test(url);
+        if (matches) {
+          return new Response(route.response.body, {
+            status: route.response.status,
+            headers: route.response.headers,
+          });
+        }
       }
-    }
-    return new Response("Not Found", { status: 404 });
-  }) as typeof fetch;
+      return new Response("Not Found", { status: 404 });
+    },
+  ) as typeof fetch;
 
   return {
     addResponse(urlPattern, response) {
@@ -626,7 +639,7 @@ export function stubFetch(): FetchStub {
           body:
             typeof response.body === "object"
               ? JSON.stringify(response.body)
-              : response.body ?? "",
+              : (response.body ?? ""),
           headers: response.headers ?? { "content-type": "application/json" },
         },
       });
@@ -648,6 +661,7 @@ git commit -m "feat: add test utilities (createMockPi, makeCtx, stubFetch)"
 ## Task 1.5: Content Storage
 
 **Files:**
+
 - Create: `src/storage.ts`
 - Test: `tests/storage.test.ts`
 
@@ -798,6 +812,7 @@ git commit -m "feat: add session-local content storage"
 ## Task 1.6: Output Truncation
 
 **Files:**
+
 - Create: `src/utils/truncate.ts`
 - Test: `tests/utils/truncate.test.ts`
 
@@ -854,10 +869,7 @@ export interface TruncateResult {
   originalChars: number;
 }
 
-export function truncateContent(
-  text: string,
-  limit: number,
-): TruncateResult {
+export function truncateContent(text: string, limit: number): TruncateResult {
   const originalChars = text.length;
   if (originalChars <= limit) {
     return { text, truncated: false, originalChars };
@@ -883,6 +895,7 @@ git commit -m "feat: add output truncation utility"
 ## Task 1.7: SSRF Guard
 
 **Files:**
+
 - Create: `src/utils/ssrf.ts`
 - Test: `tests/utils/ssrf.test.ts`
 
@@ -929,11 +942,15 @@ describe("validateUrl", () => {
 
   it("blocks cloud metadata endpoint", () => {
     expect(() => validateUrl("http://169.254.169.254")).toThrow(SSRFError);
-    expect(() => validateUrl("http://169.254.169.254/latest/meta-data")).toThrow(SSRFError);
+    expect(() =>
+      validateUrl("http://169.254.169.254/latest/meta-data"),
+    ).toThrow(SSRFError);
   });
 
   it("blocks URLs with credentials", () => {
-    expect(() => validateUrl("http://user:pass@example.com")).toThrow(SSRFError);
+    expect(() => validateUrl("http://user:pass@example.com")).toThrow(
+      SSRFError,
+    );
     expect(() => validateUrl("http://admin@example.com")).toThrow(SSRFError);
   });
 
