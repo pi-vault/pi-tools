@@ -2,42 +2,152 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Deliver a working `web_search` tool using DuckDuckGo (free, no key). After this phase, the extension registers a functional search tool that returns real results.
+**Goal:** Deliver a working `web_search` tool using DuckDuckGo via the `ddgs` CLI (free, no key). After this phase, the extension registers a functional search tool that returns real web search results.
 
-**Spec:** `docs/superpowers/specs/2026-06-27-pi-tools-design.md`
+**Spec:** `docs/superpowers/specs/2026-06-28-phase-2-ddgs-cli-design.md`
 
 **Depends on:** Phase 1 (types, test helpers, config)
 
-**Produces:** `src/providers/duckduckgo.ts`, `src/tools/web-search.ts`, updated `src/index.ts`
+**Produces:** `src/providers/duckduckgo.ts`, `src/tools/web-search.ts`, updated `src/index.ts`, updated `tests/helpers.ts`
 
 ---
 
-## Task 2.1: DuckDuckGo Search Provider
+## Task 2.1: DuckDuckGo Search Provider (ddgs CLI)
 
 **Files:**
+
 - Create: `src/providers/duckduckgo.ts`
 - Test: `tests/providers/duckduckgo.test.ts`
+- Modify: `tests/helpers.ts` (add `stubExec`)
 
-- [ ] **Step 1: Write failing tests**
+- [ ] **Step 1: Add `stubExec` test helper**
+
+Add to `tests/helpers.ts` -- intercepts `child_process.execFile` calls and writes fixture data to the output file path extracted from the command args.
+
+```typescript
+// Append to tests/helpers.ts
+
+export interface ExecStub {
+  /** Set the JSON data that ddgs will "return" via the output file. */
+  setOutput(data: unknown): void;
+  /** Set a non-zero exit code to simulate CLI failure. */
+  setError(error: { code?: number; message?: string }): void;
+  /** Make ddgs appear unavailable (command not found). */
+  setUnavailable(): void;
+  /** Restore original execFile. */
+  restore(): void;
+  /** The args from the most recent execFile call. */
+  lastArgs(): string[] | undefined;
+}
+
+export function stubExec(): ExecStub {
+  const original = childProcess.execFile;
+  let outputData: unknown = [];
+  let errorConfig: { code?: number; message?: string } | null = null;
+  let unavailable = false;
+  let capturedArgs: string[] | undefined;
+
+  // Monkey-patch execFile
+  (childProcess as any).execFile = (
+    cmd: string,
+    args: string[],
+    opts: any,
+    callback: (err: Error | null, stdout: string, stderr: string) => void,
+  ) => {
+    capturedArgs = args;
+
+    if (unavailable) {
+      const err = new Error(`spawn ${cmd} ENOENT`) as any;
+      err.code = "ENOENT";
+      callback(err, "", "");
+      return { kill: vi.fn() };
+    }
+
+    if (errorConfig) {
+      const err = new Error(errorConfig.message ?? "ddgs failed") as any;
+      err.code = errorConfig.code ?? 1;
+      callback(err, "", errorConfig.message ?? "");
+      return { kill: vi.fn() };
+    }
+
+    // Extract output file path from args: -o <path>
+    const oIdx = args.indexOf("-o");
+    if (oIdx !== -1 && oIdx + 1 < args.length) {
+      const outPath = args[oIdx + 1];
+      fs.writeFileSync(outPath, JSON.stringify(outputData));
+    }
+
+    callback(null, "", "");
+    return { kill: vi.fn() };
+  };
+
+  return {
+    setOutput(data: unknown) {
+      outputData = data;
+      errorConfig = null;
+      unavailable = false;
+    },
+    setError(error) {
+      errorConfig = error;
+      unavailable = false;
+    },
+    setUnavailable() {
+      unavailable = true;
+      errorConfig = null;
+    },
+    restore() {
+      (childProcess as any).execFile = original;
+    },
+    lastArgs() {
+      return capturedArgs;
+    },
+  };
+}
+```
+
+Add the required imports at the top of `tests/helpers.ts`:
+
+```typescript
+import * as childProcess from "node:child_process";
+import * as fs from "node:fs";
+```
+
+- [ ] **Step 2: Write failing provider tests**
 
 ```typescript
 // tests/providers/duckduckgo.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DuckDuckGoProvider } from "../../src/providers/duckduckgo.ts";
-import { stubFetch } from "../helpers.ts";
-import type { SearchResult } from "../../src/providers/types.ts";
+import { stubExec } from "../helpers.ts";
 
 describe("DuckDuckGoProvider", () => {
-  let fetchStub: ReturnType<typeof stubFetch>;
+  let execStub: ReturnType<typeof stubExec>;
   let provider: DuckDuckGoProvider;
 
   beforeEach(() => {
-    fetchStub = stubFetch();
+    execStub = stubExec();
+    execStub.setOutput([
+      {
+        title: "Example Result",
+        href: "https://example.com",
+        body: "This is a snippet about example",
+      },
+      {
+        title: "Another Result",
+        href: "https://another.com",
+        body: "More information here",
+      },
+      {
+        title: "Third Result",
+        href: "https://third.com",
+        body: "Third snippet",
+      },
+    ]);
     provider = new DuckDuckGoProvider();
   });
 
   afterEach(() => {
-    fetchStub.restore();
+    execStub.restore();
   });
 
   it("has correct name and label", () => {
@@ -46,100 +156,87 @@ describe("DuckDuckGoProvider", () => {
   });
 
   it("returns normalized search results", async () => {
-    fetchStub.addResponse("duckduckgo.com", {
-      body: {
-        RelatedTopics: [
-          {
-            Text: "Example Result - This is a snippet about example",
-            FirstURL: "https://example.com",
-          },
-          {
-            Text: "Another Result - More information here",
-            FirstURL: "https://another.com",
-          },
-        ],
-      },
-    });
-
     const results = await provider.search("test query", 5);
-    expect(results.length).toBeGreaterThan(0);
-    expect(results[0]).toHaveProperty("title");
-    expect(results[0]).toHaveProperty("url");
-    expect(results[0]).toHaveProperty("snippet");
+    expect(results.length).toBe(3);
+    expect(results[0]).toEqual({
+      title: "Example Result",
+      url: "https://example.com",
+      snippet: "This is a snippet about example",
+    });
   });
 
   it("respects maxResults", async () => {
-    fetchStub.addResponse("duckduckgo.com", {
-      body: {
-        RelatedTopics: [
-          { Text: "Result 1 - snippet", FirstURL: "https://1.com" },
-          { Text: "Result 2 - snippet", FirstURL: "https://2.com" },
-          { Text: "Result 3 - snippet", FirstURL: "https://3.com" },
-        ],
-      },
-    });
-
     const results = await provider.search("test", 2);
     expect(results.length).toBeLessThanOrEqual(2);
+    // Verify -m flag is passed to ddgs
+    const args = execStub.lastArgs();
+    expect(args).toContain("-m");
+    const mIdx = args!.indexOf("-m");
+    expect(args![mIdx + 1]).toBe("2");
   });
 
-  it("throws on non-2xx response", async () => {
-    fetchStub.addResponse("duckduckgo.com", { status: 503, body: "Service Unavailable" });
+  it("throws on ddgs CLI failure", async () => {
+    execStub.setError({ code: 1, message: "ddgs error" });
     await expect(provider.search("test", 5)).rejects.toThrow();
+  });
+
+  it("throws when ddgs not found", async () => {
+    execStub.setUnavailable();
+    await expect(provider.search("test", 5)).rejects.toThrow(/install/i);
   });
 
   it("respects abort signal", async () => {
     const controller = new AbortController();
     controller.abort();
-    await expect(provider.search("test", 5, controller.signal)).rejects.toThrow();
+    await expect(
+      provider.search("test", 5, controller.signal),
+    ).rejects.toThrow();
+  });
+
+  it("cleans up temp file after success", async () => {
+    const os = await import("node:os");
+    const fsSync = await import("node:fs");
+    const before = fsSync
+      .readdirSync(os.tmpdir())
+      .filter((f) => f.startsWith("ddgs-") && f.endsWith(".json"));
+    await provider.search("test", 5);
+    const after = fsSync
+      .readdirSync(os.tmpdir())
+      .filter((f) => f.startsWith("ddgs-") && f.endsWith(".json"));
+    // No new ddgs temp files should remain
+    expect(after.length).toBeLessThanOrEqual(before.length);
+  });
+
+  it("includes stderr in error on CLI failure", async () => {
+    execStub.setError({ code: 1, message: "rate limited" });
+    await expect(provider.search("test", 5)).rejects.toThrow(/rate limited/i);
   });
 });
 ```
 
-- [ ] **Step 2: Run tests to verify failure**
+- [ ] **Step 3: Run tests to verify failure**
 
 Run: `pnpm test -- tests/providers/duckduckgo.test.ts`
-Expected: FAIL.
+Expected: FAIL (DuckDuckGoProvider does not exist yet).
 
-- [ ] **Step 3: Implement DuckDuckGo provider**
+- [ ] **Step 4: Implement DuckDuckGo provider**
 
 ```typescript
 // src/providers/duckduckgo.ts
+import { execFile } from "node:child_process";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+import * as crypto from "node:crypto";
 import type { SearchProvider, SearchResult } from "./types.ts";
 
-interface DDGTopic {
-  Text?: string;
-  FirstURL?: string;
-  Topics?: DDGTopic[];
+interface DDGSResult {
+  title: string;
+  href: string;
+  body: string;
 }
 
-interface DDGResponse {
-  RelatedTopics?: DDGTopic[];
-  AbstractText?: string;
-  AbstractURL?: string;
-  AbstractSource?: string;
-}
-
-function flattenTopics(topics: DDGTopic[]): DDGTopic[] {
-  const flat: DDGTopic[] = [];
-  for (const topic of topics) {
-    if (topic.FirstURL && topic.Text) {
-      flat.push(topic);
-    }
-    if (topic.Topics) {
-      flat.push(...flattenTopics(topic.Topics));
-    }
-  }
-  return flat;
-}
-
-function parseTitle(text: string): { title: string; snippet: string } {
-  const dashIdx = text.indexOf(" - ");
-  if (dashIdx > 0) {
-    return { title: text.slice(0, dashIdx), snippet: text.slice(dashIdx + 3) };
-  }
-  return { title: text, snippet: text };
-}
+const EXEC_TIMEOUT_MS = 15_000;
 
 export class DuckDuckGoProvider implements SearchProvider {
   readonly name = "duckduckgo";
@@ -150,97 +247,161 @@ export class DuckDuckGoProvider implements SearchProvider {
     maxResults: number,
     signal?: AbortSignal,
   ): Promise<SearchResult[]> {
-    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
-    const response = await fetch(url, { signal });
-
-    if (!response.ok) {
-      throw new Error(`DuckDuckGo API error: ${response.status} ${response.statusText}`);
+    if (signal?.aborted) {
+      throw new Error("Search aborted");
     }
 
-    const data: DDGResponse = await response.json();
-    const topics = flattenTopics(data.RelatedTopics ?? []);
-    const results: SearchResult[] = [];
+    const tmpFile = path.join(os.tmpdir(), `ddgs-${crypto.randomUUID()}.json`);
 
-    // Include abstract if available
-    if (data.AbstractText && data.AbstractURL) {
-      results.push({
-        title: data.AbstractSource ?? "Abstract",
-        url: data.AbstractURL,
-        snippet: data.AbstractText,
-      });
+    try {
+      // runDdgs catches ENOENT from execFile and rethrows with install hint
+      await this.runDdgs(query, maxResults, tmpFile, signal);
+
+      let raw: string;
+      try {
+        raw = await fs.readFile(tmpFile, "utf-8");
+      } catch {
+        throw new Error("Failed to parse ddgs output: output file not created");
+      }
+
+      const data: DDGSResult[] = JSON.parse(raw);
+      return data.slice(0, maxResults).map((r) => ({
+        title: r.title,
+        url: r.href,
+        snippet: r.body,
+      }));
+    } finally {
+      await fs.unlink(tmpFile).catch(() => {});
     }
+  }
 
-    for (const topic of topics) {
-      if (results.length >= maxResults) break;
-      if (!topic.Text || !topic.FirstURL) continue;
-      const { title, snippet } = parseTitle(topic.Text);
-      results.push({ title, url: topic.FirstURL, snippet });
-    }
+  private runDdgs(
+    query: string,
+    maxResults: number,
+    outPath: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const child = execFile(
+        "ddgs",
+        ["text", "-q", query, "-m", String(maxResults), "-o", outPath],
+        { timeout: EXEC_TIMEOUT_MS },
+        (error, _stdout, stderr) => {
+          if (error) {
+            // ENOENT from execFile means the ddgs binary is missing
+            if ((error as any).code === "ENOENT") {
+              reject(
+                new Error(
+                  "ddgs CLI not found. Install with: pip install ddgs (or: uv tool install ddgs)",
+                ),
+              );
+              return;
+            }
+            // Include stderr in the error message when available
+            const detail = stderr?.trim();
+            reject(
+              detail
+                ? new Error(`ddgs failed: ${detail}`)
+                : error,
+            );
+          } else {
+            resolve();
+          }
+        },
+      );
 
-    return results.slice(0, maxResults);
+      if (signal) {
+        signal.addEventListener(
+          "abort",
+          () => {
+            child.kill();
+            reject(new Error("Search aborted"));
+          },
+          { once: true },
+        );
+      }
+    });
   }
 }
 ```
 
-- [ ] **Step 4: Run tests**
+- [ ] **Step 5: Run tests**
 
 Run: `pnpm test -- tests/providers/duckduckgo.test.ts`
 Expected: All tests PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/providers/duckduckgo.ts tests/providers/duckduckgo.test.ts
-git commit -m "feat: add DuckDuckGo search provider"
+git add src/providers/duckduckgo.ts tests/providers/duckduckgo.test.ts tests/helpers.ts
+git commit -m "feat: add DuckDuckGo search provider (ddgs CLI)"
 ```
 
 ## Task 2.2: web_search Tool Definition
 
 **Files:**
+
 - Create: `src/tools/web-search.ts`
 - Test: `tests/tools/web-search.test.ts`
 - Modify: `src/index.ts`
 
 - [ ] **Step 1: Write failing tests**
 
+Tool tests use an inline stub `SearchProvider` to stay provider-agnostic. They don't know about CLI internals.
+
 ```typescript
 // tests/tools/web-search.test.ts
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createWebSearchTool } from "../../src/tools/web-search.ts";
-import { DuckDuckGoProvider } from "../../src/providers/duckduckgo.ts";
-import { stubFetch } from "../helpers.ts";
 import { makeCtx } from "../helpers.ts";
+import type {
+  SearchProvider,
+  SearchResult,
+} from "../../src/providers/types.ts";
+
+function makeStubProvider(results: SearchResult[]): SearchProvider {
+  return {
+    name: "stub",
+    label: "Stub",
+    async search(_query: string, maxResults: number, _signal?: AbortSignal) {
+      return results.slice(0, maxResults);
+    },
+  };
+}
+
+function makeFailingProvider(message: string): SearchProvider {
+  return {
+    name: "stub",
+    label: "Stub",
+    async search() {
+      throw new Error(message);
+    },
+  };
+}
 
 describe("web_search tool", () => {
-  let fetchStub: ReturnType<typeof stubFetch>;
-
-  beforeEach(() => {
-    fetchStub = stubFetch();
-    fetchStub.addResponse("duckduckgo.com", {
-      body: {
-        RelatedTopics: [
-          { Text: "TypeScript - A typed superset of JavaScript", FirstURL: "https://typescriptlang.org" },
-          { Text: "MDN Web Docs - Web technology reference", FirstURL: "https://developer.mozilla.org" },
-        ],
-      },
-    });
-  });
-
-  afterEach(() => {
-    fetchStub.restore();
-  });
+  const sampleResults: SearchResult[] = [
+    {
+      title: "TypeScript",
+      url: "https://typescriptlang.org",
+      snippet: "A typed superset of JavaScript",
+    },
+    {
+      title: "MDN Web Docs",
+      url: "https://developer.mozilla.org",
+      snippet: "Web technology reference",
+    },
+  ];
 
   it("has correct tool metadata", () => {
-    const providers = { duckduckgo: new DuckDuckGoProvider() };
-    const tool = createWebSearchTool(() => providers.duckduckgo);
+    const tool = createWebSearchTool(() => makeStubProvider(sampleResults));
     expect(tool.name).toBe("web_search");
     expect(tool.label).toBe("Web Search");
     expect(tool.parameters).toBeDefined();
   });
 
   it("executes search and returns formatted results", async () => {
-    const provider = new DuckDuckGoProvider();
-    const tool = createWebSearchTool(() => provider);
+    const tool = createWebSearchTool(() => makeStubProvider(sampleResults));
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-1",
@@ -254,15 +415,13 @@ describe("web_search tool", () => {
     expect(result.content[0]).toHaveProperty("type", "text");
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toContain("TypeScript");
+    expect(text).toContain("https://typescriptlang.org");
   });
 
   it("returns error result on provider failure", async () => {
-    fetchStub.restore();
-    const stub2 = stubFetch();
-    stub2.addResponse("duckduckgo.com", { status: 500, body: "Server Error" });
-
-    const provider = new DuckDuckGoProvider();
-    const tool = createWebSearchTool(() => provider);
+    const tool = createWebSearchTool(() =>
+      makeFailingProvider("Provider exploded"),
+    );
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-2",
@@ -275,8 +434,6 @@ describe("web_search tool", () => {
     expect(result.content[0]).toHaveProperty("type", "text");
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text.toLowerCase()).toContain("error");
-
-    stub2.restore();
   });
 });
 ```
@@ -291,14 +448,22 @@ Expected: FAIL.
 ```typescript
 // src/tools/web-search.ts
 import { Type, type Static } from "typebox";
-import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionContext,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import type { SearchProvider, SearchResult } from "../providers/types.ts";
 import { sanitizeError } from "../utils/errors.ts";
 
 const WebSearchParams = Type.Object({
   query: Type.String({ description: "Search query" }),
   numResults: Type.Optional(
-    Type.Number({ minimum: 1, maximum: 20, default: 5, description: "Number of results (1-20, default 5)" }),
+    Type.Number({
+      minimum: 1,
+      maximum: 20,
+      default: 5,
+      description: "Number of results (1-20, default 5)",
+    }),
   ),
   provider: Type.Optional(
     Type.String({ description: "Provider name or 'auto' (default)" }),
@@ -338,7 +503,11 @@ export function createWebSearchTool(
       try {
         const provider = resolveProvider(params.provider);
         const maxResults = params.numResults ?? 5;
-        const results = await provider.search(params.query, maxResults, signal ?? undefined);
+        const results = await provider.search(
+          params.query,
+          maxResults,
+          signal ?? undefined,
+        );
         const text = formatResults(results);
 
         // Record successful usage for quota tracking (increment on success only)
@@ -372,7 +541,7 @@ Replace the contents of `src/index.ts`:
 ```typescript
 // src/index.ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadConfig, resolveApiKey } from "./config.ts";
+import { loadConfig } from "./config.ts";
 import { DuckDuckGoProvider } from "./providers/duckduckgo.ts";
 import type { SearchProvider } from "./providers/types.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
@@ -425,4 +594,4 @@ git commit -m "feat: add web_search tool with DuckDuckGo provider"
 
 ## Phase 2 Checkpoint
 
-The extension now registers a functional `web_search` tool. When loaded by Pi, agents can search the web using DuckDuckGo.
+The extension now registers a functional `web_search` tool. When loaded by Pi, agents can search the web via the `ddgs` CLI, returning real search results with titles, URLs, and snippets. The `ddgs` CLI must be pre-installed (`pip install ddgs` or `uv tool install ddgs`).
