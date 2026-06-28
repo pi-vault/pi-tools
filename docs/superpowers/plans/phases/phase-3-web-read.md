@@ -78,15 +78,13 @@ Expected: FAIL.
 
 ```typescript
 // src/tools/web-read.ts
-import { Type, type Static } from "typebox";
-import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ContentStore } from "../storage.ts";
 
 const WebReadParams = Type.Object({
   contentId: Type.String({ description: "Content ID from a previous web_fetch or web_search result" }),
 });
-
-type WebReadInput = Static<typeof WebReadParams>;
 
 export function createWebReadTool(
   store: ContentStore,
@@ -137,7 +135,7 @@ Expected: All tests PASS.
 ```typescript
 // src/index.ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadConfig, resolveApiKey } from "./config.ts";
+import { loadConfig } from "./config.ts";
 import { ContentStore, type StoredContent } from "./storage.ts";
 import { DuckDuckGoProvider } from "./providers/duckduckgo.ts";
 import type { SearchProvider } from "./providers/types.ts";
@@ -145,22 +143,23 @@ import { createWebSearchTool } from "./tools/web-search.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
 
 export default function createExtension(pi: ExtensionAPI): void {
-  const config = loadConfig();
+  const _config = loadConfig();
   const store = new ContentStore((customType, data) =>
     pi.appendEntry(customType, data),
   );
   const duckduckgo = new DuckDuckGoProvider();
 
-  function resolveSearchProvider(name?: string): SearchProvider {
+  function resolveSearchProvider(_name?: string): SearchProvider {
+    // Phase 2: only DuckDuckGo. Phase 5 adds the full registry.
     return duckduckgo;
   }
 
   // Restore stored content from previous session
   pi.on("session_start", (_event, ctx) => {
-    const entries = ctx.sessionManager.getEntries?.() ?? [];
+    const entries = ctx.sessionManager.getEntries();
     const restored = entries
-      .filter((e: any) => e.customType === "pi-tools-content" && e.data)
-      .map((e: any) => e.data as StoredContent);
+      .filter((e) => e.type === "custom" && e.customType === "pi-tools-content" && e.data)
+      .map((e) => (e as { data: StoredContent }).data);
     if (restored.length > 0) {
       store.restore(restored);
     }
