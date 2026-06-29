@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Introduce the provider registry with quota tracking, tier-based selection, and usage persistence. After this phase, `web_search` automatically rotates across all configured providers.
+**Goal:** Introduce the provider registry with quota tracking, tier-based selection, and usage persistence. After this phase, `web_search` automatically rotates across all configured providers and quota counts survive process restarts.
 
 **Spec:** `docs/superpowers/specs/2026-06-27-pi-tools-design.md`
 
@@ -207,6 +207,8 @@ git commit -m "feat: add monthly usage tracking for provider quota management"
 - Create: `src/providers/registry.ts`
 - Test: `tests/providers/registry.test.ts`
 
+**Design:** The registry accepts a `UsageTracker` as a constructor dependency. It delegates all usage counting and persistence to the tracker, while owning provider registration and tier-based selection logic. This separation keeps persistence concerns in `UsageTracker` and selection concerns in `ProviderRegistry`.
+
 **Note:** When integrating with real providers, consider reading rate-limit headers from HTTP responses to inform quota tracking. This is a future enhancement tracked in the spec.
 
 - [ ] **Step 1: Write failing tests**
@@ -215,7 +217,11 @@ git commit -m "feat: add monthly usage tracking for provider quota management"
 // tests/providers/registry.test.ts
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
-import type { SearchProvider, SearchResult } from "../../src/providers/types.ts";
+import { UsageTracker } from "../../src/providers/usage.ts";
+import type { SearchProvider } from "../../src/providers/types.ts";
+import * as fs from "node:fs";
+
+vi.mock("node:fs");
 
 function mockProvider(name: string, label: string): SearchProvider {
   return {
@@ -228,8 +234,19 @@ function mockProvider(name: string, label: string): SearchProvider {
 }
 
 describe("ProviderRegistry", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    // UsageTracker reads from disk on construction; stub to start fresh
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.writeFileSync).mockImplementation(() => {});
+    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined as any);
+  });
+
   it("selects tier 1 provider with highest remaining quota", () => {
-    const registry = new ProviderRegistry();
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
     const brave = mockProvider("brave", "Brave");
     const serper = mockProvider("serper", "Serper");
 
@@ -243,7 +260,8 @@ describe("ProviderRegistry", () => {
   });
 
   it("falls back to tier 2 when tier 1 exhausted", () => {
-    const registry = new ProviderRegistry();
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
     const perplexity = mockProvider("perplexity", "Perplexity");
 
     registry.registerSearch(perplexity, { tier: 2, monthlyQuota: null });
@@ -254,7 +272,8 @@ describe("ProviderRegistry", () => {
   });
 
   it("falls back to tier 3 when all others unavailable", () => {
-    const registry = new ProviderRegistry();
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
     const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
     registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
@@ -264,7 +283,8 @@ describe("ProviderRegistry", () => {
   });
 
   it("selects by name when explicitly requested", () => {
-    const registry = new ProviderRegistry();
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
     const brave = mockProvider("brave", "Brave");
     const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
@@ -276,23 +296,26 @@ describe("ProviderRegistry", () => {
   });
 
   it("returns undefined when no providers registered", () => {
-    const registry = new ProviderRegistry();
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
     expect(registry.selectSearch()).toBeUndefined();
   });
 
-  it("records usage on success", () => {
-    const registry = new ProviderRegistry();
+  it("records usage via tracker and reflects in remaining quota", () => {
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
     const brave = mockProvider("brave", "Brave");
     registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
 
     registry.recordUsage("brave");
-    // After recording, remaining should be 1999
-    const remaining = registry.getRemaining("brave");
-    expect(remaining).toBe(1999);
+    expect(registry.getRemaining("brave")).toBe(1999);
+    // Verify tracker received the increment
+    expect(tracker.getCount("brave")).toBe(1);
   });
 
   it("skips providers at 100% usage", () => {
-    const registry = new ProviderRegistry();
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
     const brave = mockProvider("brave", "Brave");
     const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
@@ -302,6 +325,30 @@ describe("ProviderRegistry", () => {
     registry.recordUsage("brave"); // Now at 100%
     const selected = registry.selectSearch();
     expect(selected!.name).toBe("duckduckgo");
+  });
+
+  it("persists usage across registry instances sharing the same tracker state", () => {
+    // Simulate: tracker loaded from disk with existing counts
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ resetAt: new Date().toISOString().slice(0, 7), counts: { brave: 1998 } }),
+    );
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
+    const brave = mockProvider("brave", "Brave");
+    const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+    registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+    // Only 2 remaining for brave
+    expect(registry.getRemaining("brave")).toBe(2);
+    const selected = registry.selectSearch();
+    expect(selected!.name).toBe("brave"); // still has quota
+
+    registry.recordUsage("brave"); // 1999 used, 1 remaining
+    registry.recordUsage("brave"); // 2000 used, 0 remaining
+    const afterExhaust = registry.selectSearch();
+    expect(afterExhaust!.name).toBe("duckduckgo");
   });
 });
 ```
@@ -316,6 +363,7 @@ Expected: FAIL.
 ```typescript
 // src/providers/registry.ts
 import type { SearchProvider, FetchProvider, CodeSearchProvider, ProviderTier } from "./types.ts";
+import type { UsageTracker } from "./usage.ts";
 
 interface RegisteredSearch {
   provider: SearchProvider;
@@ -335,7 +383,11 @@ export class ProviderRegistry {
   private searchProviders = new Map<string, RegisteredSearch>();
   private fetchProviders = new Map<string, RegisteredFetch>();
   private codeSearchProviders = new Map<string, RegisteredCodeSearch>();
-  private usageCounts = new Map<string, number>();
+  private tracker: UsageTracker;
+
+  constructor(tracker: UsageTracker) {
+    this.tracker = tracker;
+  }
 
   registerSearch(
     provider: SearchProvider,
@@ -357,18 +409,13 @@ export class ProviderRegistry {
   }
 
   recordUsage(providerName: string): void {
-    this.usageCounts.set(
-      providerName,
-      (this.usageCounts.get(providerName) ?? 0) + 1,
-    );
+    this.tracker.increment(providerName);
   }
 
   getRemaining(providerName: string): number {
     const reg = this.searchProviders.get(providerName);
     if (!reg) return 0;
-    if (reg.monthlyQuota === null) return Infinity;
-    const used = this.usageCounts.get(providerName) ?? 0;
-    return Math.max(0, reg.monthlyQuota - used);
+    return this.tracker.getRemaining(providerName, reg.monthlyQuota);
   }
 
   selectSearch(name?: string): SearchProvider | undefined {
@@ -382,18 +429,11 @@ export class ProviderRegistry {
         .filter((r) => r.tier === tier)
         .filter((r) => {
           if (r.monthlyQuota === null) return true;
-          const used = this.usageCounts.get(r.provider.name) ?? 0;
-          return used < r.monthlyQuota;
+          return this.tracker.getCount(r.provider.name) < r.monthlyQuota;
         })
         .sort((a, b) => {
-          const remA =
-            a.monthlyQuota === null
-              ? Infinity
-              : a.monthlyQuota - (this.usageCounts.get(a.provider.name) ?? 0);
-          const remB =
-            b.monthlyQuota === null
-              ? Infinity
-              : b.monthlyQuota - (this.usageCounts.get(b.provider.name) ?? 0);
+          const remA = this.tracker.getRemaining(a.provider.name, a.monthlyQuota);
+          const remB = this.tracker.getRemaining(b.provider.name, b.monthlyQuota);
           return remB - remA;
         });
 
@@ -407,7 +447,6 @@ export class ProviderRegistry {
 
   selectFetch(name?: string): FetchProvider | undefined {
     if (name) return this.fetchProviders.get(name)?.provider;
-    // Return first available fetch provider
     const first = this.fetchProviders.values().next();
     return first.done ? undefined : first.value.provider;
   }
@@ -439,15 +478,19 @@ git commit -m "feat: add provider registry with quota-aware tier-based selection
 
 **Files:**
 - Modify: `src/index.ts`
-- Modify: `tests/index.test.ts`
+
+**Constraints:**
+- Preserve the existing `isStoredContent` type guard for session restore validation.
+- Do not import `resolveApiKey` yet — no API-key providers are registered in this phase.
 
 - [ ] **Step 1: Update index.ts to use registry**
 
 ```typescript
 // src/index.ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadConfig, resolveApiKey } from "./config.ts";
+import { loadConfig } from "./config.ts";
 import { ContentStore, type StoredContent } from "./storage.ts";
+import { UsageTracker } from "./providers/usage.ts";
 import { ProviderRegistry } from "./providers/registry.ts";
 import { DuckDuckGoProvider } from "./providers/duckduckgo.ts";
 import type { SearchProvider } from "./providers/types.ts";
@@ -455,12 +498,26 @@ import { createWebSearchTool } from "./tools/web-search.ts";
 import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
 
+function isStoredContent(data: unknown): data is StoredContent {
+  if (typeof data !== "object" || data === null) return false;
+  const d = data as Record<string, unknown>;
+  return (
+    typeof d.id === "string" &&
+    typeof d.url === "string" &&
+    typeof d.text === "string" &&
+    typeof d.chars === "number" &&
+    typeof d.storedAt === "string" &&
+    (d.source === "web_fetch" || d.source === "web_search")
+  );
+}
+
 export default function createExtension(pi: ExtensionAPI): void {
   const config = loadConfig();
   const store = new ContentStore((customType, data) =>
     pi.appendEntry(customType, data),
   );
-  const registry = new ProviderRegistry();
+  const tracker = new UsageTracker();
+  const registry = new ProviderRegistry(tracker);
 
   // Register DuckDuckGo (always available, tier 3)
   if (config.providers.duckduckgo?.enabled !== false) {
@@ -480,10 +537,11 @@ export default function createExtension(pi: ExtensionAPI): void {
 
   // Restore stored content from previous session
   pi.on("session_start", (_event, ctx) => {
-    const entries = ctx.sessionManager.getEntries?.() ?? [];
+    const entries = ctx.sessionManager.getEntries();
     const restored = entries
-      .filter((e: any) => e.customType === "pi-tools-content" && e.data)
-      .map((e: any) => e.data as StoredContent);
+      .filter((e) => e.type === "custom" && e.customType === "pi-tools-content" && e.data)
+      .map((e) => (e as { data: unknown }).data)
+      .filter(isStoredContent);
     if (restored.length > 0) {
       store.restore(restored);
     }
@@ -503,7 +561,7 @@ export default function createExtension(pi: ExtensionAPI): void {
 - [ ] **Step 2: Run all tests**
 
 Run: `pnpm check`
-Expected: All pass.
+Expected: All pass (lint, typecheck, tests).
 
 - [ ] **Step 3: Commit**
 
@@ -514,4 +572,4 @@ git commit -m "refactor: integrate provider registry into extension entry point"
 
 ## Phase 5 Checkpoint
 
-The registry and quota system are operational. As providers are added in Phase 6, they automatically participate in quota-aware rotation.
+The registry and quota system are operational. Usage counts persist across process restarts via `UsageTracker` (monthly-reset file at `~/.pi/agent/pi-tools-usage.json`). As providers are added in Phase 6, they automatically participate in quota-aware rotation.
