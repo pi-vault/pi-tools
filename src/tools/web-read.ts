@@ -1,5 +1,6 @@
 import { Type } from "typebox";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import type { ContentStore } from "../storage.ts";
 
 const WebReadParams = Type.Object({
@@ -40,6 +41,25 @@ export function createWebReadTool(
         ],
         details: undefined,
       };
+    },
+    renderCall(args, theme: Theme, context) {
+      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      text.setText(
+        `${theme.fg("toolTitle", theme.bold("web_read"))} ${theme.fg("accent", `"${args.contentId}"`)}`,
+      );
+      return text;
+    },
+    renderResult(result, options, theme: Theme, context) {
+      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      const raw =
+        result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
+      if (options.expanded) {
+        const lines = raw.split("\n").slice(0, 20);
+        text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));
+      } else {
+        text.setText(theme.fg("toolOutput", `${raw.length} chars`));
+      }
+      return text;
     },
   };
 }

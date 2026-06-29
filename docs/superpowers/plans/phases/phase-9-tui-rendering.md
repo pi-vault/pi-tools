@@ -486,6 +486,22 @@ All tools now have custom TUI rendering. The extension is feature-complete per t
 Run final check: `pnpm check`
 Expected: All lint, typecheck, and tests pass.
 
+### Known Issues (not addressed — by design)
+
+1. **`web_read` `renderResult` char count includes header metadata** — `raw.length` counts the
+   `# Title\nSource: url\nChars: N\n\n` prefix added by `execute()`, slightly inflating the
+   displayed number. Fixing this requires adding a `details` field to web_read's return value
+   (currently typed as `undefined`). Low user impact since the count is directional.
+
+2. **`web_read` has no `isPartial`/`argsComplete` streaming states** — intentional. It's a
+   synchronous local cache lookup that completes near-instantly; a "Loading..." flicker would
+   be more confusing than helpful.
+
+3. **Lint warnings (`noNonNullAssertion`) in test file** — tests use `tool.renderCall!(...)`
+   which triggers biome `noNonNullAssertion` warnings. This is the pre-existing test pattern
+   across the codebase (22 existing warnings of same kind). Not worth suppressing individually;
+   if addressed, should be done globally via biome config for test files.
+
 ---
 
 ## Summary
