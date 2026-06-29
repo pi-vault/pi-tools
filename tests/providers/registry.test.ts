@@ -24,7 +24,7 @@ describe("ProviderRegistry", () => {
       throw new Error("ENOENT");
     });
     vi.mocked(fs.writeFileSync).mockImplementation(() => {});
-    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined as any);
+    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
   });
 
   it("selects tier 1 provider with highest remaining quota", () => {
@@ -39,7 +39,7 @@ describe("ProviderRegistry", () => {
     // Serper has higher remaining (2500 vs 2000)
     const selected = registry.selectSearch();
     expect(selected).toBeDefined();
-    expect(selected!.name).toBe("serper");
+    expect(selected?.name).toBe("serper");
   });
 
   it("falls back to tier 2 when tier 1 exhausted", () => {
@@ -51,7 +51,7 @@ describe("ProviderRegistry", () => {
 
     const selected = registry.selectSearch();
     expect(selected).toBeDefined();
-    expect(selected!.name).toBe("perplexity");
+    expect(selected?.name).toBe("perplexity");
   });
 
   it("falls back to tier 3 when all others unavailable", () => {
@@ -62,7 +62,7 @@ describe("ProviderRegistry", () => {
     registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
     const selected = registry.selectSearch();
-    expect(selected!.name).toBe("duckduckgo");
+    expect(selected?.name).toBe("duckduckgo");
   });
 
   it("selects by name when explicitly requested", () => {
@@ -75,7 +75,7 @@ describe("ProviderRegistry", () => {
     registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
     const selected = registry.selectSearch("duckduckgo");
-    expect(selected!.name).toBe("duckduckgo");
+    expect(selected?.name).toBe("duckduckgo");
   });
 
   it("returns undefined when no providers registered", () => {
@@ -107,7 +107,7 @@ describe("ProviderRegistry", () => {
 
     registry.recordUsage("brave"); // Now at 100%
     const selected = registry.selectSearch();
-    expect(selected!.name).toBe("duckduckgo");
+    expect(selected?.name).toBe("duckduckgo");
   });
 
   it("persists usage across registry instances sharing the same tracker state", () => {
@@ -126,11 +126,11 @@ describe("ProviderRegistry", () => {
     // Only 2 remaining for brave
     expect(registry.getRemaining("brave")).toBe(2);
     const selected = registry.selectSearch();
-    expect(selected!.name).toBe("brave"); // still has quota
+    expect(selected?.name).toBe("brave"); // still has quota
 
     registry.recordUsage("brave"); // 1999 used, 1 remaining
     registry.recordUsage("brave"); // 2000 used, 0 remaining
     const afterExhaust = registry.selectSearch();
-    expect(afterExhaust!.name).toBe("duckduckgo");
+    expect(afterExhaust?.name).toBe("duckduckgo");
   });
 });

@@ -29,7 +29,7 @@ describe("UsageTracker", () => {
       throw new Error("ENOENT");
     });
     vi.mocked(fs.writeFileSync).mockImplementation(() => {});
-    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined as any);
+    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
 
     const tracker = new UsageTracker();
     tracker.increment("brave");
@@ -58,7 +58,7 @@ describe("UsageTracker", () => {
       }),
     );
     vi.mocked(fs.writeFileSync).mockImplementation(() => {});
-    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined as any);
+    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
 
     const tracker = new UsageTracker();
     expect(tracker.getCount("brave")).toBe(0);
@@ -69,7 +69,7 @@ describe("UsageTracker", () => {
       throw new Error("ENOENT");
     });
     vi.mocked(fs.writeFileSync).mockImplementation(() => {});
-    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined as any);
+    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
 
     const tracker = new UsageTracker();
     tracker.increment("brave");
