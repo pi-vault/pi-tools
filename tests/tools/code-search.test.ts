@@ -47,4 +47,46 @@ describe("code_search tool", () => {
     expect(text).toContain("Exa");
     expect(text.toLowerCase()).toContain("api key");
   });
+
+  it("calls onSuccess with provider name after successful search", async () => {
+    const onSuccess = vi.fn();
+    const tool = createCodeSearchTool(() => mockCodeSearch(), onSuccess);
+    const ctx = makeCtx();
+    await tool.execute("call-3", { query: "hooks" }, undefined, undefined, ctx);
+    expect(onSuccess).toHaveBeenCalledWith("exa");
+  });
+
+  it("does not call onSuccess when provider throws", async () => {
+    const failingProvider: CodeSearchProvider = {
+      name: "exa",
+      codeSearch: vi.fn().mockRejectedValue(new Error("Provider exploded")),
+    };
+    const onSuccess = vi.fn();
+    const tool = createCodeSearchTool(() => failingProvider, onSuccess);
+    const ctx = makeCtx();
+    const result = await tool.execute("call-4", { query: "test" }, undefined, undefined, ctx);
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text.toLowerCase()).toContain("error");
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("returns no results message when provider returns empty array", async () => {
+    const emptyProvider: CodeSearchProvider = {
+      name: "exa",
+      codeSearch: vi.fn().mockResolvedValue([]),
+    };
+    const tool = createCodeSearchTool(() => emptyProvider);
+    const ctx = makeCtx();
+    const result = await tool.execute("call-5", { query: "nonexistent" }, undefined, undefined, ctx);
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toBe("No code results found.");
+  });
+
+  it("passes numResults to provider", async () => {
+    const provider = mockCodeSearch();
+    const tool = createCodeSearchTool(() => provider);
+    const ctx = makeCtx();
+    await tool.execute("call-6", { query: "test", numResults: 3 }, undefined, undefined, ctx);
+    expect(provider.codeSearch).toHaveBeenCalledWith("test", 3, undefined);
+  });
 });

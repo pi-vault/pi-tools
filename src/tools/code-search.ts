@@ -27,6 +27,7 @@ function formatCodeResults(results: CodeSearchResult[]): string {
 
 export function createCodeSearchTool(
   resolveProvider: () => CodeSearchProvider | undefined,
+  onSuccess?: (providerName: string) => void,
 ): ToolDefinition<typeof CodeSearchParams, CodeSearchDetails> {
   return {
     name: "code_search",
@@ -58,6 +59,8 @@ export function createCodeSearchTool(
         const maxResults = params.numResults ?? 5;
         const results = await provider.codeSearch(params.query, maxResults, signal ?? undefined);
         const text = formatCodeResults(results);
+
+        onSuccess?.(provider.name);
 
         return {
           content: [{ type: "text" as const, text }],
