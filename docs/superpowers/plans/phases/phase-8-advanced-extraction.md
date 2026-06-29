@@ -451,3 +451,9 @@ git commit -m "feat: extend extraction pipeline with PDF, RSC, Jina Reader tiers
 ## Phase 8 Checkpoint
 
 The extraction pipeline now handles HTML, PDFs, Next.js RSC pages, JS-rendered pages (via Jina Reader), with raw text as final fallback. `web_fetch` can handle a wide variety of web content.
+
+## Known Gaps (Not Addressed)
+
+- **No PDF integration test in pipeline:** Hard to test through `stubFetch` since PDF parsing requires valid binary. The `extractPdf` unit test covers the module directly.
+- **RSC MIN_CONTENT_LENGTH is 200, not 500:** Intentionally lower than Readability's 500-char threshold. RSC payloads are less structured and meaningful fragments are shorter.
+- **Jina Reader has no retry/backoff for 429:** Returns null on any failure including rate limits. Acceptable for a fallback tier — if Jina fails, the pipeline falls through to raw-text.
