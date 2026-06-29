@@ -1,6 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig } from "./config.ts";
 import { ContentStore, type StoredContent } from "./storage.ts";
+import { UsageTracker } from "./providers/usage.ts";
+import { ProviderRegistry } from "./providers/registry.ts";
 import { DuckDuckGoProvider } from "./providers/duckduckgo.ts";
 import type { SearchProvider } from "./providers/types.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
@@ -21,15 +23,27 @@ function isStoredContent(data: unknown): data is StoredContent {
 }
 
 export default function createExtension(pi: ExtensionAPI): void {
-  const _config = loadConfig();
+  const config = loadConfig();
   const store = new ContentStore((customType, data) =>
     pi.appendEntry(customType, data),
   );
-  const duckduckgo = new DuckDuckGoProvider();
+  const tracker = new UsageTracker();
+  const registry = new ProviderRegistry(tracker);
 
-  function resolveSearchProvider(_name?: string): SearchProvider {
-    // Phase 2: only DuckDuckGo. Phase 5 adds the full registry.
-    return duckduckgo;
+  // Register DuckDuckGo (always available, tier 3)
+  if (config.providers.duckduckgo?.enabled !== false) {
+    registry.registerSearch(new DuckDuckGoProvider(), {
+      tier: 3,
+      monthlyQuota: null,
+    });
+  }
+
+  function resolveSearchProvider(name?: string): SearchProvider {
+    const provider = registry.selectSearch(name);
+    if (!provider) {
+      throw new Error("No search providers available");
+    }
+    return provider;
   }
 
   // Restore stored content from previous session
@@ -44,7 +58,12 @@ export default function createExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.registerTool(createWebSearchTool(resolveSearchProvider));
+  pi.registerTool(
+    createWebSearchTool(
+      (name) => resolveSearchProvider(name),
+      (providerName) => registry.recordUsage(providerName),
+    ),
+  );
   pi.registerTool(createWebFetchTool(store));
   pi.registerTool(createWebReadTool(store));
 }
