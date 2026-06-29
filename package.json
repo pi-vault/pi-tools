@@ -47,6 +47,13 @@
     "CHANGELOG.md",
     "README.md"
   ],
+  "dependencies": {
+    "@joplin/turndown-plugin-gfm": "^1.0.67",
+    "@mozilla/readability": "^0.6.0",
+    "linkedom": "^0.18.12",
+    "turndown": "^7.2.4",
+    "unpdf": "^1.6.2"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.5.1",
     "@earendil-works/pi-coding-agent": "^0.80.2",
@@ -60,12 +67,5 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*"
-  },
-  "dependencies": {
-    "@joplin/turndown-plugin-gfm": "^1.0.67",
-    "@mozilla/readability": "^0.6.0",
-    "linkedom": "^0.18.12",
-    "turndown": "^7.2.4",
-    "unpdf": "^1.6.2"
   }
 }
