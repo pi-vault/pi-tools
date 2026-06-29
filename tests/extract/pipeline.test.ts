@@ -91,4 +91,24 @@ describe("extractContent", () => {
     const result = await extractContent("https://example.com/no-ct");
     expect(result.text).toContain("Some text content");
   });
+
+  it("falls back to RSC parser for Next.js pages", async () => {
+    const rscHtml = `<html><body>
+      <script>self.__next_f.push([1,"${"Real content ".repeat(50)}"])</script>
+    </body></html>`;
+    fetchStub.addResponse("nextjs-app.com", {
+      body: rscHtml,
+      headers: { "content-type": "text/html" },
+    });
+    const result = await extractContent("https://nextjs-app.com");
+    expect(result.extractionChain).toContain("rsc");
+  });
+
+  it("rejects binary image content", async () => {
+    fetchStub.addResponse("example.com/photo.jpg", {
+      body: "binary",
+      headers: { "content-type": "image/jpeg" },
+    });
+    await expect(extractContent("https://example.com/photo.jpg")).rejects.toThrow(/binary/i);
+  });
 });

@@ -1,5 +1,8 @@
 import { validateUrl } from "../utils/ssrf.ts";
 import { extractHtml } from "./html.ts";
+import { extractPdf } from "./pdf.ts";
+import { extractRsc } from "./rsc.ts";
+import { extractViaJinaReader } from "./jina-reader.ts";
 
 export interface ExtractedContent {
   text: string;
@@ -49,10 +52,33 @@ export async function extractContent(
 
   const contentType = response.headers.get("content-type") ?? "";
 
-  // Block binary content
-  for (const prefix of BINARY_CONTENT_TYPES) {
-    if (contentType.startsWith(prefix)) {
-      throw new Error(`Unsupported binary content type: ${contentType}`);
+  // Block binary content (except PDF)
+  if (!contentType.includes("application/pdf")) {
+    for (const prefix of BINARY_CONTENT_TYPES) {
+      if (contentType.startsWith(prefix)) {
+        throw new Error(`Unsupported binary content type: ${contentType}`);
+      }
+    }
+  }
+
+  // PDF extraction
+  if (contentType.includes("application/pdf")) {
+    chain.push("pdf");
+    try {
+      const buffer = new Uint8Array(await response.arrayBuffer());
+      const text = await extractPdf(buffer);
+      if (text.length > 0) {
+        return {
+          text,
+          title: undefined,
+          url,
+          extractionChain: chain,
+          chars: text.length,
+          truncated: false,
+        };
+      }
+    } catch {
+      chain.push("pdf:fail");
     }
   }
 
@@ -73,20 +99,51 @@ export async function extractContent(
   }
   chain.push("readability:thin");
 
-  // Fallback: return raw text (stripped of HTML if possible)
-  chain.push("raw-text");
-  const rawText = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-  if (rawText.length === 0) {
-    throw new Error(
-      `Could not extract content from ${url}. Tried: ${chain.join(" -> ")}`,
-    );
+  // Tier 2: RSC parser
+  const rscText = extractRsc(body);
+  if (rscText) {
+    chain.push("rsc");
+    return {
+      text: rscText,
+      title: undefined,
+      url,
+      extractionChain: chain,
+      chars: rscText.length,
+      truncated: false,
+    };
   }
-  return {
-    text: rawText,
-    title: undefined,
-    url,
-    extractionChain: chain,
-    chars: rawText.length,
-    truncated: false,
-  };
+  chain.push("rsc:no-match");
+
+  // Tier 3: Jina Reader
+  const jinaText = await extractViaJinaReader(url, signal);
+  if (jinaText) {
+    chain.push("jina-reader");
+    return {
+      text: jinaText,
+      title: undefined,
+      url,
+      extractionChain: chain,
+      chars: jinaText.length,
+      truncated: false,
+    };
+  }
+  chain.push("jina-reader:fail");
+
+  // Final fallback: raw text stripped of HTML
+  const rawText = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  if (rawText.length > 0) {
+    chain.push("raw-text");
+    return {
+      text: rawText,
+      title: undefined,
+      url,
+      extractionChain: chain,
+      chars: rawText.length,
+      truncated: false,
+    };
+  }
+
+  throw new Error(
+    `Could not extract content from ${url}. Tried: ${chain.join(" -> ")}`,
+  );
 }
