@@ -58,9 +58,9 @@ export async function extractContent(
 
   const body = await response.text();
 
-  // Tier 1: Readability
+  // Tier 1: Readability (extractHtml guarantees text.length >= MIN_CONTENT_LENGTH)
   const htmlResult = extractHtml(body, url);
-  if (htmlResult && htmlResult.text.length >= 500) {
+  if (htmlResult) {
     chain.push("readability");
     return {
       text: htmlResult.text,

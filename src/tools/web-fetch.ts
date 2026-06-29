@@ -27,9 +27,9 @@ export function createWebFetchTool(
     name: "web_fetch",
     label: "Web Fetch",
     description:
-      "Fetch a URL and extract readable content as markdown. Supports HTML, PDFs, and JS-rendered pages.",
+      "Fetch a URL and extract readable content as markdown. Supports HTML pages.",
     promptSnippet:
-      "Fetch a URL and extract readable content as markdown. Supports HTML, PDFs, and JS-rendered pages.",
+      "Fetch a URL and extract readable content as markdown. Supports HTML pages.",
     promptGuidelines: [
       "Use web_fetch when you have a specific URL to read.",
       "For large pages, use web_read with the returned contentId to retrieve the full text.",

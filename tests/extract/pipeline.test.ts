@@ -57,4 +57,38 @@ describe("extractContent", () => {
       extractContent("https://example.com/image.png"),
     ).rejects.toThrow(/binary/i);
   });
+
+  it("falls back to raw-text when Readability returns thin content", async () => {
+    const thinHtml = "<html><body><p>Short content that is too thin for Readability</p></body></html>";
+    fetchStub.addResponse("example.com/thin", {
+      body: thinHtml,
+      headers: { "content-type": "text/html" },
+    });
+    const result = await extractContent("https://example.com/thin");
+    expect(result.extractionChain).toContain("readability:thin");
+    expect(result.extractionChain).toContain("raw-text");
+    expect(result.text).toContain("Short content");
+  });
+
+  it("throws on HTTP error responses", async () => {
+    fetchStub.addResponse("example.com/missing", {
+      status: 404,
+      body: "Not Found",
+      headers: { "content-type": "text/html" },
+    });
+    await expect(
+      extractContent("https://example.com/missing"),
+    ).rejects.toThrow(/HTTP 404/);
+  });
+
+  it("handles responses without content-type header", async () => {
+    const html = `<html><body><p>${"Some text content. ".repeat(50)}</p></body></html>`;
+    fetchStub.addResponse("example.com/no-ct", {
+      body: html,
+      headers: {},
+    });
+    // Should not throw — falls through to extraction attempt
+    const result = await extractContent("https://example.com/no-ct");
+    expect(result.text).toContain("Some text content");
+  });
 });
