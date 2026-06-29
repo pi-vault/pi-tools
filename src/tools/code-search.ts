@@ -1,5 +1,6 @@
 import { Type } from "typebox";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import type { CodeSearchProvider, CodeSearchResult } from "../providers/types.ts";
 import { sanitizeError } from "../utils/errors.ts";
 
@@ -73,6 +74,35 @@ export function createCodeSearchTool(
           details: { provider: provider.name, resultCount: 0 },
         };
       }
+    },
+    renderCall(args, theme: Theme, context) {
+      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      if (!context.argsComplete) {
+        text.setText(theme.fg("warning", "Searching code..."));
+        return text;
+      }
+      const q = args.query.length > 70 ? `${args.query.slice(0, 67)}...` : args.query;
+      text.setText(
+        `${theme.fg("toolTitle", theme.bold("code_search"))} ${theme.fg("accent", `"${q}"`)}`,
+      );
+      return text;
+    },
+    renderResult(result, options, theme: Theme, context) {
+      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      if (context.isPartial) {
+        text.setText(theme.fg("warning", "Searching code..."));
+        return text;
+      }
+      const count = result.details?.resultCount ?? 0;
+      if (options.expanded) {
+        const raw =
+          result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
+        const lines = raw.split("\n").slice(0, 15);
+        text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));
+      } else {
+        text.setText(theme.fg("toolOutput", `${count} code results`));
+      }
+      return text;
     },
   };
 }

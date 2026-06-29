@@ -1,5 +1,6 @@
 import { Type } from "typebox";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
 import type { ContentStore } from "../storage.ts";
 import { extractContent } from "../extract/pipeline.ts";
 import { truncateContent } from "../utils/truncate.ts";
@@ -87,6 +88,40 @@ export function createWebFetchTool(
           },
         };
       }
+    },
+    renderCall(args, theme: Theme, context) {
+      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      if (!context.argsComplete) {
+        text.setText(theme.fg("warning", "Fetching..."));
+        return text;
+      }
+      const u = args.url.length > 70 ? `${args.url.slice(0, 67)}...` : args.url;
+      text.setText(
+        `${theme.fg("toolTitle", theme.bold("web_fetch"))} ${theme.fg("accent", `"${u}"`)}`,
+      );
+      return text;
+    },
+    renderResult(result, options, theme: Theme, context) {
+      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      if (context.isPartial) {
+        text.setText(theme.fg("warning", "Fetching..."));
+        return text;
+      }
+      const details = result.details;
+      if (!details || details.chars === 0) {
+        text.setText(theme.fg("error", "fetch error"));
+        return text;
+      }
+      if (options.expanded) {
+        const raw =
+          result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
+        const lines = raw.split("\n").slice(0, 20);
+        text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));
+      } else {
+        const truncNote = details.truncated ? theme.fg("warning", " (truncated)") : "";
+        text.setText(theme.fg("toolOutput", `${details.chars} chars`) + truncNote);
+      }
+      return text;
     },
   };
 }
