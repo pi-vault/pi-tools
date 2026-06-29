@@ -99,7 +99,7 @@ Expected: FAIL.
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
-import { gfm } from "turndown-plugin-gfm";
+import { gfm } from "@joplin/turndown-plugin-gfm";
 
 const MIN_CONTENT_LENGTH = 500;
 
@@ -110,7 +110,7 @@ export interface HtmlExtractResult {
 
 export function extractHtml(
   html: string,
-  url: string,
+  _url: string,
 ): HtmlExtractResult | null {
   const { document } = parseHTML(html);
 
@@ -122,7 +122,7 @@ export function extractHtml(
   }
 
   // Run Readability
-  const reader = new Readability(document, { url });
+  const reader = new Readability(document);
   const article = reader.parse();
 
   if (!article || !article.content) return null;
@@ -170,7 +170,7 @@ git commit -m "feat: add HTML extraction via Readability + Turndown"
 ```typescript
 // tests/extract/pipeline.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { extractContent, type ExtractedContent } from "../../src/extract/pipeline.ts";
+import { extractContent } from "../../src/extract/pipeline.ts";
 import { stubFetch } from "../helpers.ts";
 
 const GOOD_HTML = `
@@ -360,8 +360,7 @@ git commit -m "feat: add extraction pipeline orchestrator with HTML tier"
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createWebFetchTool } from "../../src/tools/web-fetch.ts";
 import { ContentStore } from "../../src/storage.ts";
-import { stubFetch } from "../helpers.ts";
-import { makeCtx } from "../helpers.ts";
+import { makeCtx, stubFetch } from "../helpers.ts";
 
 const GOOD_HTML = `
 <!DOCTYPE html><html><head><title>Test</title></head><body>
@@ -459,8 +458,8 @@ Expected: FAIL.
 
 ```typescript
 // src/tools/web-fetch.ts
-import { Type, type Static } from "typebox";
-import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { ContentStore } from "../storage.ts";
 import { extractContent } from "../extract/pipeline.ts";
 import { truncateContent } from "../utils/truncate.ts";
@@ -471,8 +470,6 @@ const INLINE_LIMIT = 15_000;
 const WebFetchParams = Type.Object({
   url: Type.String({ description: "HTTP(S) URL to fetch" }),
 });
-
-type WebFetchInput = Static<typeof WebFetchParams>;
 
 interface WebFetchDetails {
   url: string;
@@ -498,7 +495,7 @@ export function createWebFetchTool(
       "For large pages, use web_read with the returned contentId to retrieve the full text.",
     ],
     parameters: WebFetchParams,
-    async execute(toolCallId, params, signal, onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       try {
         const extracted = await extractContent(params.url, signal ?? undefined);
 
@@ -562,32 +559,30 @@ Expected: All tests PASS.
 
 - [ ] **Step 5: Wire into index.ts**
 
+Add the `web-fetch` import and tool registration to `src/index.ts`. Do NOT replace the file — only add the two lines below to the existing code:
+
+1. Add import after the existing `createWebSearchTool` import:
 ```typescript
-// src/index.ts
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadConfig, resolveApiKey } from "./config.ts";
-import { ContentStore } from "./storage.ts";
-import { DuckDuckGoProvider } from "./providers/duckduckgo.ts";
-import type { SearchProvider } from "./providers/types.ts";
+import { createWebFetchTool } from "./tools/web-fetch.ts";
+```
+
+2. Add tool registration between the `web_search` and `web_read` registrations:
+```typescript
+  pi.registerTool(createWebFetchTool(store));
+```
+
+The resulting imports section should look like:
+```typescript
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
+```
 
-export default function createExtension(pi: ExtensionAPI): void {
-  const config = loadConfig();
-  const store = new ContentStore((customType, data) =>
-    pi.appendEntry(customType, data),
-  );
-  const duckduckgo = new DuckDuckGoProvider();
-
-  function resolveSearchProvider(name?: string): SearchProvider {
-    return duckduckgo;
-  }
-
+And the registration block:
+```typescript
   pi.registerTool(createWebSearchTool(resolveSearchProvider));
   pi.registerTool(createWebFetchTool(store));
   pi.registerTool(createWebReadTool(store));
-}
 ```
 
 - [ ] **Step 6: Update index test**

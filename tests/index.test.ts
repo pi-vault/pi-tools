@@ -21,6 +21,13 @@ describe("tools extension", () => {
     expect(pi.tools.some((t) => t.name === "web_read")).toBe(true);
   });
 
+  it("registers web_fetch tool", () => {
+    const pi = createMockPi();
+    // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
+    createExtension(pi as any);
+    expect(pi.tools.some((t) => t.name === "web_fetch")).toBe(true);
+  });
+
   it("restores content from session on session_start", async () => {
     const pi = createMockPi();
     // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
