@@ -27,7 +27,7 @@ export function extractHtml(
   const reader = new Readability(document);
   const article = reader.parse();
 
-  if (!article || !article.content) return null;
+  if (!article?.content) return null;
 
   // Convert HTML to Markdown
   const turndown = new TurndownService({

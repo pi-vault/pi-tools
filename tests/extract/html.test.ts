@@ -31,28 +31,28 @@ describe("extractHtml", () => {
   it("extracts article content as markdown", () => {
     const result = extractHtml(SAMPLE_HTML, "https://example.com/article");
     expect(result).not.toBeNull();
-    expect(result!.text).toContain("Main Article");
-    expect(result!.text).toContain("main content");
+    expect(result?.text).toContain("Main Article");
+    expect(result?.text).toContain("main content");
   });
 
   it("strips script and style tags", () => {
     const result = extractHtml(SAMPLE_HTML, "https://example.com/article");
     expect(result).not.toBeNull();
-    expect(result!.text).not.toContain("alert");
+    expect(result?.text).not.toContain("alert");
   });
 
   it("preserves tables as GFM markdown", () => {
     const result = extractHtml(SAMPLE_HTML, "https://example.com/article");
     expect(result).not.toBeNull();
     // GFM tables use pipe characters
-    expect(result!.text).toContain("|");
-    expect(result!.text).toContain("Alpha");
+    expect(result?.text).toContain("|");
+    expect(result?.text).toContain("Alpha");
   });
 
   it("includes title when available", () => {
     const result = extractHtml(SAMPLE_HTML, "https://example.com/article");
     expect(result).not.toBeNull();
-    expect(result!.title).toBeDefined();
+    expect(result?.title).toBeDefined();
   });
 
   it("returns null for content too short to be useful", () => {

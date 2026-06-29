@@ -4,6 +4,7 @@ import { ContentStore, type StoredContent } from "./storage.ts";
 import { DuckDuckGoProvider } from "./providers/duckduckgo.ts";
 import type { SearchProvider } from "./providers/types.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
+import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
 
 function isStoredContent(data: unknown): data is StoredContent {
@@ -44,5 +45,6 @@ export default function createExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerTool(createWebSearchTool(resolveSearchProvider));
+  pi.registerTool(createWebFetchTool(store));
   pi.registerTool(createWebReadTool(store));
 }
