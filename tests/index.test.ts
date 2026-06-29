@@ -70,6 +70,13 @@ describe("tools extension", () => {
     expect(text).toContain("Restored content");
   });
 
+  it("registers code_search tool", () => {
+    const pi = createMockPi();
+    // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
+    createExtension(pi as any);
+    expect(pi.tools.some((t) => t.name === "code_search")).toBe(true);
+  });
+
   it("skips invalid entries during session restore", async () => {
     const pi = createMockPi();
     // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime

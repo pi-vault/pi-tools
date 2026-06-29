@@ -16,6 +16,7 @@ import type { SearchProvider, FetchProvider, CodeSearchProvider } from "./provid
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
+import { createCodeSearchTool } from "./tools/code-search.ts";
 
 interface ProviderFactory {
   create: (key?: string) => {
@@ -147,4 +148,5 @@ export default function createExtension(pi: ExtensionAPI): void {
   );
   pi.registerTool(createWebFetchTool(store));
   pi.registerTool(createWebReadTool(store));
+  pi.registerTool(createCodeSearchTool(() => registry.selectCodeSearch()));
 }
