@@ -1,13 +1,79 @@
+// src/index.ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadConfig } from "./config.ts";
+import { loadConfig, resolveApiKey } from "./config.ts";
 import { ContentStore, type StoredContent } from "./storage.ts";
 import { UsageTracker } from "./providers/usage.ts";
 import { ProviderRegistry } from "./providers/registry.ts";
 import { DuckDuckGoProvider } from "./providers/duckduckgo.ts";
-import type { SearchProvider } from "./providers/types.ts";
+import { JinaProvider } from "./providers/jina.ts";
+import { BraveProvider } from "./providers/brave.ts";
+import { SerperProvider } from "./providers/serper.ts";
+import { TavilyProvider } from "./providers/tavily.ts";
+import { ExaProvider } from "./providers/exa.ts";
+import { PerplexityProvider } from "./providers/perplexity.ts";
+import { FirecrawlProvider } from "./providers/firecrawl.ts";
+import type { SearchProvider, FetchProvider, CodeSearchProvider } from "./providers/types.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
+
+interface ProviderFactory {
+  create: (key?: string) => {
+    search?: SearchProvider;
+    fetch?: FetchProvider;
+    codeSearch?: CodeSearchProvider;
+  };
+  tier: 1 | 2 | 3;
+  monthlyQuota: number | null;
+  requiresKey: boolean;
+}
+
+const providerFactories: Record<string, ProviderFactory> = {
+  duckduckgo: {
+    create: () => ({ search: new DuckDuckGoProvider() }),
+    tier: 3, monthlyQuota: null, requiresKey: false,
+  },
+  jina: {
+    create: (key) => {
+      const p = new JinaProvider(key);
+      return { search: p, fetch: p };
+    },
+    tier: 3, monthlyQuota: null, requiresKey: false,
+  },
+  brave: {
+    create: (key) => ({ search: new BraveProvider(key!) }),
+    tier: 1, monthlyQuota: 2000, requiresKey: true,
+  },
+  serper: {
+    create: (key) => ({ search: new SerperProvider(key!) }),
+    tier: 1, monthlyQuota: 2500, requiresKey: true,
+  },
+  tavily: {
+    create: (key) => {
+      const p = new TavilyProvider(key!);
+      return { search: p, fetch: p };
+    },
+    tier: 1, monthlyQuota: 1000, requiresKey: true,
+  },
+  exa: {
+    create: (key) => {
+      const p = new ExaProvider(key!);
+      return { search: p, fetch: p, codeSearch: p };
+    },
+    tier: 1, monthlyQuota: 1000, requiresKey: true,
+  },
+  perplexity: {
+    create: (key) => ({ search: new PerplexityProvider(key!) }),
+    tier: 2, monthlyQuota: null, requiresKey: true,
+  },
+  firecrawl: {
+    create: (key) => {
+      const p = new FirecrawlProvider(key!);
+      return { search: p, fetch: p };
+    },
+    tier: 1, monthlyQuota: 1000, requiresKey: true,
+  },
+};
 
 function isStoredContent(data: unknown): data is StoredContent {
   if (typeof data !== "object" || data === null) return false;
@@ -30,12 +96,27 @@ export default function createExtension(pi: ExtensionAPI): void {
   const tracker = new UsageTracker();
   const registry = new ProviderRegistry(tracker);
 
-  // Register DuckDuckGo (always available, tier 3)
-  if (config.providers.duckduckgo?.enabled !== false) {
-    registry.registerSearch(new DuckDuckGoProvider(), {
-      tier: 3,
-      monthlyQuota: null,
-    });
+  // Register providers based on config
+  for (const [name, factory] of Object.entries(providerFactories)) {
+    const providerConfig = config.providers[name];
+    if (providerConfig?.enabled === false) continue;
+
+    // Resolve API key from config (which may be an env var name, shell cmd, or literal)
+    const resolvedKey = resolveApiKey(providerConfig?.apiKey);
+    if (factory.requiresKey && !resolvedKey) continue;
+
+    const instances = factory.create(resolvedKey);
+    const quota = providerConfig?.monthlyQuota ?? factory.monthlyQuota;
+
+    if (instances.search) {
+      registry.registerSearch(instances.search, { tier: factory.tier, monthlyQuota: quota });
+    }
+    if (instances.fetch) {
+      registry.registerFetch(instances.fetch);
+    }
+    if (instances.codeSearch) {
+      registry.registerCodeSearch(instances.codeSearch);
+    }
   }
 
   function resolveSearchProvider(name?: string): SearchProvider {

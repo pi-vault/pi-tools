@@ -161,7 +161,7 @@ export class JinaProvider implements SearchProvider, FetchProvider {
 
   async fetch(url: string, signal?: AbortSignal): Promise<FetchResult> {
     const readerUrl = `https://r.jina.ai/${url}`;
-    const response = await globalThis.fetch(readerUrl, {
+    const response = await fetch(readerUrl, {
       headers: {
         ...this.headers(),
         Accept: "text/plain",
@@ -957,11 +957,16 @@ git commit -m "feat: add Firecrawl search and scrape provider"
 
 - [ ] **Step 1: Update index.ts with all provider registrations**
 
+Add imports for the new providers and replace the DuckDuckGo-only registration with a
+data-driven factory loop. The existing `isStoredContent` type guard, `UsageTracker`,
+and `session_start` handler remain unchanged.
+
 ```typescript
 // src/index.ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadConfig, resolveApiKey } from "./config.ts";
 import { ContentStore, type StoredContent } from "./storage.ts";
+import { UsageTracker } from "./providers/usage.ts";
 import { ProviderRegistry } from "./providers/registry.ts";
 import { DuckDuckGoProvider } from "./providers/duckduckgo.ts";
 import { JinaProvider } from "./providers/jina.ts";
@@ -971,83 +976,97 @@ import { TavilyProvider } from "./providers/tavily.ts";
 import { ExaProvider } from "./providers/exa.ts";
 import { PerplexityProvider } from "./providers/perplexity.ts";
 import { FirecrawlProvider } from "./providers/firecrawl.ts";
-import type { SearchProvider } from "./providers/types.ts";
+import type { SearchProvider, FetchProvider, CodeSearchProvider } from "./providers/types.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
+
+interface ProviderFactory {
+  create: (key?: string) => {
+    search?: SearchProvider;
+    fetch?: FetchProvider;
+    codeSearch?: CodeSearchProvider;
+  };
+  tier: 1 | 2 | 3;
+  monthlyQuota: number | null;
+  requiresKey: boolean;
+}
+
+const providerFactories: Record<string, ProviderFactory> = {
+  duckduckgo: {
+    create: () => ({ search: new DuckDuckGoProvider() }),
+    tier: 3, monthlyQuota: null, requiresKey: false,
+  },
+  jina: {
+    create: (key) => {
+      const p = new JinaProvider(key);
+      return { search: p, fetch: p };
+    },
+    tier: 3, monthlyQuota: null, requiresKey: false,
+  },
+  brave: {
+    create: (key) => ({ search: new BraveProvider(key!) }),
+    tier: 1, monthlyQuota: 2000, requiresKey: true,
+  },
+  serper: {
+    create: (key) => ({ search: new SerperProvider(key!) }),
+    tier: 1, monthlyQuota: 2500, requiresKey: true,
+  },
+  tavily: {
+    create: (key) => {
+      const p = new TavilyProvider(key!);
+      return { search: p, fetch: p };
+    },
+    tier: 1, monthlyQuota: 1000, requiresKey: true,
+  },
+  exa: {
+    create: (key) => {
+      const p = new ExaProvider(key!);
+      return { search: p, fetch: p, codeSearch: p };
+    },
+    tier: 1, monthlyQuota: 1000, requiresKey: true,
+  },
+  perplexity: {
+    create: (key) => ({ search: new PerplexityProvider(key!) }),
+    tier: 2, monthlyQuota: null, requiresKey: true,
+  },
+  firecrawl: {
+    create: (key) => {
+      const p = new FirecrawlProvider(key!);
+      return { search: p, fetch: p };
+    },
+    tier: 1, monthlyQuota: 1000, requiresKey: true,
+  },
+};
+
+function isStoredContent(data: unknown): data is StoredContent {
+  if (typeof data !== "object" || data === null) return false;
+  const d = data as Record<string, unknown>;
+  return (
+    typeof d.id === "string" &&
+    typeof d.url === "string" &&
+    typeof d.text === "string" &&
+    typeof d.chars === "number" &&
+    typeof d.storedAt === "string" &&
+    (d.source === "web_fetch" || d.source === "web_search")
+  );
+}
 
 export default function createExtension(pi: ExtensionAPI): void {
   const config = loadConfig();
   const store = new ContentStore((customType, data) =>
     pi.appendEntry(customType, data),
   );
-  const registry = new ProviderRegistry();
+  const tracker = new UsageTracker();
+  const registry = new ProviderRegistry(tracker);
 
   // Register providers based on config
-  const providerFactories: Record<
-    string,
-    {
-      create: (key?: string) => { search?: SearchProvider; fetch?: any; codeSearch?: any };
-      tier: 1 | 2 | 3;
-      monthlyQuota: number | null;
-      requiresKey: boolean;
-    }
-  > = {
-    duckduckgo: {
-      create: () => ({ search: new DuckDuckGoProvider() }),
-      tier: 3, monthlyQuota: null, requiresKey: false,
-    },
-    jina: {
-      create: (key) => {
-        const p = new JinaProvider(key);
-        return { search: p, fetch: p };
-      },
-      tier: 3, monthlyQuota: null, requiresKey: false,
-    },
-    brave: {
-      create: (key) => ({ search: new BraveProvider(key!) }),
-      tier: 1, monthlyQuota: 2000, requiresKey: true,
-    },
-    serper: {
-      create: (key) => ({ search: new SerperProvider(key!) }),
-      tier: 1, monthlyQuota: 2500, requiresKey: true,
-    },
-    tavily: {
-      create: (key) => {
-        const p = new TavilyProvider(key!);
-        return { search: p, fetch: p };
-      },
-      tier: 1, monthlyQuota: 1000, requiresKey: true,
-    },
-    exa: {
-      create: (key) => {
-        const p = new ExaProvider(key!);
-        return { search: p, fetch: p, codeSearch: p };
-      },
-      tier: 1, monthlyQuota: 1000, requiresKey: true,
-    },
-    perplexity: {
-      create: (key) => ({ search: new PerplexityProvider(key!) }),
-      tier: 2, monthlyQuota: null, requiresKey: true,
-    },
-    firecrawl: {
-      create: (key) => {
-        const p = new FirecrawlProvider(key!);
-        return { search: p, fetch: p };
-      },
-      tier: 1, monthlyQuota: 1000, requiresKey: true,
-    },
-  };
-
   for (const [name, factory] of Object.entries(providerFactories)) {
     const providerConfig = config.providers[name];
     if (providerConfig?.enabled === false) continue;
 
-    const configuredKey = providerConfig?.apiKey;
-    // Check env var directly first, then fall back to config
-    const envKey = resolveApiKey(name.toUpperCase() + "_API_KEY");
-    const resolvedKey = envKey ?? resolveApiKey(configuredKey);
-
+    // Resolve API key from config (which may be an env var name, shell cmd, or literal)
+    const resolvedKey = resolveApiKey(providerConfig?.apiKey);
     if (factory.requiresKey && !resolvedKey) continue;
 
     const instances = factory.create(resolvedKey);
@@ -1066,16 +1085,19 @@ export default function createExtension(pi: ExtensionAPI): void {
 
   function resolveSearchProvider(name?: string): SearchProvider {
     const provider = registry.selectSearch(name);
-    if (!provider) throw new Error("No search providers available");
+    if (!provider) {
+      throw new Error("No search providers available");
+    }
     return provider;
   }
 
   // Restore stored content from previous session
   pi.on("session_start", (_event, ctx) => {
-    const entries = ctx.sessionManager.getEntries?.() ?? [];
+    const entries = ctx.sessionManager.getEntries();
     const restored = entries
-      .filter((e: any) => e.customType === "pi-tools-content" && e.data)
-      .map((e: any) => e.data as StoredContent);
+      .filter((e) => e.type === "custom" && e.customType === "pi-tools-content" && e.data)
+      .map((e) => (e as { data: unknown }).data)
+      .filter(isStoredContent);
     if (restored.length > 0) {
       store.restore(restored);
     }
