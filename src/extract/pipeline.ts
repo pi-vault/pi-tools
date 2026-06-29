@@ -61,7 +61,8 @@ export async function extractContent(
     }
   }
 
-  // PDF extraction
+  // PDF extraction — must return or throw here since arrayBuffer() consumes
+  // the response body stream (cannot call response.text() afterwards)
   if (contentType.includes("application/pdf")) {
     chain.push("pdf");
     try {
@@ -78,8 +79,12 @@ export async function extractContent(
         };
       }
     } catch {
-      chain.push("pdf:fail");
+      // fall through
     }
+    chain.push("pdf:fail");
+    throw new Error(
+      `Could not extract content from ${url}. Tried: ${chain.join(" -> ")}`,
+    );
   }
 
   const body = await response.text();

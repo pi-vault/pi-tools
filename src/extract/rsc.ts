@@ -6,9 +6,8 @@ export function extractRsc(html: string): string | null {
 
   const chunks: string[] = [];
   const pattern = /self\.__next_f\.push\(\[1,"((?:[^"\\]|\\.)*)"\]\)/g;
-  let match = pattern.exec(html);
 
-  while (match !== null) {
+  for (const match of html.matchAll(pattern)) {
     try {
       const decoded = match[1]
         .replace(/\\"/g, '"')
@@ -18,7 +17,6 @@ export function extractRsc(html: string): string | null {
     } catch {
       // Skip malformed chunks
     }
-    match = pattern.exec(html);
   }
 
   if (chunks.length === 0) return null;
@@ -30,7 +28,7 @@ export function extractRsc(html: string): string | null {
     .replace(/\$[A-Za-z0-9]+/g, "") // Remove RSC references
     .replace(/\["[^"]*",/g, "") // Remove component markers
     .replace(/[{}[\]]/g, " ") // Remove JSON structure
-    .replace(/\\u[0-9a-fA-F]{4}/g, "") // Remove unicode escapes
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
     .replace(/\s+/g, " ")
     .trim();
 
