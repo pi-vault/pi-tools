@@ -1,5 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parseGitHubUrl, isBinaryFile, fetchRaw, fetchViaApi } from "../../src/extract/github.ts";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import {
+  parseGitHubUrl,
+  isBinaryFile,
+  fetchRaw,
+  fetchViaApi,
+  fetchViaClone,
+  _resetCloneCache,
+} from "../../src/extract/github.ts";
+import type { GitHubConfig } from "../../src/extract/github.ts";
 import { stubFetch } from "../helpers.ts";
 
 describe("parseGitHubUrl", () => {
@@ -648,5 +659,129 @@ describe("fetchViaApi", () => {
       .filter((line) => line.match(/^\s*([\u{1F4C4}\u{1F4C1}]|file-)/u));
     expect(fileLines.length).toBeLessThanOrEqual(200);
     expect(result!.text).toContain("truncated");
+  });
+});
+
+describe("fetchViaClone", () => {
+  let fetchStub: ReturnType<typeof stubFetch>;
+  const testCacheDir = path.join(os.tmpdir(), "pi-tools-github-cache-test");
+
+  beforeEach(() => {
+    fetchStub = stubFetch();
+    _resetCloneCache();
+    fs.rmSync(testCacheDir, { recursive: true, force: true });
+  });
+
+  afterEach(() => {
+    fetchStub.restore();
+    fs.rmSync(testCacheDir, { recursive: true, force: true });
+  });
+
+  it("returns null for unknown URL types", async () => {
+    const parsed = parseGitHubUrl(
+      "https://github.com/owner/repo/issues/123",
+    )!;
+    const result = await fetchViaClone(parsed);
+    expect(result).toBeNull();
+  });
+
+  it("skips clone when repo size exceeds maxRepoSizeMB", async () => {
+    fetchStub.addResponse("api.github.com/repos/huge/repo", {
+      body: { size: 400 * 1024 }, // 400 MB in KB
+      headers: { "content-type": "application/json" },
+    });
+
+    const parsed = parseGitHubUrl("https://github.com/huge/repo")!;
+    const config: GitHubConfig = {
+      enabled: true,
+      maxRepoSizeMB: 350,
+      cloneTimeoutSeconds: 30,
+    };
+    const result = await fetchViaClone(parsed, undefined, config);
+    expect(result).toBeNull();
+  });
+
+  it("filters noise directories from tree listings", async () => {
+    const cloneDir = path.join(testCacheDir, "owner", "repo@main");
+    fs.mkdirSync(cloneDir, { recursive: true });
+    fs.mkdirSync(path.join(cloneDir, "src"));
+    fs.mkdirSync(path.join(cloneDir, "node_modules"));
+    fs.mkdirSync(path.join(cloneDir, ".git"));
+    fs.mkdirSync(path.join(cloneDir, "dist"));
+    fs.writeFileSync(path.join(cloneDir, "README.md"), "# Test");
+    fs.writeFileSync(path.join(cloneDir, "package.json"), "{}");
+
+    const { listCloneDir } = await import("../../src/extract/github.ts");
+    const listing = listCloneDir(cloneDir, "owner", "repo", "main");
+    expect(listing).toContain("src/");
+    expect(listing).toContain("README.md");
+    expect(listing).toContain("package.json");
+    expect(listing).not.toContain("node_modules");
+    expect(listing).not.toContain(".git");
+    expect(listing).not.toContain("dist");
+  });
+
+  it("reads file content from clone for blob URLs", async () => {
+    const cloneDir = path.join(testCacheDir, "owner", "repo@main");
+    fs.mkdirSync(path.join(cloneDir, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(cloneDir, "src", "index.ts"),
+      'export const hello = "world";',
+    );
+
+    const { readCloneFile } = await import("../../src/extract/github.ts");
+    const content = readCloneFile(cloneDir, "src/index.ts");
+    expect(content).toContain('export const hello = "world"');
+  });
+
+  it("returns binary placeholder for binary files in clone", async () => {
+    const cloneDir = path.join(testCacheDir, "owner", "repo@main");
+    fs.mkdirSync(cloneDir, { recursive: true });
+    const binaryContent = Buffer.alloc(100);
+    binaryContent[0] = 0x89; // PNG header-like
+    fs.writeFileSync(path.join(cloneDir, "logo.png"), binaryContent);
+
+    const { readCloneFile } = await import("../../src/extract/github.ts");
+    const content = readCloneFile(cloneDir, "logo.png");
+    expect(content).toContain("Binary file");
+  });
+
+  it("includes README content in root URL listings", async () => {
+    const cloneDir = path.join(testCacheDir, "owner", "repo@main");
+    fs.mkdirSync(path.join(cloneDir, "src"), { recursive: true });
+    fs.writeFileSync(
+      path.join(cloneDir, "README.md"),
+      "# My Project\n\nA description of the project.",
+    );
+    fs.writeFileSync(path.join(cloneDir, "package.json"), "{}");
+
+    const { listCloneDir } = await import("../../src/extract/github.ts");
+    const listing = listCloneDir(cloneDir, "owner", "repo", "main", true);
+    expect(listing).toContain("My Project");
+    expect(listing).toContain("A description of the project");
+  });
+
+  it("truncates README content at 8,000 chars", async () => {
+    const cloneDir = path.join(testCacheDir, "owner", "repo@main");
+    fs.mkdirSync(cloneDir, { recursive: true });
+    fs.writeFileSync(path.join(cloneDir, "README.md"), "x".repeat(10_000));
+
+    const { listCloneDir } = await import("../../src/extract/github.ts");
+    const listing = listCloneDir(cloneDir, "owner", "repo", "main", true);
+    expect(listing).toContain("[truncated]");
+  });
+
+  it("caps tree listings at 200 entries", async () => {
+    const cloneDir = path.join(testCacheDir, "owner", "repo@main");
+    fs.mkdirSync(cloneDir, { recursive: true });
+    for (let i = 0; i < 250; i++) {
+      fs.writeFileSync(path.join(cloneDir, `file-${i}.ts`), `// file ${i}`);
+    }
+
+    const { listCloneDir } = await import("../../src/extract/github.ts");
+    const listing = listCloneDir(cloneDir, "owner", "repo", "main");
+    const fileLines = listing.split("\n").filter((l) => l.match(/file-\d+\.ts/));
+    expect(fileLines.length).toBeLessThanOrEqual(200);
+    expect(listing).toContain("truncated");
   });
 });

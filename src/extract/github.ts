@@ -1,4 +1,11 @@
+import { execFile } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as nodePath from "node:path";
+import { promisify } from "node:util";
 import type { ExtractedContent } from "./pipeline.ts";
+
+const execFileAsync = promisify(execFile);
 
 export interface GitHubUrl {
   owner: string;
@@ -403,5 +410,279 @@ export async function fetchRaw(
     extractionChain: ["github:raw"],
     chars: totalChars,
     truncated,
+  };
+}
+
+// ── Clone cache (Tier 2) ──────────────────────────────────────────────────────
+
+export interface GitHubConfig {
+  enabled: boolean;
+  maxRepoSizeMB: number;
+  cloneTimeoutSeconds: number;
+}
+
+const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
+  enabled: true,
+  maxRepoSizeMB: 350,
+  cloneTimeoutSeconds: 30,
+};
+
+const NOISE_DIRS = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "build",
+  "vendor",
+  "__pycache__",
+  ".next",
+  ".nuxt",
+  ".output",
+  "coverage",
+  ".cache",
+]);
+
+const README_LIMIT = 8_000;
+const CACHE_BASE = nodePath.join(os.tmpdir(), "pi-tools-github-cache");
+
+// Session-scoped map of cloned repos (owner/repo@ref -> local path)
+let cloneRegistry = new Map<string, string>();
+
+/** Test helper: reset the clone registry between tests. */
+export function _resetCloneCache(): void {
+  cloneRegistry = new Map();
+}
+
+/**
+ * List directory contents of a clone directory with noise filtering.
+ * If includeReadme is true, prepend README content (for root URLs).
+ */
+export function listCloneDir(
+  cloneDir: string,
+  owner: string,
+  repo: string,
+  ref: string,
+  includeReadme = false,
+): string {
+  const lines: string[] = [];
+  lines.push(`# ${owner}/${repo} (${ref})`);
+  lines.push("");
+
+  if (includeReadme) {
+    const readmeNames = ["README.md", "README", "README.txt", "readme.md"];
+    for (const name of readmeNames) {
+      const readmePath = nodePath.join(cloneDir, name);
+      if (fs.existsSync(readmePath)) {
+        let readmeContent = fs.readFileSync(readmePath, "utf-8");
+        if (readmeContent.length > README_LIMIT) {
+          readmeContent =
+            readmeContent.slice(0, README_LIMIT) +
+            `\n\n[truncated] README showing ${README_LIMIT.toLocaleString()} of ${readmeContent.length.toLocaleString()} chars`;
+        }
+        lines.push(readmeContent);
+        lines.push("");
+        lines.push("---");
+        lines.push("");
+        break;
+      }
+    }
+  }
+
+  lines.push("## Files");
+  lines.push("");
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(cloneDir, { withFileTypes: true });
+  } catch {
+    return lines.join("\n");
+  }
+
+  const filtered = entries.filter((e) => !NOISE_DIRS.has(e.name));
+  const dirs = filtered.filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name));
+  const files = filtered.filter((e) => !e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name));
+
+  const all = [...dirs, ...files];
+  const truncated = all.length > MAX_DIR_ENTRIES;
+  const visible = all.slice(0, MAX_DIR_ENTRIES);
+
+  for (const entry of visible) {
+    if (entry.isDirectory()) {
+      lines.push(`  ${entry.name}/`);
+    } else {
+      lines.push(`  ${entry.name}`);
+    }
+  }
+
+  if (truncated) {
+    lines.push("");
+    lines.push(
+      `[truncated] showing ${MAX_DIR_ENTRIES} of ${all.length} entries`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Read a single file from a clone directory.
+ * Returns binary placeholder for binary files.
+ */
+export function readCloneFile(cloneDir: string, filePath: string): string {
+  const fullPath = nodePath.join(cloneDir, filePath);
+
+  if (!fs.existsSync(fullPath)) {
+    return `File not found: ${filePath}`;
+  }
+
+  const stat = fs.statSync(fullPath);
+
+  if (isBinaryFile(filePath)) {
+    return `Binary file: ${filePath} (${stat.size} bytes)`;
+  }
+
+  const buf = fs.readFileSync(fullPath);
+
+  if (isBinaryFile(filePath, buf)) {
+    return `Binary file: ${filePath} (${stat.size} bytes)`;
+  }
+
+  let text = buf.toString("utf-8");
+  if (text.length > RAW_CONTENT_LIMIT) {
+    text = text.slice(0, RAW_CONTENT_LIMIT);
+  }
+
+  return text;
+}
+
+async function getRepoSizeMB(
+  owner: string,
+  repo: string,
+  signal?: AbortSignal,
+): Promise<number | null> {
+  const headers = apiHeaders();
+  const apiUrl = `https://api.github.com/repos/${owner}/${repo}`;
+
+  try {
+    const response = await fetch(apiUrl, { headers, signal });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { size: number };
+    return data.size / 1024; // API returns KB
+  } catch {
+    return null;
+  }
+}
+
+async function cloneRepo(
+  owner: string,
+  repo: string,
+  ref: string,
+  timeoutSeconds: number,
+): Promise<string | null> {
+  const cacheKey = `${owner}/${repo}@${ref}`;
+
+  const existing = cloneRegistry.get(cacheKey);
+  if (existing && fs.existsSync(existing)) return existing;
+
+  const cloneDir = nodePath.join(CACHE_BASE, owner, `${repo}@${ref}`);
+
+  if (fs.existsSync(cloneDir)) {
+    cloneRegistry.set(cacheKey, cloneDir);
+    return cloneDir;
+  }
+
+  fs.mkdirSync(nodePath.dirname(cloneDir), { recursive: true });
+
+  const cloneUrl = `https://github.com/${owner}/${repo}.git`;
+  const args = [
+    "clone",
+    "--depth=1",
+    "--filter=blob:none",
+    "--single-branch",
+    `--branch=${ref}`,
+    cloneUrl,
+    cloneDir,
+  ];
+
+  try {
+    await execFileAsync("git", args, { timeout: timeoutSeconds * 1000 });
+    cloneRegistry.set(cacheKey, cloneDir);
+    return cloneDir;
+  } catch {
+    fs.rmSync(cloneDir, { recursive: true, force: true });
+    return null;
+  }
+}
+
+function hasReadme(dir: string): boolean {
+  const readmeNames = ["README.md", "README", "README.txt", "readme.md"];
+  return readmeNames.some((name) => fs.existsSync(nodePath.join(dir, name)));
+}
+
+/**
+ * Tier 2: Shallow-clone the repo and read from the local filesystem.
+ * Session-scoped cache: clones persist for process lifetime.
+ * Returns null if cloning fails, repo is too large, or URL type is unsupported.
+ */
+export async function fetchViaClone(
+  parsed: GitHubUrl,
+  signal?: AbortSignal,
+  config?: GitHubConfig,
+): Promise<ExtractedContent | null> {
+  if (parsed.type === "unknown") return null;
+
+  const cfg = config ?? DEFAULT_GITHUB_CONFIG;
+  const ref = parsed.ref ?? "HEAD";
+  const originalUrl = buildOriginalUrl(parsed);
+
+  const sizeMB = await getRepoSizeMB(parsed.owner, parsed.repo, signal);
+  if (sizeMB !== null && sizeMB > cfg.maxRepoSizeMB) return null;
+
+  const cloneDir = await cloneRepo(
+    parsed.owner,
+    parsed.repo,
+    ref,
+    cfg.cloneTimeoutSeconds,
+  );
+  if (!cloneDir) return null;
+
+  if (parsed.type === "blob" || parsed.type === "raw") {
+    if (!parsed.path) return null;
+
+    const content = readCloneFile(cloneDir, parsed.path);
+    const isBinary = content.startsWith("Binary file:");
+    return {
+      text: content,
+      title: `${parsed.owner}/${parsed.repo} - ${parsed.path}`,
+      url: originalUrl,
+      extractionChain: ["github:clone"],
+      chars: isBinary ? 0 : content.length,
+      truncated: false,
+    };
+  }
+
+  const isRoot = parsed.type === "root";
+  const targetDir = parsed.path
+    ? nodePath.join(cloneDir, parsed.path)
+    : cloneDir;
+
+  if (!fs.existsSync(targetDir) || !fs.statSync(targetDir).isDirectory()) {
+    return null;
+  }
+
+  const listing = listCloneDir(
+    targetDir,
+    parsed.owner,
+    parsed.repo,
+    ref,
+    isRoot || hasReadme(targetDir),
+  );
+
+  return {
+    text: listing,
+    title: `${parsed.owner}/${parsed.repo}${parsed.path ? ` - ${parsed.path}` : ""}`,
+    url: originalUrl,
+    extractionChain: ["github:clone"],
+    chars: listing.length,
+    truncated: false,
   };
 }
