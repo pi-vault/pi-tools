@@ -32,6 +32,32 @@ describe("SearXNGProvider", () => {
     expect(provider.instanceUrl).toBe("http://searxng.internal:4000");
   });
 
+  it("uses SEARXNG_URL env var when set", () => {
+    const prev = process.env["SEARXNG_URL"];
+    try {
+      process.env["SEARXNG_URL"] = "http://10.0.0.50:8888";
+      const provider = new SearXNGProvider();
+      expect(provider.instanceUrl).toBe("http://10.0.0.50:8888");
+    } finally {
+      if (prev === undefined) delete process.env["SEARXNG_URL"];
+      else process.env["SEARXNG_URL"] = prev;
+    }
+  });
+
+  it("config instanceUrl takes precedence over SEARXNG_URL env var", () => {
+    const prev = process.env["SEARXNG_URL"];
+    try {
+      process.env["SEARXNG_URL"] = "http://env-instance:9999";
+      const provider = new SearXNGProvider({
+        instanceUrl: "http://config-instance:7777",
+      });
+      expect(provider.instanceUrl).toBe("http://config-instance:7777");
+    } finally {
+      if (prev === undefined) delete process.env["SEARXNG_URL"];
+      else process.env["SEARXNG_URL"] = prev;
+    }
+  });
+
   it("returns normalized search results", async () => {
     fetchStub.addResponse("localhost:8080", {
       body: {

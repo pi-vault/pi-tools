@@ -119,6 +119,20 @@ describe("ExaMcpProvider", () => {
     await expect(provider.search("test", 5)).rejects.toThrow("Invalid request");
   });
 
+  it("throws descriptive error on malformed JSON in text content", async () => {
+    fetchStub.addResponse("mcp.exa.ai", {
+      body: {
+        jsonrpc: "2.0",
+        id: 1,
+        result: { content: [{ type: "text", text: "<html>not json</html>" }] },
+      },
+    });
+    const provider = new ExaMcpProvider();
+    await expect(provider.search("test", 5)).rejects.toThrow(
+      "Exa MCP error: invalid response content",
+    );
+  });
+
   it("handles empty result content gracefully", async () => {
     fetchStub.addResponse("mcp.exa.ai", {
       body: {

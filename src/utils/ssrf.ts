@@ -40,7 +40,7 @@ function isPrivateIP(hostname: string): boolean {
   return false;
 }
 
-interface ValidateUrlOptions {
+export interface ValidateUrlOptions {
   /** Explicit base URLs (scheme + host + port) that bypass hostname/IP blocks. */
   allowedBaseUrls?: string[];
 }

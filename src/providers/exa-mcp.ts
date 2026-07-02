@@ -63,7 +63,12 @@ export class ExaMcpProvider implements SearchProvider {
     const textContent = data.result?.content?.[0]?.text;
     if (!textContent) return [];
 
-    const parsed = JSON.parse(textContent) as ExaMcpResult[];
+    let parsed: ExaMcpResult[];
+    try {
+      parsed = JSON.parse(textContent) as ExaMcpResult[];
+    } catch {
+      throw new Error("Exa MCP error: invalid response content");
+    }
     return parsed.slice(0, maxResults).map((r) => ({
       title: r.title,
       url: r.url,
