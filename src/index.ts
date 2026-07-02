@@ -138,7 +138,7 @@ export default function createExtension(pi: ExtensionAPI): void {
       (providerName) => registry.recordUsage(providerName),
     ),
   );
-  pi.registerTool(createWebFetchTool(store));
+  pi.registerTool(createWebFetchTool(store, () => registry.selectFetchCandidates()));
   pi.registerTool(createWebReadTool(store));
   pi.registerTool(
     createCodeSearchTool(
