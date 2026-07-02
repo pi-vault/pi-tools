@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { JinaProvider } from "../../src/providers/jina.ts";
 import { stubFetch } from "../helpers.ts";
+import type { SearchFilters } from "../../src/providers/types.ts";
 
 describe("JinaProvider", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
@@ -71,5 +72,41 @@ describe("JinaProvider", () => {
     fetchStub.addResponse("s.jina.ai", { status: 500, body: "Error" });
     const provider = new JinaProvider();
     await expect(provider.search("test", 5)).rejects.toThrow();
+  });
+
+  describe("search filters", () => {
+    it("accepts filters parameter without error", async () => {
+      fetchStub.addResponse("s.jina.ai", {
+        body: {
+          data: [{ title: "Result", url: "https://example.com", description: "snippet" }],
+        },
+      });
+
+      const provider = new JinaProvider("key");
+      const filters: SearchFilters = {
+        includeDomains: ["example.com"],
+        excludeDomains: ["spam.com"],
+        startDate: "2025-01-01",
+        endDate: "2025-12-31",
+      };
+      const results = await provider.search("test", 5, undefined, filters);
+      expect(results).toHaveLength(1);
+      expect(results[0].title).toBe("Result");
+    });
+
+    it("does not modify the query or request when filters are provided", async () => {
+      fetchStub.addResponse("s.jina.ai", {
+        body: { data: [] },
+      });
+
+      const provider = new JinaProvider("key");
+      const filters: SearchFilters = { includeDomains: ["example.com"] };
+      await provider.search("test query", 5, undefined, filters);
+
+      const fetchCall = (globalThis.fetch as any).mock.calls[0];
+      const url = fetchCall[0] as string;
+      expect(url).toContain("q=test%20query");
+      expect(url).not.toContain("site:");
+    });
   });
 });

@@ -1,5 +1,5 @@
 // src/providers/firecrawl.ts
-import type { FetchProvider, FetchResult, SearchProvider, SearchResult } from "./types.ts";
+import type { FetchProvider, FetchResult, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 interface FirecrawlSearchResponse {
   data: Array<{ title: string; url: string; markdown?: string; description?: string }>;
@@ -25,7 +25,7 @@ export class FirecrawlProvider implements SearchProvider, FetchProvider {
     };
   }
 
-  async search(query: string, maxResults: number, signal?: AbortSignal): Promise<SearchResult[]> {
+  async search(query: string, maxResults: number, signal?: AbortSignal, _filters?: SearchFilters): Promise<SearchResult[]> {
     const response = await fetch("https://api.firecrawl.dev/v1/search", {
       method: "POST",
       headers: this.headers(),

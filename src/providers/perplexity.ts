@@ -1,5 +1,5 @@
 // src/providers/perplexity.ts
-import type { SearchProvider, SearchResult } from "./types.ts";
+import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 interface PerplexityResponse {
   choices: Array<{ message: { content: string } }>;
@@ -15,7 +15,7 @@ export class PerplexityProvider implements SearchProvider {
     this.apiKey = apiKey;
   }
 
-  async search(query: string, maxResults: number, signal?: AbortSignal): Promise<SearchResult[]> {
+  async search(query: string, maxResults: number, signal?: AbortSignal, _filters?: SearchFilters): Promise<SearchResult[]> {
     const response = await fetch("https://api.perplexity.ai/chat/completions", {
       method: "POST",
       headers: {
