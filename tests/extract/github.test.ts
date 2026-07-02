@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parseGitHubUrl, isBinaryFile, fetchRaw } from "../../src/extract/github.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { parseGitHubUrl, isBinaryFile, fetchRaw, fetchViaApi } from "../../src/extract/github.ts";
 import { stubFetch } from "../helpers.ts";
 
 describe("parseGitHubUrl", () => {
@@ -469,5 +469,184 @@ describe("fetchRaw", () => {
     const result = await fetchRaw(parsed);
     expect(result).not.toBeNull();
     expect(result!.text).toContain("React");
+  });
+});
+
+describe("fetchViaApi", () => {
+  let fetchStub: ReturnType<typeof stubFetch>;
+
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+
+  afterEach(() => {
+    fetchStub.restore();
+  });
+
+  it("fetches file content via /contents/ endpoint (base64 response)", async () => {
+    const content = Buffer.from("# Hello World\n\nSome content.").toString(
+      "base64",
+    );
+    fetchStub.addResponse(
+      "api.github.com/repos/owner/repo/contents/README.md",
+      {
+        body: {
+          type: "file",
+          name: "README.md",
+          content,
+          encoding: "base64",
+          size: 28,
+        },
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    const parsed = parseGitHubUrl(
+      "https://github.com/owner/repo/blob/main/README.md",
+    )!;
+    const result = await fetchViaApi(parsed);
+    expect(result).not.toBeNull();
+    expect(result!.text).toContain("Hello World");
+    expect(result!.extractionChain).toContain("github:api");
+  });
+
+  it("fetches directory listing via /contents/ endpoint", async () => {
+    fetchStub.addResponse(
+      "api.github.com/repos/owner/repo/contents/src",
+      {
+        body: [
+          { name: "index.ts", type: "file", size: 1200 },
+          { name: "utils", type: "dir", size: 0 },
+          { name: "config.ts", type: "file", size: 450 },
+        ],
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    const parsed = parseGitHubUrl(
+      "https://github.com/owner/repo/tree/main/src",
+    )!;
+    const result = await fetchViaApi(parsed);
+    expect(result).not.toBeNull();
+    expect(result!.text).toContain("index.ts");
+    expect(result!.text).toContain("utils/");
+    expect(result!.text).toContain("config.ts");
+  });
+
+  it("fetches root tree listing for root URLs", async () => {
+    fetchStub.addResponse(
+      "api.github.com/repos/owner/repo/contents/",
+      {
+        body: [
+          { name: "README.md", type: "file", size: 5000 },
+          { name: "src", type: "dir", size: 0 },
+          { name: "package.json", type: "file", size: 800 },
+        ],
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    const parsed = parseGitHubUrl("https://github.com/owner/repo")!;
+    const result = await fetchViaApi(parsed);
+    expect(result).not.toBeNull();
+    expect(result!.text).toContain("README.md");
+    expect(result!.text).toContain("src/");
+  });
+
+  it("returns null on API error (rate limited)", async () => {
+    fetchStub.addResponse(
+      "api.github.com/repos/owner/repo/contents/README.md",
+      {
+        status: 403,
+        body: { message: "API rate limit exceeded" },
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    const parsed = parseGitHubUrl(
+      "https://github.com/owner/repo/blob/main/README.md",
+    )!;
+    const result = await fetchViaApi(parsed);
+    expect(result).toBeNull();
+  });
+
+  it("returns binary placeholder for binary files", async () => {
+    const content = Buffer.from("\x00\x01\x02binary").toString("base64");
+    fetchStub.addResponse(
+      "api.github.com/repos/owner/repo/contents/image.png",
+      {
+        body: {
+          type: "file",
+          name: "image.png",
+          content,
+          encoding: "base64",
+          size: 10240,
+        },
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    const parsed = parseGitHubUrl(
+      "https://github.com/owner/repo/blob/main/image.png",
+    )!;
+    const result = await fetchViaApi(parsed);
+    expect(result).not.toBeNull();
+    expect(result!.text).toContain("Binary file");
+    expect(result!.text).toContain("image.png");
+  });
+
+  it("uses GITHUB_TOKEN header when env var is set", async () => {
+    process.env.GITHUB_TOKEN = "ghp_test123";
+
+    fetchStub.addResponse(
+      "api.github.com/repos/owner/repo/contents/README.md",
+      {
+        body: {
+          type: "file",
+          name: "README.md",
+          content: Buffer.from("# Auth Test").toString("base64"),
+          encoding: "base64",
+          size: 11,
+        },
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    const parsed = parseGitHubUrl(
+      "https://github.com/owner/repo/blob/main/README.md",
+    )!;
+    await fetchViaApi(parsed);
+
+    // Verify the token was sent (check the mock's call args)
+    const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+    const lastCall = calls[calls.length - 1];
+    const headers = lastCall[1]?.headers as Record<string, string>;
+    expect(headers?.Authorization).toBe("Bearer ghp_test123");
+
+    delete process.env.GITHUB_TOKEN;
+  });
+
+  it("caps directory listing at 200 entries", async () => {
+    const entries = Array.from({ length: 300 }, (_, i) => ({
+      name: `file-${i}.ts`,
+      type: "file",
+      size: 100,
+    }));
+    fetchStub.addResponse("api.github.com/repos/owner/repo/contents/src", {
+      body: entries,
+      headers: { "content-type": "application/json" },
+    });
+
+    const parsed = parseGitHubUrl(
+      "https://github.com/owner/repo/tree/main/src",
+    )!;
+    const result = await fetchViaApi(parsed);
+    expect(result).not.toBeNull();
+    // Count the number of file entries in the output
+    const fileLines = result!.text
+      .split("\n")
+      .filter((line) => line.match(/^\s*([\u{1F4C4}\u{1F4C1}]|file-)/u));
+    expect(fileLines.length).toBeLessThanOrEqual(200);
+    expect(result!.text).toContain("truncated");
   });
 });

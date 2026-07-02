@@ -158,6 +158,196 @@ export function isBinaryFile(path: string, content?: Buffer): boolean {
 }
 
 const RAW_CONTENT_LIMIT = 100_000;
+const MAX_DIR_ENTRIES = 200;
+
+interface GitHubApiHeaders {
+  Accept: string;
+  "User-Agent": string;
+  Authorization?: string;
+}
+
+function apiHeaders(): GitHubApiHeaders {
+  const headers: GitHubApiHeaders = {
+    Accept: "application/vnd.github.v3+json",
+    "User-Agent": "pi-tools",
+  };
+  const token = process.env.GITHUB_TOKEN;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+interface GitHubContentsFile {
+  type: "file";
+  name: string;
+  content: string;
+  encoding: string;
+  size: number;
+}
+
+interface GitHubContentsDir {
+  name: string;
+  type: "file" | "dir" | "symlink" | "submodule";
+  size: number;
+}
+
+function buildOriginalUrl(parsed: GitHubUrl): string {
+  const base = `https://github.com/${parsed.owner}/${parsed.repo}`;
+  if (parsed.type === "root") return base;
+  if (parsed.type === "raw" && parsed.ref && parsed.path) {
+    return `${base}/blob/${parsed.ref}/${parsed.path}`;
+  }
+  const action = parsed.type === "blob" ? "blob" : "tree";
+  if (parsed.ref && parsed.path) return `${base}/${action}/${parsed.ref}/${parsed.path}`;
+  if (parsed.ref) return `${base}/${action}/${parsed.ref}`;
+  return base;
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatDirListing(
+  entries: GitHubContentsDir[],
+  parsed: GitHubUrl,
+): string {
+  const truncated = entries.length > MAX_DIR_ENTRIES;
+  const visible = entries.slice(0, MAX_DIR_ENTRIES);
+
+  const lines: string[] = [];
+  const pathLabel = parsed.path ?? "";
+  const ref = parsed.ref ?? "HEAD";
+  lines.push(
+    `# ${parsed.owner}/${parsed.repo}${pathLabel ? `/${pathLabel}` : ""} (${ref})`,
+  );
+  lines.push("");
+
+  const dirs = visible.filter((e) => e.type === "dir");
+  const files = visible.filter((e) => e.type !== "dir");
+
+  for (const dir of dirs) {
+    lines.push(`  ${dir.name}/`);
+  }
+  for (const file of files) {
+    const size = file.size > 0 ? ` (${formatSize(file.size)})` : "";
+    lines.push(`  ${file.name}${size}`);
+  }
+
+  if (truncated) {
+    lines.push("");
+    lines.push(
+      `[truncated] showing ${MAX_DIR_ENTRIES} of ${entries.length} entries`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Tier 3: Fetch content via the GitHub REST API.
+ * Uses /repos/{owner}/{repo}/contents/{path} endpoints.
+ * Returns null on API errors (rate limiting, auth, etc.).
+ */
+export async function fetchViaApi(
+  parsed: GitHubUrl,
+  signal?: AbortSignal,
+): Promise<ExtractedContent | null> {
+  const headers = apiHeaders();
+  const refParam = parsed.ref ? `?ref=${encodeURIComponent(parsed.ref)}` : "";
+  const originalUrl = buildOriginalUrl(parsed);
+
+  if (parsed.type === "blob" || parsed.type === "raw") {
+    if (!parsed.path) return null;
+
+    const apiUrl = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/contents/${parsed.path}${refParam}`;
+
+    let response: Response;
+    try {
+      response = await fetch(apiUrl, { headers, signal });
+    } catch {
+      return null;
+    }
+
+    if (!response.ok) return null;
+
+    const data = (await response.json()) as GitHubContentsFile;
+    if (data.type !== "file") return null;
+
+    // Binary check by extension
+    if (isBinaryFile(parsed.path)) {
+      return {
+        text: `Binary file: ${parsed.path} (${data.size} bytes)`,
+        title: `${parsed.owner}/${parsed.repo} - ${parsed.path}`,
+        url: originalUrl,
+        extractionChain: ["github:api", "binary-skip"],
+        chars: 0,
+        truncated: false,
+      };
+    }
+
+    // Decode base64 content
+    const rawContent = Buffer.from(data.content, "base64");
+
+    // Binary check by content
+    if (isBinaryFile(parsed.path, rawContent)) {
+      return {
+        text: `Binary file: ${parsed.path} (${data.size} bytes)`,
+        title: `${parsed.owner}/${parsed.repo} - ${parsed.path}`,
+        url: originalUrl,
+        extractionChain: ["github:api", "binary-skip"],
+        chars: 0,
+        truncated: false,
+      };
+    }
+
+    const text = rawContent.toString("utf-8");
+    let outputText = text;
+    let truncated = false;
+    if (text.length > RAW_CONTENT_LIMIT) {
+      outputText = text.slice(0, RAW_CONTENT_LIMIT);
+      truncated = true;
+    }
+
+    return {
+      text: outputText,
+      title: `${parsed.owner}/${parsed.repo} - ${parsed.path}`,
+      url: originalUrl,
+      extractionChain: ["github:api"],
+      chars: text.length,
+      truncated,
+    };
+  }
+
+  // Root or tree -- fetch directory listing
+  const dirPath = parsed.path ?? "";
+  const apiUrl = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}/contents/${dirPath}${refParam}`;
+
+  let response: Response;
+  try {
+    response = await fetch(apiUrl, { headers, signal });
+  } catch {
+    return null;
+  }
+
+  if (!response.ok) return null;
+
+  const data = (await response.json()) as GitHubContentsDir[];
+  if (!Array.isArray(data)) return null;
+
+  const listing = formatDirListing(data, parsed);
+
+  return {
+    text: listing,
+    title: `${parsed.owner}/${parsed.repo}${dirPath ? ` - ${dirPath}` : ""}`,
+    url: originalUrl,
+    extractionChain: ["github:api"],
+    chars: listing.length,
+    truncated: false,
+  };
+}
 
 /**
  * Tier 1: Rewrite a blob (or raw) URL to raw.githubusercontent.com and
