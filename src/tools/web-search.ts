@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import type { SearchProvider, SearchResult } from "../providers/types.ts";
+import type { SearchFilters, SearchProvider, SearchResult } from "../providers/types.ts";
 import { AggregateProviderError } from "../utils/errors.ts";
 
 const WebSearchParams = Type.Object({
@@ -17,6 +17,31 @@ const WebSearchParams = Type.Object({
   provider: Type.Optional(
     Type.String({ description: "Provider name or 'auto' (default)" }),
   ),
+  includeDomains: Type.Optional(
+    Type.Array(Type.String(), {
+      description: "Only return results from these domains",
+    }),
+  ),
+  excludeDomains: Type.Optional(
+    Type.Array(Type.String(), {
+      description: "Exclude results from these domains",
+    }),
+  ),
+  startDate: Type.Optional(
+    Type.String({
+      description: "Only return results published after this date (ISO 8601, e.g. 2025-01-01)",
+    }),
+  ),
+  endDate: Type.Optional(
+    Type.String({
+      description: "Only return results published before this date (ISO 8601, e.g. 2025-12-31)",
+    }),
+  ),
+  compact: Type.Optional(
+    Type.Boolean({
+      description: "When true, return results in compact single-line format (title -- URL, no snippets)",
+    }),
+  ),
 });
 
 interface WebSearchDetails {
@@ -29,6 +54,35 @@ function formatResults(results: SearchResult[]): string {
   return results
     .map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${r.snippet}`)
     .join("\n\n");
+}
+
+function formatResultsCompact(results: SearchResult[]): string {
+  if (results.length === 0) return "No results found.";
+  return results
+    .map((r, i) => `${i + 1}. ${r.title} -- ${r.url}`)
+    .join("\n");
+}
+
+function buildFilters(params: {
+  includeDomains?: string[];
+  excludeDomains?: string[];
+  startDate?: string;
+  endDate?: string;
+}): SearchFilters | undefined {
+  const hasAny =
+    params.includeDomains?.length ||
+    params.excludeDomains?.length ||
+    params.startDate ||
+    params.endDate;
+
+  if (!hasAny) return undefined;
+
+  return {
+    includeDomains: params.includeDomains,
+    excludeDomains: params.excludeDomains,
+    startDate: params.startDate,
+    endDate: params.endDate,
+  };
 }
 
 export function createWebSearchTool(
@@ -57,6 +111,7 @@ export function createWebSearchTool(
       }
 
       const maxResults = params.numResults ?? 5;
+      const filters = buildFilters(params);
       const errors: Array<{ provider: string; error: string }> = [];
 
       for (const provider of candidates) {
@@ -65,8 +120,11 @@ export function createWebSearchTool(
             params.query,
             maxResults,
             signal ?? undefined,
+            filters,
           );
-          const text = formatResults(results);
+          const text = params.compact
+            ? formatResultsCompact(results)
+            : formatResults(results);
           onSuccess?.(provider.name);
 
           return {
@@ -119,4 +177,3 @@ export function createWebSearchTool(
     },
   };
 }
-

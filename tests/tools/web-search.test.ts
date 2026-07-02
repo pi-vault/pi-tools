@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createWebSearchTool } from "../../src/tools/web-search.ts";
 import { makeCtx } from "../helpers.ts";
-import type { SearchProvider, SearchResult } from "../../src/providers/types.ts";
+import type { SearchFilters, SearchProvider, SearchResult } from "../../src/providers/types.ts";
 
 function makeProvider(name: string, results: SearchResult[]): SearchProvider {
   return {
@@ -126,5 +126,192 @@ describe("web_search fallback chain", () => {
     const result = await tool.execute("call-4", { query: "test" }, undefined, undefined, ctx);
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text.toLowerCase()).toContain("no search providers available");
+  });
+});
+
+function makeCapturingProvider(): {
+  provider: SearchProvider;
+  captured: { query: string; filters?: SearchFilters }[];
+} {
+  const captured: { query: string; filters?: SearchFilters }[] = [];
+  const provider: SearchProvider = {
+    name: "capturing",
+    label: "Capturing",
+    async search(
+      query: string,
+      maxResults: number,
+      signal?: AbortSignal,
+      filters?: SearchFilters,
+    ): Promise<SearchResult[]> {
+      captured.push({ query, filters });
+      return [
+        { title: "Captured Result", url: "https://example.com", snippet: "captured" },
+      ];
+    },
+  };
+  return { provider, captured };
+}
+
+describe("web_search filter parameters", () => {
+  it("passes includeDomains to the provider as SearchFilters", async () => {
+    const { provider, captured } = makeCapturingProvider();
+    const tool = createWebSearchTool(() => [provider]);
+    const ctx = makeCtx();
+    await tool.execute(
+      "call-f1",
+      { query: "test", includeDomains: ["example.com", "docs.rs"] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(captured).toHaveLength(1);
+    expect(captured[0].filters?.includeDomains).toEqual(["example.com", "docs.rs"]);
+  });
+
+  it("passes excludeDomains to the provider as SearchFilters", async () => {
+    const { provider, captured } = makeCapturingProvider();
+    const tool = createWebSearchTool(() => [provider]);
+    const ctx = makeCtx();
+    await tool.execute(
+      "call-f2",
+      { query: "test", excludeDomains: ["spam.com"] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(captured).toHaveLength(1);
+    expect(captured[0].filters?.excludeDomains).toEqual(["spam.com"]);
+  });
+
+  it("passes startDate and endDate to the provider as SearchFilters", async () => {
+    const { provider, captured } = makeCapturingProvider();
+    const tool = createWebSearchTool(() => [provider]);
+    const ctx = makeCtx();
+    await tool.execute(
+      "call-f3",
+      { query: "test", startDate: "2025-01-01", endDate: "2025-12-31" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(captured).toHaveLength(1);
+    expect(captured[0].filters?.startDate).toBe("2025-01-01");
+    expect(captured[0].filters?.endDate).toBe("2025-12-31");
+  });
+
+  it("passes all filter fields together", async () => {
+    const { provider, captured } = makeCapturingProvider();
+    const tool = createWebSearchTool(() => [provider]);
+    const ctx = makeCtx();
+    await tool.execute(
+      "call-f4",
+      {
+        query: "test",
+        includeDomains: ["example.com"],
+        excludeDomains: ["spam.com"],
+        startDate: "2025-01-01",
+        endDate: "2025-06-30",
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(captured).toHaveLength(1);
+    expect(captured[0].filters).toEqual({
+      includeDomains: ["example.com"],
+      excludeDomains: ["spam.com"],
+      startDate: "2025-01-01",
+      endDate: "2025-06-30",
+    });
+  });
+
+  it("passes undefined filters when no filter params are provided", async () => {
+    const { provider, captured } = makeCapturingProvider();
+    const tool = createWebSearchTool(() => [provider]);
+    const ctx = makeCtx();
+    await tool.execute(
+      "call-f5",
+      { query: "test" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(captured).toHaveLength(1);
+    expect(captured[0].filters).toBeUndefined();
+  });
+});
+
+describe("web_search compact output", () => {
+  const sampleResults: SearchResult[] = [
+    {
+      title: "TypeScript",
+      url: "https://typescriptlang.org",
+      snippet: "A typed superset of JavaScript",
+    },
+    {
+      title: "MDN Web Docs",
+      url: "https://developer.mozilla.org",
+      snippet: "Web technology reference",
+    },
+  ];
+
+  it("returns compact single-line format when compact=true", async () => {
+    const tool = createWebSearchTool(() => [makeProvider("stub", sampleResults)]);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-c1",
+      { query: "test", compact: true },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toBe(
+      "1. TypeScript -- https://typescriptlang.org\n2. MDN Web Docs -- https://developer.mozilla.org",
+    );
+  });
+
+  it("returns full format when compact is not set", async () => {
+    const tool = createWebSearchTool(() => [makeProvider("stub", sampleResults)]);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-c2",
+      { query: "test" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("[TypeScript]");
+    expect(text).toContain("A typed superset of JavaScript");
+  });
+
+  it("returns full format when compact=false", async () => {
+    const tool = createWebSearchTool(() => [makeProvider("stub", sampleResults)]);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-c3",
+      { query: "test", compact: false },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("[TypeScript]");
+    expect(text).toContain("A typed superset of JavaScript");
+  });
+
+  it("returns 'No results found.' in compact mode with empty results", async () => {
+    const tool = createWebSearchTool(() => [makeProvider("stub", [])]);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-c4",
+      { query: "test", compact: true },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toBe("No results found.");
   });
 });
