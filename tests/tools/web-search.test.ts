@@ -3,27 +3,7 @@ import { createWebSearchTool } from "../../src/tools/web-search.ts";
 import { makeCtx } from "../helpers.ts";
 import type { SearchProvider, SearchResult } from "../../src/providers/types.ts";
 
-function makeStubProvider(results: SearchResult[]): SearchProvider {
-  return {
-    name: "stub",
-    label: "Stub",
-    async search(_query: string, maxResults: number, _signal?: AbortSignal) {
-      return results.slice(0, maxResults);
-    },
-  };
-}
-
-function makeFailingProvider(message: string): SearchProvider {
-  return {
-    name: "stub",
-    label: "Stub",
-    async search() {
-      throw new Error(message);
-    },
-  };
-}
-
-function makeNamedProvider(name: string, results: SearchResult[]): SearchProvider {
+function makeProvider(name: string, results: SearchResult[]): SearchProvider {
   return {
     name,
     label: name,
@@ -33,7 +13,7 @@ function makeNamedProvider(name: string, results: SearchResult[]): SearchProvide
   };
 }
 
-function makeNamedFailingProvider(name: string, message: string): SearchProvider {
+function makeFailingProvider(name: string, message: string): SearchProvider {
   return {
     name,
     label: name,
@@ -58,14 +38,14 @@ describe("web_search tool", () => {
   ];
 
   it("has correct tool metadata", () => {
-    const tool = createWebSearchTool(() => [makeStubProvider(sampleResults)]);
+    const tool = createWebSearchTool(() => [makeProvider("stub", sampleResults)]);
     expect(tool.name).toBe("web_search");
     expect(tool.label).toBe("Web Search");
     expect(tool.parameters).toBeDefined();
   });
 
   it("executes search and returns formatted results", async () => {
-    const tool = createWebSearchTool(() => [makeStubProvider(sampleResults)]);
+    const tool = createWebSearchTool(() => [makeProvider("stub", sampleResults)]);
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-1",
@@ -83,7 +63,7 @@ describe("web_search tool", () => {
   });
 
   it("returns error result on provider failure", async () => {
-    const tool = createWebSearchTool(() => [makeFailingProvider("Provider exploded")]);
+    const tool = createWebSearchTool(() => [makeFailingProvider("stub", "Provider exploded")]);
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-2",
@@ -105,8 +85,8 @@ describe("web_search fallback chain", () => {
   ];
 
   it("falls back to second provider when first fails", async () => {
-    const failing = makeNamedFailingProvider("brave", "429 Too Many Requests");
-    const working = makeNamedProvider("exa", sampleResults);
+    const failing = makeFailingProvider("brave", "429 Too Many Requests");
+    const working = makeProvider("exa", sampleResults);
 
     const tool = createWebSearchTool(() => [failing, working], vi.fn());
     const ctx = makeCtx();
@@ -117,8 +97,8 @@ describe("web_search fallback chain", () => {
   });
 
   it("returns aggregate error when all providers fail", async () => {
-    const fail1 = makeNamedFailingProvider("brave", "429 Too Many Requests");
-    const fail2 = makeNamedFailingProvider("exa", "Request timeout");
+    const fail1 = makeFailingProvider("brave", "429 Too Many Requests");
+    const fail2 = makeFailingProvider("exa", "Request timeout");
 
     const tool = createWebSearchTool(() => [fail1, fail2], vi.fn());
     const ctx = makeCtx();
@@ -129,8 +109,8 @@ describe("web_search fallback chain", () => {
   });
 
   it("records usage only for the successful provider", async () => {
-    const failing = makeNamedFailingProvider("brave", "429");
-    const working = makeNamedProvider("exa", sampleResults);
+    const failing = makeFailingProvider("brave", "429");
+    const working = makeProvider("exa", sampleResults);
     const onSuccess = vi.fn();
 
     const tool = createWebSearchTool(() => [failing, working], onSuccess);
