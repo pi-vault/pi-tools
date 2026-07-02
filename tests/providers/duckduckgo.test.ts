@@ -3,6 +3,7 @@ import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DuckDuckGoProvider } from "../../src/providers/duckduckgo.ts";
 import { stubExec } from "../helpers.ts";
+import type { SearchFilters } from "../../src/providers/types.ts";
 
 describe("DuckDuckGoProvider", () => {
   let execStub: ReturnType<typeof stubExec>;
@@ -112,5 +113,105 @@ describe("DuckDuckGoProvider", () => {
     await expect(provider.search("test", 5)).rejects.toThrow(
       /failed to parse ddgs output/i,
     );
+  });
+
+  describe("search filters", () => {
+    it("prepends site: operators for includeDomains in the -q argument", async () => {
+      const provider = new DuckDuckGoProvider(execStub.fn);
+      const filters: SearchFilters = { includeDomains: ["example.com", "docs.rs"] };
+      await provider.search("rust tutorial", 5, undefined, filters);
+
+      const args = execStub.lastArgs();
+      const qIdx = args?.indexOf("-q") ?? -1;
+      const query = args?.[qIdx + 1] ?? "";
+      expect(query).toContain("site:example.com OR site:docs.rs");
+      expect(query).toContain("rust tutorial");
+    });
+
+    it("prepends -site: operators for excludeDomains in the -q argument", async () => {
+      const provider = new DuckDuckGoProvider(execStub.fn);
+      const filters: SearchFilters = { excludeDomains: ["spam.com"] };
+      await provider.search("test query", 5, undefined, filters);
+
+      const args = execStub.lastArgs();
+      const qIdx = args?.indexOf("-q") ?? -1;
+      const query = args?.[qIdx + 1] ?? "";
+      expect(query).toContain("-site:spam.com");
+      expect(query).toContain("test query");
+    });
+
+    it("passes timelimit flag for startDate (approximate mapping)", async () => {
+      const provider = new DuckDuckGoProvider(execStub.fn);
+      // 5 days ago — within 7-day window → "w"
+      const recent = new Date();
+      recent.setDate(recent.getDate() - 5);
+      const filters: SearchFilters = { startDate: recent.toISOString().slice(0, 10) };
+      await provider.search("test", 5, undefined, filters);
+
+      const args = execStub.lastArgs();
+      expect(args).toContain("-t");
+      const tIdx = args?.indexOf("-t") ?? -1;
+      expect(args?.[tIdx + 1]).toBe("w");
+    });
+
+    it("maps startDate older than 30 days to year timelimit", async () => {
+      const provider = new DuckDuckGoProvider(execStub.fn);
+      const old = new Date();
+      old.setDate(old.getDate() - 200);
+      const filters: SearchFilters = { startDate: old.toISOString().slice(0, 10) };
+      await provider.search("test", 5, undefined, filters);
+
+      const args = execStub.lastArgs();
+      expect(args).toContain("-t");
+      const tIdx = args?.indexOf("-t") ?? -1;
+      expect(args?.[tIdx + 1]).toBe("y");
+    });
+
+    it("does not pass timelimit when no startDate is set", async () => {
+      const provider = new DuckDuckGoProvider(execStub.fn);
+      const filters: SearchFilters = { includeDomains: ["example.com"] };
+      await provider.search("test", 5, undefined, filters);
+
+      const args = execStub.lastArgs();
+      expect(args).not.toContain("-t");
+    });
+
+    it("silently ignores endDate (not supported by ddgs)", async () => {
+      const provider = new DuckDuckGoProvider(execStub.fn);
+      const filters: SearchFilters = { endDate: "2025-12-31" };
+      await provider.search("test", 5, undefined, filters);
+
+      const args = execStub.lastArgs();
+      expect(args).not.toContain("-t");
+    });
+
+    it("combines domain and date filters", async () => {
+      const provider = new DuckDuckGoProvider(execStub.fn);
+      // 20 days ago — within 30-day window → "m"
+      const recent = new Date();
+      recent.setDate(recent.getDate() - 20);
+      const filters: SearchFilters = {
+        includeDomains: ["example.com"],
+        excludeDomains: ["spam.com"],
+        startDate: recent.toISOString().slice(0, 10),
+      };
+      await provider.search("query", 5, undefined, filters);
+
+      const args = execStub.lastArgs();
+      const qIdx = args?.indexOf("-q") ?? -1;
+      const query = args?.[qIdx + 1] ?? "";
+      expect(query).toContain("site:example.com");
+      expect(query).toContain("-site:spam.com");
+      expect(args).toContain("-t");
+      const tIdx = args?.indexOf("-t") ?? -1;
+      expect(args?.[tIdx + 1]).toBe("m");
+    });
+
+    it("works normally without filters", async () => {
+      const provider = new DuckDuckGoProvider(execStub.fn);
+      const results = await provider.search("test query", 5);
+      expect(results.length).toBe(3);
+      expect(results[0].title).toBe("Example Result");
+    });
   });
 });

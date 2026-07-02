@@ -3,7 +3,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { SearchProvider, SearchResult } from "./types.ts";
+import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 interface DDGSResult {
   title: string;
@@ -36,10 +36,14 @@ export class DuckDuckGoProvider implements SearchProvider {
     query: string,
     maxResults: number,
     signal?: AbortSignal,
+    filters?: SearchFilters,
   ): Promise<SearchResult[]> {
     if (signal?.aborted) {
       throw new Error("Search aborted");
     }
+
+    const effectiveQuery = applyDomainFilters(query, filters);
+    const timelimit = computeTimelimit(filters);
 
     const tmpFile = path.join(
       os.tmpdir(),
@@ -48,7 +52,7 @@ export class DuckDuckGoProvider implements SearchProvider {
 
     try {
       // runDdgs handles ENOENT (binary missing) and rethrows with install hint
-      await this.runDdgs(query, maxResults, tmpFile, signal);
+      await this.runDdgs(effectiveQuery, maxResults, tmpFile, signal, timelimit);
 
       let raw: string;
       try {
@@ -81,6 +85,7 @@ export class DuckDuckGoProvider implements SearchProvider {
     maxResults: number,
     outPath: string,
     signal?: AbortSignal,
+    timelimit?: string,
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const onAbort = () => {
@@ -88,9 +93,14 @@ export class DuckDuckGoProvider implements SearchProvider {
         reject(new Error("Search aborted"));
       };
 
+      const args = ["text", "-q", query, "-m", String(maxResults), "-o", outPath];
+      if (timelimit) {
+        args.push("-t", timelimit);
+      }
+
       const child = this.execFile(
         "ddgs",
-        ["text", "-q", query, "-m", String(maxResults), "-o", outPath],
+        args,
         { timeout: EXEC_TIMEOUT_MS },
         (error, _stdout, stderr) => {
           if (signal) signal.removeEventListener("abort", onAbort);
@@ -118,4 +128,39 @@ export class DuckDuckGoProvider implements SearchProvider {
       }
     });
   }
+}
+
+function applyDomainFilters(query: string, filters?: SearchFilters): string {
+  if (!filters) return query;
+
+  const parts: string[] = [];
+
+  if (filters.includeDomains?.length) {
+    parts.push(filters.includeDomains.map((d) => `site:${d}`).join(" OR "));
+  }
+
+  if (filters.excludeDomains?.length) {
+    parts.push(filters.excludeDomains.map((d) => `-site:${d}`).join(" "));
+  }
+
+  if (parts.length === 0) return query;
+  return `${parts.join(" ")} ${query}`;
+}
+
+/**
+ * Maps a startDate to the closest ddgs timelimit flag.
+ * ddgs supports: d (day), w (week), m (month), y (year).
+ * endDate is not supported — silently ignored.
+ */
+function computeTimelimit(filters?: SearchFilters): string | undefined {
+  if (!filters?.startDate) return undefined;
+
+  const start = new Date(filters.startDate);
+  const now = new Date();
+  const diffDays = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays <= 1) return "d";
+  if (diffDays <= 7) return "w";
+  if (diffDays <= 30) return "m";
+  return "y";
 }
