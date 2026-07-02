@@ -1492,7 +1492,7 @@ describe("search filters", () => {
 
     const fetchCall = (globalThis.fetch as any).mock.calls[0];
     const url = fetchCall[0] as string;
-    expect(url).toContain("q=test+query");
+    expect(url).toContain("q=test%20query");
     expect(url).not.toContain("site:");
   });
 });
@@ -1826,7 +1826,7 @@ describe("web_search compact output", () => {
   ];
 
   it("returns compact single-line format when compact=true", async () => {
-    const tool = createWebSearchTool(() => [makeStubProvider(sampleResults)]);
+    const tool = createWebSearchTool(() => [makeProvider("stub", sampleResults)]);
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-c1",
@@ -1842,7 +1842,7 @@ describe("web_search compact output", () => {
   });
 
   it("returns full format when compact is not set", async () => {
-    const tool = createWebSearchTool(() => [makeStubProvider(sampleResults)]);
+    const tool = createWebSearchTool(() => [makeProvider("stub", sampleResults)]);
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-c2",
@@ -1857,7 +1857,7 @@ describe("web_search compact output", () => {
   });
 
   it("returns full format when compact=false", async () => {
-    const tool = createWebSearchTool(() => [makeStubProvider(sampleResults)]);
+    const tool = createWebSearchTool(() => [makeProvider("stub", sampleResults)]);
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-c3",
@@ -1872,7 +1872,7 @@ describe("web_search compact output", () => {
   });
 
   it("returns 'No results found.' in compact mode with empty results", async () => {
-    const tool = createWebSearchTool(() => [makeStubProvider([])]);
+    const tool = createWebSearchTool(() => [makeProvider("stub", [])]);
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-c4",
@@ -1901,7 +1901,7 @@ import { Type } from "typebox";
 import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { SearchFilters, SearchProvider, SearchResult } from "../providers/types.ts";
-import { sanitizeError, AggregateProviderError } from "../utils/errors.ts";
+import { AggregateProviderError } from "../utils/errors.ts";
 
 const WebSearchParams = Type.Object({
   query: Type.String({ description: "Search query" }),
