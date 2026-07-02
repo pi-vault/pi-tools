@@ -3,9 +3,10 @@ import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { ContentStore } from "../storage.ts";
 import type { FetchProvider } from "../providers/types.ts";
-import { extractContent, RetryableExtractionError } from "../extract/pipeline.ts";
+import { extractContent, RetryableExtractionError, type ExtractedContent } from "../extract/pipeline.ts";
 import { truncateContent } from "../utils/truncate.ts";
 import { AggregateProviderError, sanitizeError } from "../utils/errors.ts";
+import type { ContentCache } from "../cache.ts";
 
 const INLINE_LIMIT = 15_000;
 
@@ -25,7 +26,73 @@ interface WebFetchDetails {
 export function createWebFetchTool(
   store: ContentStore,
   resolveFetchCandidates?: () => FetchProvider[],
+  cache?: ContentCache,
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
+
+  async function executeSingleUrl(
+    url: string,
+    signal: AbortSignal | undefined,
+  ) {
+    try {
+      // Check cache first
+      const cached = cache?.get(url);
+      if (cached) {
+        return buildResult(cached, url, store);
+      }
+
+      const extracted = await extractContent(url, signal);
+
+      // Write to cache
+      cache?.set(url, extracted);
+
+      return buildResult(extracted, url, store);
+    } catch (pipelineError) {
+      // Only fall back to providers for retryable errors
+      if (!(pipelineError instanceof RetryableExtractionError)) {
+        const msg = sanitizeError(pipelineError);
+        return errorResult(url, `Fetch error: ${msg}`);
+      }
+
+      // Try each registered FetchProvider as fallback
+      const candidates = resolveFetchCandidates?.() ?? [];
+      if (candidates.length === 0) {
+        const msg = sanitizeError(pipelineError);
+        return errorResult(url, `Fetch error: ${msg}`);
+      }
+
+      const errors: Array<{ provider: string; error: string }> = [
+        { provider: "http", error: pipelineError.message },
+      ];
+
+      for (const provider of candidates) {
+        try {
+          const fetchResult = await provider.fetch(url, signal);
+          const extracted: ExtractedContent = {
+            text: fetchResult.text,
+            title: fetchResult.title,
+            url,
+            extractionChain: [`fetch-provider:${provider.name}`],
+            chars: fetchResult.text.length,
+            truncated: false,
+          };
+
+          // Write provider result to cache
+          cache?.set(url, extracted);
+
+          return buildResult(extracted, url, store);
+        } catch (providerError) {
+          errors.push({
+            provider: provider.name,
+            error: providerError instanceof Error ? providerError.message : String(providerError),
+          });
+        }
+      }
+
+      const aggregate = new AggregateProviderError("fetch", errors);
+      return errorResult(url, `Fetch error: ${aggregate.message}`);
+    }
+  }
+
   return {
     name: "web_fetch",
     label: "Web Fetch",
@@ -39,54 +106,7 @@ export function createWebFetchTool(
     ],
     parameters: WebFetchParams,
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-      // Try the direct extraction pipeline first
-      try {
-        const extracted = await extractContent(params.url, signal ?? undefined);
-        return buildResult(extracted, params.url, store);
-      } catch (pipelineError) {
-        // Only fall back to providers for retryable errors
-        if (!(pipelineError instanceof RetryableExtractionError)) {
-          const msg = sanitizeError(pipelineError);
-          return errorResult(params.url, `Fetch error: ${msg}`);
-        }
-
-        // Try each registered FetchProvider as fallback
-        const candidates = resolveFetchCandidates?.() ?? [];
-        if (candidates.length === 0) {
-          const msg = sanitizeError(pipelineError);
-          return errorResult(params.url, `Fetch error: ${msg}`);
-        }
-
-        const errors: Array<{ provider: string; error: string }> = [
-          { provider: "http", error: pipelineError.message },
-        ];
-
-        for (const provider of candidates) {
-          try {
-            const fetchResult = await provider.fetch(params.url, signal ?? undefined);
-            return buildResult(
-              {
-                text: fetchResult.text,
-                title: fetchResult.title,
-                url: params.url,
-                extractionChain: [`fetch-provider:${provider.name}`],
-                chars: fetchResult.text.length,
-                truncated: false,
-              },
-              params.url,
-              store,
-            );
-          } catch (providerError) {
-            errors.push({
-              provider: provider.name,
-              error: providerError instanceof Error ? providerError.message : String(providerError),
-            });
-          }
-        }
-
-        const aggregate = new AggregateProviderError("fetch", errors);
-        return errorResult(params.url, `Fetch error: ${aggregate.message}`);
-      }
+      return executeSingleUrl(params.url, signal ?? undefined);
     },
     renderCall(args, theme: Theme, context) {
       const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);

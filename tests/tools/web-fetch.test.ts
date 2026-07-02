@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWebFetchTool } from "../../src/tools/web-fetch.ts";
 import { ContentStore } from "../../src/storage.ts";
+import { ContentCache } from "../../src/cache.ts";
 import { makeCtx, stubFetch } from "../helpers.ts";
 import type { FetchProvider, FetchResult } from "../../src/providers/types.ts";
 
@@ -263,5 +264,74 @@ describe("web_fetch fallback to FetchProvider", () => {
     );
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toContain("Article Title");
+  });
+});
+
+describe("web_fetch caching", () => {
+  let fetchStub: ReturnType<typeof stubFetch>;
+
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+
+  afterEach(() => {
+    fetchStub.restore();
+  });
+
+  it("returns cached content on second call without re-fetching", async () => {
+    fetchStub.addResponse("example.com/cached", {
+      body: GOOD_HTML,
+      headers: { "content-type": "text/html" },
+    });
+
+    const store = new ContentStore(() => {});
+    const cache = new ContentCache(100, 300_000);
+    const tool = createWebFetchTool(store, undefined, cache);
+    const ctx = makeCtx();
+
+    // First call — fetches from network
+    const result1 = await tool.execute(
+      "call-c1",
+      { url: "https://example.com/cached" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect((result1.content[0] as { type: "text"; text: string }).text).toContain("Article Title");
+
+    // Clear fetch routes to prove second call doesn't fetch
+    fetchStub.restore();
+    const emptyFetch = stubFetch();
+
+    const result2 = await tool.execute(
+      "call-c2",
+      { url: "https://example.com/cached" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect((result2.content[0] as { type: "text"; text: string }).text).toContain("Article Title");
+
+    emptyFetch.restore();
+  });
+
+  it("works without a cache (backward compatible)", async () => {
+    fetchStub.addResponse("example.com/nocache", {
+      body: GOOD_HTML,
+      headers: { "content-type": "text/html" },
+    });
+
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+
+    const result = await tool.execute(
+      "call-c3",
+      { url: "https://example.com/nocache" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect((result.content[0] as { type: "text"; text: string }).text).toContain("Article Title");
   });
 });
