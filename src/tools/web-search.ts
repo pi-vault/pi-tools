@@ -76,19 +76,13 @@ function buildFilters(params: {
   const startDate = params.startDate && ISO_DATE_RE.test(params.startDate) ? params.startDate : undefined;
   const endDate = params.endDate && ISO_DATE_RE.test(params.endDate) ? params.endDate : undefined;
 
-  const hasAny =
-    (includeDomains?.length) ||
-    (excludeDomains?.length) ||
-    startDate ||
-    endDate;
-
-  if (!hasAny) return undefined;
+  if (!includeDomains?.length && !excludeDomains?.length && !startDate && !endDate) return undefined;
 
   return {
-    ...(includeDomains?.length ? { includeDomains } : {}),
-    ...(excludeDomains?.length ? { excludeDomains } : {}),
-    ...(startDate ? { startDate } : {}),
-    ...(endDate ? { endDate } : {}),
+    includeDomains: includeDomains?.length ? includeDomains : undefined,
+    excludeDomains: excludeDomains?.length ? excludeDomains : undefined,
+    startDate,
+    endDate,
   };
 }
 

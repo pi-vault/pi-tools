@@ -1,5 +1,6 @@
 // src/providers/serper.ts
 import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import { applyDomainFilters } from "../utils/filters.ts";
 
 interface SerperResponse {
   organic: Array<{ title: string; link: string; snippet: string }>;
@@ -47,23 +48,6 @@ export class SerperProvider implements SearchProvider {
       title: r.title, url: r.link, snippet: r.snippet,
     }));
   }
-}
-
-function applyDomainFilters(query: string, filters?: SearchFilters): string {
-  if (!filters) return query;
-
-  const parts: string[] = [];
-
-  if (filters.includeDomains?.length) {
-    parts.push(filters.includeDomains.map((d) => `site:${d}`).join(" OR "));
-  }
-
-  if (filters.excludeDomains?.length) {
-    parts.push(filters.excludeDomains.map((d) => `-site:${d}`).join(" "));
-  }
-
-  if (parts.length === 0) return query;
-  return `${parts.join(" ")} ${query}`;
 }
 
 /**

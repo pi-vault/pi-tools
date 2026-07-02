@@ -1,5 +1,6 @@
 // src/providers/brave.ts
 import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import { applyDomainFilters } from "../utils/filters.ts";
 
 interface BraveSearchResponse {
   web?: {
@@ -58,23 +59,6 @@ export class BraveProvider implements SearchProvider {
       snippet: r.description,
     }));
   }
-}
-
-function applyDomainFilters(query: string, filters?: SearchFilters): string {
-  if (!filters) return query;
-
-  const parts: string[] = [];
-
-  if (filters.includeDomains?.length) {
-    parts.push(filters.includeDomains.map((d) => `site:${d}`).join(" OR "));
-  }
-
-  if (filters.excludeDomains?.length) {
-    parts.push(filters.excludeDomains.map((d) => `-site:${d}`).join(" "));
-  }
-
-  if (parts.length === 0) return query;
-  return `${parts.join(" ")} ${query}`;
 }
 
 function buildFreshness(filters?: SearchFilters): string | null {
