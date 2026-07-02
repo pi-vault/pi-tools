@@ -747,6 +747,15 @@ describe("fetchViaClone", () => {
     expect(content).toContain("Binary file");
   });
 
+  it("returns 'File not found' for missing files in clone", async () => {
+    const cloneDir = path.join(testCacheDir, "owner", "repo@main");
+    fs.mkdirSync(cloneDir, { recursive: true });
+
+    const { readCloneFile } = await import("../../src/extract/github.ts");
+    const content = readCloneFile(cloneDir, "does-not-exist.ts");
+    expect(content).toContain("File not found");
+  });
+
   it("includes README content in root URL listings", async () => {
     const cloneDir = path.join(testCacheDir, "owner", "repo@main");
     fs.mkdirSync(path.join(cloneDir, "src"), { recursive: true });

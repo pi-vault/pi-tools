@@ -168,6 +168,16 @@ export function isBinaryFile(path: string, content?: Buffer): boolean {
 const RAW_CONTENT_LIMIT = 100_000;
 const MAX_DIR_ENTRIES = 200;
 
+/** Truncate text to RAW_CONTENT_LIMIT chars, appending a notice within budget. */
+function truncateWithNotice(text: string): { output: string; truncated: boolean } {
+  if (text.length <= RAW_CONTENT_LIMIT) {
+    return { output: text, truncated: false };
+  }
+  const notice = `\n\n[truncated] showing ${RAW_CONTENT_LIMIT.toLocaleString()} of ${text.length.toLocaleString()} chars`;
+  const output = text.slice(0, RAW_CONTENT_LIMIT - notice.length) + notice;
+  return { output, truncated: true };
+}
+
 function apiHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github.v3+json",
@@ -306,15 +316,10 @@ export async function fetchViaApi(
     }
 
     const text = rawContent.toString("utf-8");
-    let outputText = text;
-    let truncated = false;
-    if (text.length > RAW_CONTENT_LIMIT) {
-      outputText = text.slice(0, RAW_CONTENT_LIMIT);
-      truncated = true;
-    }
+    const { output, truncated } = truncateWithNotice(text);
 
     return {
-      text: outputText,
+      text: output,
       title: `${parsed.owner}/${parsed.repo} - ${parsed.path}`,
       url: originalUrl,
       extractionChain: ["github:api"],
@@ -390,16 +395,10 @@ export async function fetchRaw(
   const text = await response.text();
   const originalUrl = `https://github.com/${parsed.owner}/${parsed.repo}/blob/${parsed.ref}/${parsed.path}`;
   const totalChars = text.length;
-
-  let outputText = text;
-  let truncated = false;
-  if (totalChars > RAW_CONTENT_LIMIT) {
-    outputText = text.slice(0, RAW_CONTENT_LIMIT);
-    truncated = true;
-  }
+  const { output, truncated } = truncateWithNotice(text);
 
   return {
-    text: outputText,
+    text: output,
     title: `${parsed.owner}/${parsed.repo} - ${parsed.path}`,
     url: originalUrl,
     extractionChain: ["github:raw"],
@@ -537,12 +536,9 @@ export function readCloneFile(cloneDir: string, filePath: string): string {
     return `Binary file: ${filePath} (${stat.size} bytes)`;
   }
 
-  let text = buf.toString("utf-8");
-  if (text.length > RAW_CONTENT_LIMIT) {
-    text = text.slice(0, RAW_CONTENT_LIMIT);
-  }
-
-  return text;
+  const text = buf.toString("utf-8");
+  const { output } = truncateWithNotice(text);
+  return output;
 }
 
 async function getRepoSizeMB(
@@ -563,12 +559,24 @@ async function getRepoSizeMB(
   }
 }
 
+function isValidRef(ref: string): boolean {
+  // Reject refs that could be interpreted as git CLI flags
+  if (ref.startsWith("-")) return false;
+  // Reject empty refs
+  if (ref.length === 0) return false;
+  // Reject refs with control characters or spaces
+  if (/[\x00-\x1f\x7f ]/.test(ref)) return false;
+  return true;
+}
+
 async function cloneRepo(
   owner: string,
   repo: string,
   ref: string,
   timeoutSeconds: number,
 ): Promise<string | null> {
+  if (!isValidRef(ref)) return null;
+
   const cacheKey = `${owner}/${repo}@${ref}`;
 
   const existing = cloneRegistry.get(cacheKey);
@@ -640,6 +648,7 @@ export async function fetchViaClone(
     if (!parsed.path) return null;
 
     const content = readCloneFile(cloneDir, parsed.path);
+    if (content.startsWith("File not found:")) return null;
     const isBinary = content.startsWith("Binary file:");
     return {
       text: content,
@@ -647,7 +656,7 @@ export async function fetchViaClone(
       url: originalUrl,
       extractionChain: ["github:clone"],
       chars: isBinary ? 0 : content.length,
-      truncated: false,
+      truncated: content.includes("[truncated]"),
     };
   }
 
