@@ -8,10 +8,7 @@ interface WebSearchApiResponse {
     title: string;
     url: string;
     description: string;
-    position?: number;
-    score?: number;
   }>;
-  responseTime?: number;
 }
 
 export class WebSearchApiProvider implements SearchProvider {

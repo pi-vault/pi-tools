@@ -10,7 +10,6 @@ interface JsonRpcResponse {
     content: Array<{ type: string; text: string }>;
   };
   error?: {
-    code: number;
     message: string;
   };
 }

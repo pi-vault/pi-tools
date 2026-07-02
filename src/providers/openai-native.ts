@@ -8,8 +8,6 @@ interface UrlCitation {
   type: "url_citation";
   url: string;
   title: string;
-  start_index: number;
-  end_index: number;
 }
 
 interface OutputText {
@@ -24,14 +22,7 @@ interface MessageOutput {
   content: OutputText[];
 }
 
-interface WebSearchCallOutput {
-  type: "web_search_call";
-  id: string;
-  status: string;
-  action?: { type: string; query?: string };
-}
-
-type OutputItem = MessageOutput | WebSearchCallOutput | { type: string };
+type OutputItem = MessageOutput | { type: string };
 
 interface OpenAIResponsesResult {
   id: string;

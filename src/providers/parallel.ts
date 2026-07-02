@@ -11,25 +11,20 @@ const PARALLEL_SEARCH_ENDPOINT = "https://api.parallel.ai/v1/search";
 const PARALLEL_EXTRACT_ENDPOINT = "https://api.parallel.ai/v1/extract";
 
 interface ParallelSearchResponse {
-  search_id: string;
   results: Array<{
     url: string;
     title: string;
     excerpts: string[];
-    publish_date?: string;
   }>;
-  session_id: string;
 }
 
 interface ParallelExtractResponse {
-  extract_id: string;
   results: Array<{
     url: string;
     title?: string;
     excerpts?: string[];
     full_content?: string;
   }>;
-  session_id: string;
 }
 
 export class ParallelProvider implements SearchProvider, FetchProvider {
