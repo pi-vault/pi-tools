@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadConfig, resolveApiKey, type PiToolsConfig } from "../src/config.ts";
+import { loadConfig, resolveApiKey } from "../src/config.ts";
 
 vi.mock("node:fs");
 
@@ -20,7 +20,7 @@ describe("loadConfig", () => {
   });
 
   it("parses valid config file", () => {
-    const configData: PiToolsConfig = {
+    const configData = {
       defaultProvider: "brave",
       providers: {
         brave: { enabled: true, monthlyQuota: 2000, apiKey: "BRAVE_API_KEY" },
@@ -79,5 +79,62 @@ describe("resolveApiKey", () => {
   it("resolves shell commands prefixed with !", () => {
     const result = resolveApiKey("!echo test-key");
     expect(result).toBe("test-key");
+  });
+});
+
+describe("GitHub config", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("provides default GitHub config when config file is missing", () => {
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+    const config = loadConfig();
+    expect(config.github).toBeDefined();
+    expect(config.github.enabled).toBe(true);
+    expect(config.github.maxRepoSizeMB).toBe(350);
+    expect(config.github.cloneTimeoutSeconds).toBe(30);
+  });
+
+  it("merges user GitHub config with defaults", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        github: {
+          maxRepoSizeMB: 500,
+        },
+      }),
+    );
+    const config = loadConfig();
+    expect(config.github.enabled).toBe(true); // from defaults
+    expect(config.github.maxRepoSizeMB).toBe(500); // from user
+    expect(config.github.cloneTimeoutSeconds).toBe(30); // from defaults
+  });
+
+  it("allows disabling GitHub interception", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        github: {
+          enabled: false,
+        },
+      }),
+    );
+    const config = loadConfig();
+    expect(config.github.enabled).toBe(false);
+  });
+
+  it("preserves provider defaults alongside github config", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        github: { maxRepoSizeMB: 200 },
+      }),
+    );
+    const config = loadConfig();
+    // Provider defaults still present
+    expect(config.providers.duckduckgo.enabled).toBe(true);
+    // GitHub merged
+    expect(config.github.maxRepoSizeMB).toBe(200);
+    expect(config.github.enabled).toBe(true);
   });
 });

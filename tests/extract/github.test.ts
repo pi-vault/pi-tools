@@ -11,7 +11,7 @@ import {
   extractGitHub,
   _resetCloneCache,
 } from "../../src/extract/github.ts";
-import type { GitHubConfig } from "../../src/extract/github.ts";
+import type { GitHubConfig } from "../../src/config.ts";
 import { stubFetch } from "../helpers.ts";
 
 describe("parseGitHubUrl", () => {

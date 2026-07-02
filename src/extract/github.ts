@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { promisify } from "node:util";
+import type { GitHubConfig } from "../config.ts";
 import type { ExtractedContent } from "./pipeline.ts";
 
 const execFileAsync = promisify(execFile);
@@ -167,14 +168,8 @@ export function isBinaryFile(path: string, content?: Buffer): boolean {
 const RAW_CONTENT_LIMIT = 100_000;
 const MAX_DIR_ENTRIES = 200;
 
-interface GitHubApiHeaders {
-  Accept: string;
-  "User-Agent": string;
-  Authorization?: string;
-}
-
-function apiHeaders(): GitHubApiHeaders {
-  const headers: GitHubApiHeaders = {
+function apiHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
     Accept: "application/vnd.github.v3+json",
     "User-Agent": "pi-tools",
   };
@@ -415,11 +410,7 @@ export async function fetchRaw(
 
 // ── Clone cache (Tier 2) ──────────────────────────────────────────────────────
 
-export interface GitHubConfig {
-  enabled: boolean;
-  maxRepoSizeMB: number;
-  cloneTimeoutSeconds: number;
-}
+// GitHubConfig is the canonical definition from src/config.ts (imported above).
 
 const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
   enabled: true,
