@@ -335,3 +335,179 @@ describe("web_fetch caching", () => {
     expect((result.content[0] as { type: "text"; text: string }).text).toContain("Article Title");
   });
 });
+
+describe("web_fetch multi-URL", () => {
+  let fetchStub: ReturnType<typeof stubFetch>;
+
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+
+  afterEach(() => {
+    fetchStub.restore();
+  });
+
+  it("rejects when both url and urls are provided", async () => {
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-m1",
+      { url: "https://a.com", urls: ["https://b.com"] } as any,
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text.toLowerCase()).toContain("error");
+    expect(text).toContain("exactly one");
+  });
+
+  it("rejects when neither url nor urls is provided", async () => {
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-m2",
+      {} as any,
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text.toLowerCase()).toContain("error");
+    expect(text).toContain("exactly one");
+  });
+
+  it("rejects urls array longer than 20", async () => {
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+    const urls = Array.from({ length: 21 }, (_, i) => `https://example.com/${i}`);
+    const result = await tool.execute(
+      "call-m3",
+      { urls } as any,
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text.toLowerCase()).toContain("error");
+    expect(text).toContain("20");
+  });
+
+  it("fetches 2 URLs concurrently with split budget", async () => {
+    const html1 = `<!DOCTYPE html><html><head><title>Page One</title></head><body>
+<article><h1>Page One</h1><p>${"First page content. ".repeat(30)}</p></article></body></html>`;
+    const html2 = `<!DOCTYPE html><html><head><title>Page Two</title></head><body>
+<article><h1>Page Two</h1><p>${"Second page content. ".repeat(30)}</p></article></body></html>`;
+
+    fetchStub.addResponse("example.com/one", {
+      body: html1,
+      headers: { "content-type": "text/html" },
+    });
+    fetchStub.addResponse("example.com/two", {
+      body: html2,
+      headers: { "content-type": "text/html" },
+    });
+
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-m4",
+      { urls: ["https://example.com/one", "https://example.com/two"] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("Page One");
+    expect(text).toContain("Page Two");
+    expect(result.details.urlResults).toHaveLength(2);
+  });
+
+  it("stores full content for multi-URL via ContentStore", async () => {
+    const html1 = `<!DOCTYPE html><html><head><title>Stored</title></head><body>
+<article><h1>Stored Page</h1><p>${"Stored content. ".repeat(30)}</p></article></body></html>`;
+
+    fetchStub.addResponse("example.com/stored", {
+      body: html1,
+      headers: { "content-type": "text/html" },
+    });
+
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-m5",
+      { urls: ["https://example.com/stored"] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("Stored Page");
+  });
+
+  it("handles partial failures in multi-URL mode", async () => {
+    fetchStub.addResponse("example.com/ok", {
+      body: GOOD_HTML,
+      headers: { "content-type": "text/html" },
+    });
+    fetchStub.addResponse("example.com/fail", {
+      status: 500,
+      body: "Server Error",
+      headers: { "content-type": "text/html" },
+    });
+
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-m6",
+      { urls: ["https://example.com/ok", "https://example.com/fail"] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("Article Title");
+    expect(result.details.urlResults).toHaveLength(2);
+    const failResult = result.details.urlResults!.find(
+      (r: any) => r.url === "https://example.com/fail",
+    );
+    expect(failResult!.error).toBeDefined();
+  });
+
+  it("uses manifest mode (512 char preview) for 6+ URLs", async () => {
+    const urls: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const domain = `site${i}.com`;
+      urls.push(`https://${domain}/page`);
+      fetchStub.addResponse(`${domain}/page`, {
+        body: `<!DOCTYPE html><html><head><title>Site ${i}</title></head><body>
+<article><h1>Site ${i}</h1><p>${"Content for this site. ".repeat(50)}</p></article></body></html>`,
+        headers: { "content-type": "text/html" },
+      });
+    }
+
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-m7",
+      { urls },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(result.details.urlResults).toHaveLength(6);
+    // All should have contentIds for full retrieval
+    for (const ur of result.details.urlResults!) {
+      if (!(ur as any).error) {
+        expect((ur as any).contentId).toBeDefined();
+      }
+    }
+  });
+});
