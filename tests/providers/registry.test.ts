@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
 import { UsageTracker } from "../../src/providers/usage.ts";
-import type { SearchProvider } from "../../src/providers/types.ts";
+import type { FetchProvider, SearchProvider } from "../../src/providers/types.ts";
 import * as fs from "node:fs";
 
 vi.mock("node:fs");
@@ -195,5 +195,32 @@ describe("ProviderRegistry", () => {
     registry.recordUsage("brave"); // 2000 used, 0 remaining
     const afterExhaust = registry.selectSearch();
     expect(afterExhaust?.name).toBe("duckduckgo");
+  });
+
+  describe("selectFetchCandidates", () => {
+    it("returns all registered fetch providers", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const jina: FetchProvider = {
+        name: "jina",
+        fetch: vi.fn().mockResolvedValue({ text: "content", title: "Title" }),
+      };
+      const exa: FetchProvider = {
+        name: "exa",
+        fetch: vi.fn().mockResolvedValue({ text: "content", title: "Title" }),
+      };
+
+      registry.registerFetch(jina);
+      registry.registerFetch(exa);
+
+      const candidates = registry.selectFetchCandidates();
+      expect(candidates.map((c) => c.name)).toEqual(["jina", "exa"]);
+    });
+
+    it("returns empty array when no fetch providers registered", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      expect(registry.selectFetchCandidates()).toEqual([]);
+    });
   });
 });

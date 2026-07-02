@@ -113,6 +113,10 @@ export class ProviderRegistry {
     return first.done ? undefined : first.value.provider;
   }
 
+  selectFetchCandidates(): FetchProvider[] {
+    return [...this.fetchProviders.values()].map((r) => r.provider);
+  }
+
   selectCodeSearch(): CodeSearchProvider | undefined {
     const first = this.codeSearchProviders.values().next();
     return first.done ? undefined : first.value.provider;
