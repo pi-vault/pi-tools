@@ -283,3 +283,162 @@ describe("extractContent raw mode", () => {
     ).rejects.toThrow(/404/);
   });
 });
+
+describe("GitHub URL interception in extractContent", () => {
+  let fetchStub: ReturnType<typeof stubFetch>;
+
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+
+  afterEach(() => {
+    fetchStub.restore();
+  });
+
+  it("intercepts blob URL and returns raw file content", async () => {
+    fetchStub.addResponse(
+      "raw.githubusercontent.com/facebook/react/main/README.md",
+      {
+        body: "# React\n\nA library for building UIs.",
+        headers: { "content-type": "text/plain" },
+      },
+    );
+
+    const result = await extractContent(
+      "https://github.com/facebook/react/blob/main/README.md",
+    );
+    expect(result.text).toContain("React");
+    expect(result.extractionChain).toContain("github:raw");
+    // Should NOT have gone through the normal HTTP pipeline
+    expect(result.extractionChain).not.toContain("readability");
+  });
+
+  it("intercepts raw.githubusercontent.com URL directly", async () => {
+    fetchStub.addResponse(
+      "raw.githubusercontent.com/owner/repo/main/config.json",
+      {
+        body: '{"setting": true}',
+        headers: { "content-type": "text/plain" },
+      },
+    );
+
+    const result = await extractContent(
+      "https://raw.githubusercontent.com/owner/repo/main/config.json",
+    );
+    expect(result.text).toContain('"setting": true');
+    expect(result.extractionChain).toContain("github:raw");
+  });
+
+  it("does NOT intercept issues URL — falls through to normal pipeline", async () => {
+    const issuesHtml = `
+      <!DOCTYPE html><html><head><title>Issue #123</title></head><body>
+      <article><h1>Bug Report</h1>
+      <p>${"This issue describes a bug in the system. ".repeat(30)}</p>
+      </article></body></html>`;
+
+    fetchStub.addResponse("github.com/facebook/react/issues/123", {
+      body: issuesHtml,
+      headers: { "content-type": "text/html" },
+    });
+
+    const result = await extractContent(
+      "https://github.com/facebook/react/issues/123",
+    );
+    // Should go through normal extraction (Readability, etc.)
+    expect(result.extractionChain).toContain("readability");
+    expect(result.extractionChain).not.toContain("github:raw");
+    expect(result.extractionChain).not.toContain("github:clone");
+    expect(result.extractionChain).not.toContain("github:api");
+  });
+
+  it("does NOT intercept pull request URL", async () => {
+    const prHtml = `
+      <!DOCTYPE html><html><head><title>PR #456</title></head><body>
+      <article><h1>Feature PR</h1>
+      <p>${"This PR adds a new feature to the codebase. ".repeat(30)}</p>
+      </article></body></html>`;
+
+    fetchStub.addResponse("github.com/facebook/react/pull/456", {
+      body: prHtml,
+      headers: { "content-type": "text/html" },
+    });
+
+    const result = await extractContent(
+      "https://github.com/facebook/react/pull/456",
+    );
+    expect(result.extractionChain).toContain("readability");
+  });
+
+  it("falls through to normal pipeline when GitHub interceptor returns null", async () => {
+    // Tier 1: raw fetch fails
+    fetchStub.addResponse(
+      "raw.githubusercontent.com/owner/repo/main/missing.ts",
+      { status: 404, body: "Not Found" },
+    );
+
+    // Tier 3 (API) mock added before less-specific repo mock
+    fetchStub.addResponse(
+      "api.github.com/repos/owner/repo/contents/missing.ts",
+      {
+        status: 404,
+        body: { message: "Not Found" },
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    // Tier 2: repo size check fails (API returns error)
+    fetchStub.addResponse("api.github.com/repos/owner/repo", {
+      status: 403,
+      body: { message: "rate limited" },
+      headers: { "content-type": "application/json" },
+    });
+
+    // Normal pipeline's HTTP fetch for the original URL
+    const fallbackHtml = `
+      <!DOCTYPE html><html><head><title>Blob View</title></head><body>
+      <article><h1>File Content</h1>
+      <p>${"Rendered blob view content from GitHub. ".repeat(30)}</p>
+      </article></body></html>`;
+
+    fetchStub.addResponse("github.com/owner/repo/blob/main/missing.ts", {
+      body: fallbackHtml,
+      headers: { "content-type": "text/html" },
+    });
+
+    const result = await extractContent(
+      "https://github.com/owner/repo/blob/main/missing.ts",
+    );
+    // Falls through to normal pipeline
+    expect(result.extractionChain).toContain("readability");
+  });
+
+  it("does not interfere with non-GitHub URLs", async () => {
+    fetchStub.addResponse("example.com/page", {
+      body: `<html><head><title>Normal Page</title></head><body>
+        <article><h1>Normal Content</h1>
+        <p>${"Regular web page content. ".repeat(30)}</p>
+        </article></body></html>`,
+      headers: { "content-type": "text/html" },
+    });
+
+    const result = await extractContent("https://example.com/page");
+    expect(result.text).toContain("Normal Content");
+    expect(result.extractionChain).toContain("readability");
+    expect(result.extractionChain).not.toContain("github:raw");
+  });
+
+  it("preserves raw mode for non-GitHub URLs", async () => {
+    fetchStub.addResponse("example.com/api/data", {
+      body: '{"raw": true}',
+      headers: { "content-type": "application/json" },
+    });
+
+    const result = await extractContent(
+      "https://example.com/api/data",
+      undefined,
+      { raw: true },
+    );
+    expect(result.text).toContain('"raw": true');
+    expect(result.extractionChain).toContain("raw");
+  });
+});

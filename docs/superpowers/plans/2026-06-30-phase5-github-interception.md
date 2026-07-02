@@ -1417,6 +1417,8 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+// NOTE: GitHubConfig will be moved to src/config.ts in Task 7.
+// For now, define it locally. Task 7 Step 4 replaces this with an import.
 export interface GitHubConfig {
   enabled: boolean;
   maxRepoSizeMB: number;
@@ -1965,14 +1967,25 @@ git commit -m "feat(github): add extractGitHub orchestrator combining all 3 tier
 - Modify: `src/config.ts`
 - Modify: `tests/config.test.ts`
 
+**Context:** The existing `tests/config.test.ts` uses `vi.mock("node:fs")` at file scope.
+All tests must use `vi.mocked(fs.readFileSync).mockReturnValue(...)` — NOT real filesystem operations.
+The `GitHubConfig` interface defined here is the canonical definition; `src/extract/github.ts` (Task 5) should import from `../config.ts` instead of defining its own copy.
+
 - [ ] **Step 1: Write the failing tests**
 
-Add to `tests/config.test.ts`:
+Add to `tests/config.test.ts` (within the existing `describe("loadConfig", ...)` block or as a new top-level describe):
 
 ```ts
 describe("GitHub config", () => {
-  it("provides default GitHub config when not specified", () => {
-    const config = loadConfig("/nonexistent/path.json");
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("provides default GitHub config when config file is missing", () => {
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+    const config = loadConfig();
     expect(config.github).toBeDefined();
     expect(config.github.enabled).toBe(true);
     expect(config.github.maxRepoSizeMB).toBe(350);
@@ -1980,43 +1993,43 @@ describe("GitHub config", () => {
   });
 
   it("merges user GitHub config with defaults", () => {
-    const tempFile = path.join(os.tmpdir(), "pi-tools-test-gh-config.json");
-    fs.writeFileSync(
-      tempFile,
+    vi.mocked(fs.readFileSync).mockReturnValue(
       JSON.stringify({
         github: {
           maxRepoSizeMB: 500,
         },
       }),
     );
-
-    try {
-      const config = loadConfig(tempFile);
-      expect(config.github.enabled).toBe(true); // from defaults
-      expect(config.github.maxRepoSizeMB).toBe(500); // from user
-      expect(config.github.cloneTimeoutSeconds).toBe(30); // from defaults
-    } finally {
-      fs.unlinkSync(tempFile);
-    }
+    const config = loadConfig();
+    expect(config.github.enabled).toBe(true); // from defaults
+    expect(config.github.maxRepoSizeMB).toBe(500); // from user
+    expect(config.github.cloneTimeoutSeconds).toBe(30); // from defaults
   });
 
   it("allows disabling GitHub interception", () => {
-    const tempFile = path.join(os.tmpdir(), "pi-tools-test-gh-disabled.json");
-    fs.writeFileSync(
-      tempFile,
+    vi.mocked(fs.readFileSync).mockReturnValue(
       JSON.stringify({
         github: {
           enabled: false,
         },
       }),
     );
+    const config = loadConfig();
+    expect(config.github.enabled).toBe(false);
+  });
 
-    try {
-      const config = loadConfig(tempFile);
-      expect(config.github.enabled).toBe(false);
-    } finally {
-      fs.unlinkSync(tempFile);
-    }
+  it("preserves provider defaults alongside github config", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        github: { maxRepoSizeMB: 200 },
+      }),
+    );
+    const config = loadConfig();
+    // Provider defaults still present
+    expect(config.providers.duckduckgo.enabled).toBe(true);
+    // GitHub merged
+    expect(config.github.maxRepoSizeMB).toBe(200);
+    expect(config.github.enabled).toBe(true);
   });
 });
 ```
@@ -2024,13 +2037,11 @@ describe("GitHub config", () => {
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `npx vitest run tests/config.test.ts`
-Expected: FAIL -- `config.github` is undefined
+Expected: FAIL -- `config.github` is undefined (property doesn't exist on `PiToolsConfig` yet)
 
 - [ ] **Step 3: Update `PiToolsConfig` and `loadConfig`**
 
-In `src/config.ts`, add the `GitHubConfig` interface and update `PiToolsConfig`:
-
-Add after the `ProviderConfigEntry` interface:
+In `src/config.ts`, add the `GitHubConfig` interface after `ProviderConfigEntry`:
 
 ```ts
 export interface GitHubConfig {
@@ -2040,7 +2051,7 @@ export interface GitHubConfig {
 }
 ```
 
-Update `PiToolsConfig`:
+Update `PiToolsConfig` to include the new field:
 
 ```ts
 export interface PiToolsConfig {
@@ -2050,30 +2061,17 @@ export interface PiToolsConfig {
 }
 ```
 
-Add default GitHub config to `DEFAULT_CONFIG`:
+Add `github` to `DEFAULT_CONFIG` (keep the existing `providers` entries exactly as-is):
 
 ```ts
-const DEFAULT_CONFIG: PiToolsConfig = {
-  defaultProvider: "auto",
-  providers: {
-    brave: { enabled: true, monthlyQuota: 2000, apiKey: "BRAVE_API_KEY" },
-    exa: { enabled: true, monthlyQuota: 1000, apiKey: "EXA_API_KEY" },
-    tavily: { enabled: false, apiKey: "TAVILY_API_KEY" },
-    jina: { enabled: true },
-    duckduckgo: { enabled: true },
-    serper: { enabled: false, apiKey: "SERPER_API_KEY" },
-    perplexity: { enabled: true, apiKey: "PERPLEXITY_API_KEY" },
-    firecrawl: { enabled: true, apiKey: "FIRECRAWL_API_KEY" },
-  },
   github: {
     enabled: true,
     maxRepoSizeMB: 350,
     cloneTimeoutSeconds: 30,
   },
-};
 ```
 
-Update `loadConfig` return to merge the github section:
+Update the `loadConfig` return object to merge `github`:
 
 ```ts
 export function loadConfig(configPath?: string): PiToolsConfig {
@@ -2098,15 +2096,41 @@ export function loadConfig(configPath?: string): PiToolsConfig {
 }
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 4: Update `src/extract/github.ts` to import `GitHubConfig` from config**
+
+Remove the local `GitHubConfig` interface definition from `src/extract/github.ts` and replace with:
+
+```ts
+import type { GitHubConfig } from "../config.ts";
+```
+
+Ensure all usages of `GitHubConfig` in `github.ts` (function parameters, default config object) still type-check. The `DEFAULT_GITHUB_CONFIG` constant in `github.ts` should use the imported type:
+
+```ts
+const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
+  enabled: true,
+  maxRepoSizeMB: 350,
+  cloneTimeoutSeconds: 30,
+};
+```
+
+- [ ] **Step 5: Run tests to verify they pass**
 
 Run: `npx vitest run tests/config.test.ts`
-Expected: All tests PASS
+Expected: All tests PASS (existing + new)
 
-- [ ] **Step 5: Commit**
+Also: `npx vitest run tests/extract/github.test.ts`
+Expected: All tests PASS (type import doesn't change behavior)
+
+- [ ] **Step 6: Run type checking**
+
+Run: `npx tsc --noEmit`
+Expected: No errors
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/config.ts tests/config.test.ts
+git add src/config.ts tests/config.test.ts src/extract/github.ts
 git commit -m "feat(config): add github section with enabled, maxRepoSizeMB, cloneTimeoutSeconds"
 ```
 
@@ -2118,13 +2142,21 @@ git commit -m "feat(config): add github section with enabled, maxRepoSizeMB, clo
 - Modify: `src/extract/pipeline.ts`
 - Modify: `tests/extract/pipeline.test.ts`
 
+**Context:** The current `extractContent` signature is:
+```ts
+export async function extractContent(
+  url: string,
+  signal?: AbortSignal,
+  options?: ExtractOptions,
+): Promise<ExtractedContent>
+```
+This signature MUST be preserved. The GitHub interception is inserted as a new early-exit before the HTTP `fetch()` call. The rest of the function body (raw mode, PDF, Readability, RSC, Jina, raw-text fallback) remains untouched.
+
 - [ ] **Step 1: Write the failing tests**
 
 Add to `tests/extract/pipeline.test.ts`:
 
 ```ts
-import { extractContent } from "../../src/extract/pipeline.ts";
-
 describe("GitHub URL interception in extractContent", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
 
@@ -2262,7 +2294,7 @@ describe("GitHub URL interception in extractContent", () => {
     expect(result.extractionChain).toContain("readability");
   });
 
-  it("intercepts non-GitHub URLs normally (no interception)", async () => {
+  it("does not interfere with non-GitHub URLs", async () => {
     fetchStub.addResponse("example.com/page", {
       body: `<html><head><title>Normal Page</title></head><body>
         <article><h1>Normal Content</h1>
@@ -2276,6 +2308,21 @@ describe("GitHub URL interception in extractContent", () => {
     expect(result.extractionChain).toContain("readability");
     expect(result.extractionChain).not.toContain("github:raw");
   });
+
+  it("preserves raw mode for non-GitHub URLs", async () => {
+    fetchStub.addResponse("example.com/api/data", {
+      body: '{"raw": true}',
+      headers: { "content-type": "application/json" },
+    });
+
+    const result = await extractContent(
+      "https://example.com/api/data",
+      undefined,
+      { raw: true },
+    );
+    expect(result.text).toContain('"raw": true');
+    expect(result.extractionChain).toContain("raw");
+  });
 });
 ```
 
@@ -2286,67 +2333,28 @@ Expected: FAIL -- `extractContent` with GitHub blob URLs still goes through norm
 
 - [ ] **Step 3: Update `extractContent` to check GitHub URLs first**
 
-In `src/extract/pipeline.ts`, add the GitHub import and intercept check at the top of `extractContent`, before the HTTP fetch:
+In `src/extract/pipeline.ts`:
 
-Add import at the top of the file:
+1. Add imports at the top of the file:
 
 ```ts
 import { parseGitHubUrl, extractGitHub } from "./github.ts";
-```
-
-Update `extractContent` to add GitHub interception before the `fetch` call:
-
-```ts
-export async function extractContent(
-  url: string,
-  signal?: AbortSignal,
-): Promise<ExtractedContent> {
-  validateUrl(url);
-
-  // GitHub interception: try to extract from GitHub before HTTP fetch
-  const ghParsed = parseGitHubUrl(url);
-  if (ghParsed && ghParsed.type !== "unknown") {
-    const ghResult = await extractGitHub(ghParsed, signal);
-    if (ghResult) return ghResult;
-    // If interceptor returns null, fall through to normal pipeline
-  }
-
-  const chain: string[] = [];
-
-  const response = await fetch(url, {
-    headers: BROWSER_HEADERS,
-    signal,
-    redirect: "follow",
-  });
-
-  chain.push(`http:${response.status}`);
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-  }
-
-  // ... rest of pipeline unchanged
-```
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `npx vitest run tests/extract/pipeline.test.ts`
-Expected: All tests PASS (both new GitHub tests and existing tests)
-
-- [ ] **Step 5: Wire config into the integration point**
-
-Update `src/extract/pipeline.ts` to accept optional config and pass it through:
-
-```ts
 import { loadConfig } from "../config.ts";
+```
 
+2. Insert the GitHub interception block inside `extractContent`, immediately after `validateUrl(url)` and before the existing `const chain: string[] = [];` line. The function signature stays exactly as-is:
+
+```ts
 export async function extractContent(
   url: string,
   signal?: AbortSignal,
+  options?: ExtractOptions,
 ): Promise<ExtractedContent> {
   validateUrl(url);
 
-  // GitHub interception
+  // GitHub interception: try structured extraction before HTML scraping.
+  // Only fires for content URLs (blob, tree, root, raw).
+  // Returns null for non-content URLs (issues, PRs, etc.) -> falls through.
   const ghParsed = parseGitHubUrl(url);
   if (ghParsed && ghParsed.type !== "unknown") {
     const config = loadConfig();
@@ -2356,17 +2364,23 @@ export async function extractContent(
     }
   }
 
-  // ... rest unchanged
+  const chain: string[] = [];
+  // ... rest of the function body is UNCHANGED
 ```
 
-Note: `loadConfig()` is cheap (reads a JSON file) and is already called once at startup in `src/index.ts`. For the pipeline integration, calling it per-request is acceptable since GitHub URL interception is infrequent. If profiling shows it's a concern, the config can be cached or injected via parameter later.
+**Important:** Do NOT modify anything below `const chain: string[] = [];`. The existing logic (raw mode, PDF, Readability, RSC, Jina, raw-text fallback) and the `options?: ExtractOptions` parameter continue to work exactly as before.
 
-- [ ] **Step 6: Run full pipeline tests**
+- [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npx vitest run tests/extract/pipeline.test.ts`
-Expected: All tests PASS
+Expected: All tests PASS — both new GitHub interception tests AND existing pipeline tests (raw mode, PDF, Readability, etc.)
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 5: Run the full test suite for regression**
+
+Run: `npx vitest run`
+Expected: All tests PASS across all test files
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add src/extract/pipeline.ts tests/extract/pipeline.test.ts

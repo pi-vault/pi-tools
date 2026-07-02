@@ -1,4 +1,6 @@
+import { loadConfig } from "../config.ts";
 import { validateUrl } from "../utils/ssrf.ts";
+import { extractGitHub, parseGitHubUrl } from "./github.ts";
 import { extractHtml } from "./html.ts";
 import { extractPdf } from "./pdf.ts";
 import { extractRsc } from "./rsc.ts";
@@ -51,6 +53,18 @@ export async function extractContent(
   options?: ExtractOptions,
 ): Promise<ExtractedContent> {
   validateUrl(url);
+
+  // GitHub interception: try structured extraction before HTML scraping.
+  // Only fires for content URLs (blob, tree, root, raw).
+  // Returns null for non-content URLs (issues, PRs, etc.) -> falls through.
+  const ghParsed = parseGitHubUrl(url);
+  if (ghParsed && ghParsed.type !== "unknown") {
+    const config = loadConfig();
+    if (config.github.enabled) {
+      const ghResult = await extractGitHub(ghParsed, signal, config.github);
+      if (ghResult) return ghResult;
+    }
+  }
 
   const chain: string[] = [];
 

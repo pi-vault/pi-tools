@@ -10,9 +10,16 @@ export interface ProviderConfigEntry {
   instanceUrl?: string;
 }
 
+export interface GitHubConfig {
+  enabled: boolean;
+  maxRepoSizeMB: number;
+  cloneTimeoutSeconds: number;
+}
+
 export interface PiToolsConfig {
   defaultProvider: string;
   providers: Record<string, ProviderConfigEntry>;
+  github: GitHubConfig;
 }
 
 const ENV_VAR_PATTERN = /^[A-Z][A-Z0-9_]+$/;
@@ -36,6 +43,11 @@ const DEFAULT_CONFIG: PiToolsConfig = {
     searxng: { enabled: false, instanceUrl: "http://localhost:8080" },
     websearchapi: { enabled: false, apiKey: "WEBSEARCHAPI_API_KEY" },
   },
+  github: {
+    enabled: true,
+    maxRepoSizeMB: 350,
+    cloneTimeoutSeconds: 30,
+  },
 };
 
 export function getConfigPath(): string {
@@ -52,6 +64,10 @@ export function loadConfig(configPath?: string): PiToolsConfig {
       providers: {
         ...DEFAULT_CONFIG.providers,
         ...parsed.providers,
+      },
+      github: {
+        ...DEFAULT_CONFIG.github,
+        ...parsed.github,
       },
     };
   } catch {
