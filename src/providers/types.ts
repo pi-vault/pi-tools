@@ -17,10 +17,22 @@ export interface FetchResult {
   contentType?: string;
 }
 
+export interface SearchFilters {
+  includeDomains?: string[];
+  excludeDomains?: string[];
+  startDate?: string; // ISO 8601 date
+  endDate?: string; // ISO 8601 date
+}
+
 export interface SearchProvider {
   readonly name: string;
   readonly label: string;
-  search(query: string, maxResults: number, signal?: AbortSignal): Promise<SearchResult[]>;
+  search(
+    query: string,
+    maxResults: number,
+    signal?: AbortSignal,
+    filters?: SearchFilters,
+  ): Promise<SearchResult[]>;
 }
 
 export interface FetchProvider {

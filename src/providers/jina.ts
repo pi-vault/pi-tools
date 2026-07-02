@@ -1,5 +1,5 @@
 // src/providers/jina.ts
-import type { FetchProvider, FetchResult, SearchProvider, SearchResult } from "./types.ts";
+import type { FetchProvider, FetchResult, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 interface JinaSearchResponse {
   data: Array<{
@@ -32,6 +32,7 @@ export class JinaProvider implements SearchProvider, FetchProvider {
     query: string,
     maxResults: number,
     signal?: AbortSignal,
+    _filters?: SearchFilters,
   ): Promise<SearchResult[]> {
     const url = `https://s.jina.ai/?q=${encodeURIComponent(query)}`;
     const response = await fetch(url, {

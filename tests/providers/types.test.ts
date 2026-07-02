@@ -3,6 +3,8 @@ import type {
   CodeSearchResult,
   FetchResult,
   ProviderMeta,
+  SearchFilters,
+  SearchProvider,
   SearchResult,
 } from "../../src/providers/types.ts";
 
@@ -61,5 +63,62 @@ describe("provider types", () => {
     expect(meta.requiresKey).toBe(true);
     expect(meta.capabilities.search).toBe(true);
     expect(meta.capabilities.fetch).toBeUndefined();
+  });
+});
+
+describe("SearchFilters type", () => {
+  it("allows a provider to accept filters as an optional parameter", () => {
+    const provider: SearchProvider = {
+      name: "test",
+      label: "Test",
+      async search(
+        query: string,
+        maxResults: number,
+        signal?: AbortSignal,
+        filters?: SearchFilters,
+      ): Promise<SearchResult[]> {
+        return [];
+      },
+    };
+
+    expect(provider.name).toBe("test");
+  });
+
+  it("allows a provider to omit the filters parameter (backward compat)", () => {
+    const provider: SearchProvider = {
+      name: "legacy",
+      label: "Legacy",
+      async search(
+        query: string,
+        maxResults: number,
+        signal?: AbortSignal,
+      ): Promise<SearchResult[]> {
+        return [];
+      },
+    };
+
+    expect(provider.name).toBe("legacy");
+  });
+
+  it("SearchFilters accepts all optional fields", () => {
+    const filters: SearchFilters = {
+      includeDomains: ["example.com", "docs.rs"],
+      excludeDomains: ["spam.com"],
+      startDate: "2025-01-01",
+      endDate: "2025-12-31",
+    };
+
+    expect(filters.includeDomains).toHaveLength(2);
+    expect(filters.excludeDomains).toHaveLength(1);
+    expect(filters.startDate).toBe("2025-01-01");
+    expect(filters.endDate).toBe("2025-12-31");
+  });
+
+  it("SearchFilters accepts empty object", () => {
+    const filters: SearchFilters = {};
+    expect(filters.includeDomains).toBeUndefined();
+    expect(filters.excludeDomains).toBeUndefined();
+    expect(filters.startDate).toBeUndefined();
+    expect(filters.endDate).toBeUndefined();
   });
 });

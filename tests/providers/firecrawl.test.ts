@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FirecrawlProvider } from "../../src/providers/firecrawl.ts";
 import { stubFetch } from "../helpers.ts";
+import type { SearchFilters } from "../../src/providers/types.ts";
 
 describe("FirecrawlProvider", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
@@ -40,5 +41,41 @@ describe("FirecrawlProvider", () => {
     await new FirecrawlProvider("my-key").search("test", 5);
     const fetchCall = (globalThis.fetch as any).mock.calls[0];
     expect(fetchCall[1].headers.Authorization).toBe("Bearer my-key");
+  });
+
+  describe("search filters", () => {
+    it("accepts filters parameter without error", async () => {
+      fetchStub.addResponse("api.firecrawl.dev/v1/search", {
+        body: {
+          data: [{ title: "Result", url: "https://example.com", markdown: "snippet" }],
+        },
+      });
+
+      const provider = new FirecrawlProvider("key");
+      const filters: SearchFilters = {
+        includeDomains: ["example.com"],
+        excludeDomains: ["spam.com"],
+        startDate: "2025-01-01",
+        endDate: "2025-12-31",
+      };
+      const results = await provider.search("test", 5, undefined, filters);
+      expect(results).toHaveLength(1);
+      expect(results[0].title).toBe("Result");
+    });
+
+    it("does not modify the request body when filters are provided", async () => {
+      fetchStub.addResponse("api.firecrawl.dev/v1/search", {
+        body: { data: [] },
+      });
+
+      const provider = new FirecrawlProvider("key");
+      const filters: SearchFilters = { includeDomains: ["example.com"] };
+      await provider.search("test query", 5, undefined, filters);
+
+      const fetchCall = (globalThis.fetch as any).mock.calls[0];
+      const body = JSON.parse(fetchCall[1].body);
+      expect(body.query).toBe("test query");
+      expect(body.includeDomains).toBeUndefined();
+    });
   });
 });

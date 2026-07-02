@@ -1,5 +1,5 @@
 // src/providers/tavily.ts
-import type { FetchProvider, FetchResult, SearchProvider, SearchResult } from "./types.ts";
+import type { FetchProvider, FetchResult, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 interface TavilySearchResponse {
   results: Array<{ title: string; url: string; content: string }>;
@@ -18,11 +18,30 @@ export class TavilyProvider implements SearchProvider, FetchProvider {
     this.apiKey = apiKey;
   }
 
-  async search(query: string, maxResults: number, signal?: AbortSignal): Promise<SearchResult[]> {
+  async search(
+    query: string,
+    maxResults: number,
+    signal?: AbortSignal,
+    filters?: SearchFilters,
+  ): Promise<SearchResult[]> {
+    const body: Record<string, unknown> = {
+      api_key: this.apiKey,
+      query,
+      max_results: maxResults,
+    };
+
+    if (filters?.includeDomains?.length) {
+      body.include_domains = filters.includeDomains;
+    }
+    if (filters?.excludeDomains?.length) {
+      body.exclude_domains = filters.excludeDomains;
+    }
+    // Note: Tavily does not support date filtering — startDate/endDate are silently ignored.
+
     const response = await fetch("https://api.tavily.com/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ api_key: this.apiKey, query, max_results: maxResults }),
+      body: JSON.stringify(body),
       signal,
     });
     if (!response.ok) throw new Error(`Tavily API error: ${response.status} ${response.statusText}`);

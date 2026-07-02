@@ -1,5 +1,6 @@
 // src/providers/brave.ts
-import type { SearchProvider, SearchResult } from "./types.ts";
+import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import { applyDomainFilters } from "../utils/filters.ts";
 
 interface BraveSearchResponse {
   web?: {
@@ -24,8 +25,21 @@ export class BraveProvider implements SearchProvider {
     query: string,
     maxResults: number,
     signal?: AbortSignal,
+    filters?: SearchFilters,
   ): Promise<SearchResult[]> {
-    const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(query)}&count=${maxResults}`;
+    const effectiveQuery = applyDomainFilters(query, filters);
+
+    const params = new URLSearchParams({
+      q: effectiveQuery,
+      count: String(maxResults),
+    });
+
+    const freshness = buildFreshness(filters);
+    if (freshness) {
+      params.set("freshness", freshness);
+    }
+
+    const url = `https://api.search.brave.com/res/v1/web/search?${params.toString()}`;
     const response = await fetch(url, {
       headers: {
         Accept: "application/json",
@@ -45,4 +59,10 @@ export class BraveProvider implements SearchProvider {
       snippet: r.description,
     }));
   }
+}
+
+function buildFreshness(filters?: SearchFilters): string | null {
+  if (!filters) return null;
+  if (!filters.startDate && !filters.endDate) return null;
+  return `${filters.startDate ?? ""}to${filters.endDate ?? ""}`;
 }
