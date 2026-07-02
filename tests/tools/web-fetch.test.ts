@@ -480,7 +480,7 @@ describe("web_fetch multi-URL", () => {
     expect(failResult!.error).toBeDefined();
   });
 
-  it("uses manifest mode (512 char preview) for 6+ URLs", async () => {
+  it("uses manifest mode (512-char preview) for 6+ URLs", async () => {
     const urls: string[] = [];
     for (let i = 0; i < 6; i++) {
       const domain = `site${i}.com`;
@@ -509,5 +509,120 @@ describe("web_fetch multi-URL", () => {
         expect((ur as any).contentId).toBeDefined();
       }
     }
+  });
+});
+
+describe("web_fetch fresh parameter", () => {
+  let fetchStub: ReturnType<typeof stubFetch>;
+
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+
+  afterEach(() => {
+    fetchStub.restore();
+  });
+
+  it("bypasses cache when fresh is true", async () => {
+    const html1 = `<!DOCTYPE html><html><head><title>V1</title></head><body>
+<article><h1>Version 1</h1><p>${"First version content. ".repeat(30)}</p></article></body></html>`;
+    const html2 = `<!DOCTYPE html><html><head><title>V2</title></head><body>
+<article><h1>Version 2</h1><p>${"Second version content. ".repeat(30)}</p></article></body></html>`;
+
+    fetchStub.addResponse("example.com/changing", {
+      body: html1,
+      headers: { "content-type": "text/html" },
+    });
+
+    const store = new ContentStore(() => {});
+    const cache = new ContentCache(100, 300_000);
+    const tool = createWebFetchTool(store, undefined, cache);
+    const ctx = makeCtx();
+
+    // First fetch — populates cache with V1
+    const result1 = await tool.execute(
+      "call-f1",
+      { url: "https://example.com/changing" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect((result1.content[0] as { type: "text"; text: string }).text).toContain("Version 1");
+
+    // Update the response to V2
+    fetchStub.restore();
+    const freshStub = stubFetch();
+    freshStub.addResponse("example.com/changing", {
+      body: html2,
+      headers: { "content-type": "text/html" },
+    });
+
+    // Without fresh: still gets V1 from cache
+    const result2 = await tool.execute(
+      "call-f2",
+      { url: "https://example.com/changing" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect((result2.content[0] as { type: "text"; text: string }).text).toContain("Version 1");
+
+    // With fresh: bypasses cache, gets V2
+    const result3 = await tool.execute(
+      "call-f3",
+      { url: "https://example.com/changing", fresh: true },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect((result3.content[0] as { type: "text"; text: string }).text).toContain("Version 2");
+
+    // Cache now has V2 — subsequent non-fresh call returns V2
+    const result4 = await tool.execute(
+      "call-f4",
+      { url: "https://example.com/changing" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect((result4.content[0] as { type: "text"; text: string }).text).toContain("Version 2");
+
+    freshStub.restore();
+  });
+
+  it("fresh still writes back to cache", async () => {
+    fetchStub.addResponse("example.com/writeback", {
+      body: GOOD_HTML,
+      headers: { "content-type": "text/html" },
+    });
+
+    const store = new ContentStore(() => {});
+    const cache = new ContentCache(100, 300_000);
+    const tool = createWebFetchTool(store, undefined, cache);
+    const ctx = makeCtx();
+
+    // Fresh fetch — should write to cache
+    await tool.execute(
+      "call-f5",
+      { url: "https://example.com/writeback", fresh: true },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    // Second call without fresh — should hit cache
+    fetchStub.restore();
+    const emptyStub = stubFetch();
+
+    const result = await tool.execute(
+      "call-f6",
+      { url: "https://example.com/writeback" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect((result.content[0] as { type: "text"; text: string }).text).toContain("Article Title");
+
+    emptyStub.restore();
   });
 });
