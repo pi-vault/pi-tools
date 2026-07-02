@@ -261,7 +261,7 @@ git commit -m "feat: add Exa MCP provider (free, no-auth JSON-RPC search)"
 
 ### Task 2: WebSearchAPI provider
 
-Standard REST GET pattern with API key in header. Single-capability provider (search only).
+POST-based search API (api.websearchapi.ai). Auth via Bearer token. Response uses `organic[]` array. Single-capability provider (search only).
 
 **Files:**
 - Create: `src/providers/websearchapi.ts`
@@ -294,21 +294,26 @@ describe("WebSearchApiProvider", () => {
     expect(provider.label).toBe("WebSearchAPI");
   });
 
-  it("returns normalized search results", async () => {
-    fetchStub.addResponse("api.websearchapi.com", {
+  it("returns normalized search results from organic array", async () => {
+    fetchStub.addResponse("api.websearchapi.ai", {
       body: {
-        results: [
+        organic: [
           {
             title: "WS Result",
             url: "https://example.com/page",
             description: "A WebSearchAPI snippet",
+            position: 1,
+            score: 0.95,
           },
           {
             title: "Second Result",
             url: "https://example.com/other",
             description: "Another snippet",
+            position: 2,
+            score: 0.88,
           },
         ],
+        responseTime: 1.2,
       },
     });
 
@@ -328,9 +333,9 @@ describe("WebSearchApiProvider", () => {
     });
   });
 
-  it("sends API key in header and correct query params", async () => {
-    fetchStub.addResponse("api.websearchapi.com", {
-      body: { results: [] },
+  it("sends correct POST request with Bearer auth", async () => {
+    fetchStub.addResponse("api.websearchapi.ai", {
+      body: { organic: [], responseTime: 0.5 },
     });
 
     const provider = new WebSearchApiProvider("my-ws-key");
@@ -338,10 +343,15 @@ describe("WebSearchApiProvider", () => {
 
     const fetchCall = (globalThis.fetch as any).mock.calls[0];
     const url = fetchCall[0] as string;
-    expect(url).toContain("api.websearchapi.com/v2/search");
-    expect(url).toContain("q=my+query");
-    expect(url).toContain("num=7");
-    expect(fetchCall[1].headers["X-Api-Key"]).toBe("my-ws-key");
+    expect(url).toBe("https://api.websearchapi.ai/ai-search");
+    expect(fetchCall[1].method).toBe("POST");
+
+    const body = JSON.parse(fetchCall[1].body);
+    expect(body.query).toBe("my query");
+    expect(body.maxResults).toBe(7);
+
+    expect(fetchCall[1].headers["Authorization"]).toBe("Bearer my-ws-key");
+    expect(fetchCall[1].headers["Content-Type"]).toBe("application/json");
   });
 
   it("limits results to maxResults", async () => {
@@ -349,9 +359,11 @@ describe("WebSearchApiProvider", () => {
       title: `Result ${i}`,
       url: `https://example.com/${i}`,
       description: `Snippet ${i}`,
+      position: i + 1,
+      score: 0.9 - i * 0.05,
     }));
-    fetchStub.addResponse("api.websearchapi.com", {
-      body: { results: manyResults },
+    fetchStub.addResponse("api.websearchapi.ai", {
+      body: { organic: manyResults, responseTime: 1.0 },
     });
 
     const provider = new WebSearchApiProvider("key");
@@ -360,7 +372,7 @@ describe("WebSearchApiProvider", () => {
   });
 
   it("throws on error response", async () => {
-    fetchStub.addResponse("api.websearchapi.com", {
+    fetchStub.addResponse("api.websearchapi.ai", {
       status: 401,
       body: "Unauthorized",
     });
@@ -370,9 +382,19 @@ describe("WebSearchApiProvider", () => {
     );
   });
 
-  it("handles empty results array", async () => {
-    fetchStub.addResponse("api.websearchapi.com", {
-      body: { results: [] },
+  it("handles empty organic array", async () => {
+    fetchStub.addResponse("api.websearchapi.ai", {
+      body: { organic: [], responseTime: 0.3 },
+    });
+
+    const provider = new WebSearchApiProvider("key");
+    const results = await provider.search("nothing", 5);
+    expect(results).toEqual([]);
+  });
+
+  it("handles missing organic field gracefully", async () => {
+    fetchStub.addResponse("api.websearchapi.ai", {
+      body: { responseTime: 0.3 },
     });
 
     const provider = new WebSearchApiProvider("key");
@@ -395,14 +417,17 @@ Create `src/providers/websearchapi.ts`:
 // src/providers/websearchapi.ts
 import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
-const WEBSEARCHAPI_BASE = "https://api.websearchapi.com/v2/search";
+const WEBSEARCHAPI_ENDPOINT = "https://api.websearchapi.ai/ai-search";
 
 interface WebSearchApiResponse {
-  results: Array<{
+  organic?: Array<{
     title: string;
     url: string;
     description: string;
+    position?: number;
+    score?: number;
   }>;
+  responseTime?: number;
 }
 
 export class WebSearchApiProvider implements SearchProvider {
@@ -420,12 +445,13 @@ export class WebSearchApiProvider implements SearchProvider {
     signal?: AbortSignal,
     _filters?: SearchFilters,
   ): Promise<SearchResult[]> {
-    const url = `${WEBSEARCHAPI_BASE}?q=${encodeURIComponent(query)}&num=${maxResults}`;
-    const response = await fetch(url, {
+    const response = await fetch(WEBSEARCHAPI_ENDPOINT, {
+      method: "POST",
       headers: {
-        Accept: "application/json",
-        "X-Api-Key": this.apiKey,
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.apiKey}`,
       },
+      body: JSON.stringify({ query, maxResults }),
       signal,
     });
 
@@ -436,7 +462,7 @@ export class WebSearchApiProvider implements SearchProvider {
     }
 
     const data = (await response.json()) as WebSearchApiResponse;
-    return (data.results ?? []).slice(0, maxResults).map((r) => ({
+    return (data.organic ?? []).slice(0, maxResults).map((r) => ({
       title: r.title,
       url: r.url,
       snippet: r.description,
@@ -454,14 +480,14 @@ Expected: All tests PASS
 
 ```bash
 git add src/providers/websearchapi.ts tests/providers/websearchapi.test.ts
-git commit -m "feat: add WebSearchAPI provider (Google-powered search)"
+git commit -m "feat: add WebSearchAPI provider (Google-powered POST search)"
 ```
 
 ---
 
 ### Task 3: OpenAI native provider
 
-Uses the OpenAI Responses API with the built-in `web_search` tool. Requires parsing search results out of the structured response output.
+Uses the OpenAI Responses API with the built-in `web_search` tool. Search results are extracted from `url_citation` annotations in the message output (there is no separate `web_search_results` type). Uses `gpt-4.1-nano` for minimal cost.
 
 **Files:**
 - Create: `src/providers/openai-native.ts`
@@ -494,7 +520,7 @@ describe("OpenAINativeProvider", () => {
     expect(provider.label).toBe("OpenAI Web Search");
   });
 
-  it("returns normalized search results from web_search_call output", async () => {
+  it("returns normalized search results from url_citation annotations", async () => {
     fetchStub.addResponse("api.openai.com/v1/responses", {
       body: {
         id: "resp_123",
@@ -503,26 +529,35 @@ describe("OpenAINativeProvider", () => {
             type: "web_search_call",
             id: "ws_1",
             status: "completed",
-          },
-          {
-            type: "web_search_results",
-            results: [
-              {
-                title: "OpenAI Result",
-                url: "https://openai.com/page",
-                snippet: "A result from OpenAI search",
-              },
-              {
-                title: "Another Result",
-                url: "https://example.com",
-                snippet: "Another snippet",
-              },
-            ],
+            action: { type: "search", query: "test query" },
           },
           {
             type: "message",
+            id: "msg_1",
+            status: "completed",
             role: "assistant",
-            content: [{ type: "output_text", text: "Here are your results." }],
+            content: [
+              {
+                type: "output_text",
+                text: "Here are your results about the topic.",
+                annotations: [
+                  {
+                    type: "url_citation",
+                    url: "https://openai.com/page",
+                    title: "OpenAI Result",
+                    start_index: 0,
+                    end_index: 20,
+                  },
+                  {
+                    type: "url_citation",
+                    url: "https://example.com/other",
+                    title: "Another Result",
+                    start_index: 21,
+                    end_index: 38,
+                  },
+                ],
+              },
+            ],
           },
         ],
       },
@@ -535,13 +570,70 @@ describe("OpenAINativeProvider", () => {
     expect(results[0]).toEqual({
       title: "OpenAI Result",
       url: "https://openai.com/page",
-      snippet: "A result from OpenAI search",
+      snippet: "",
     });
     expect(results[1]).toEqual({
       title: "Another Result",
-      url: "https://example.com",
-      snippet: "Another snippet",
+      url: "https://example.com/other",
+      snippet: "",
     });
+  });
+
+  it("deduplicates citations by URL", async () => {
+    fetchStub.addResponse("api.openai.com/v1/responses", {
+      body: {
+        id: "resp_123",
+        output: [
+          {
+            type: "web_search_call",
+            id: "ws_1",
+            status: "completed",
+            action: { type: "search", query: "test" },
+          },
+          {
+            type: "message",
+            id: "msg_1",
+            status: "completed",
+            role: "assistant",
+            content: [
+              {
+                type: "output_text",
+                text: "Multiple citations from same source.",
+                annotations: [
+                  {
+                    type: "url_citation",
+                    url: "https://example.com/page",
+                    title: "Same Page",
+                    start_index: 0,
+                    end_index: 10,
+                  },
+                  {
+                    type: "url_citation",
+                    url: "https://example.com/page",
+                    title: "Same Page",
+                    start_index: 15,
+                    end_index: 30,
+                  },
+                  {
+                    type: "url_citation",
+                    url: "https://other.com",
+                    title: "Other Page",
+                    start_index: 31,
+                    end_index: 35,
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const provider = new OpenAINativeProvider("key");
+    const results = await provider.search("test", 10);
+    expect(results).toHaveLength(2);
+    expect(results[0].url).toBe("https://example.com/page");
+    expect(results[1].url).toBe("https://other.com");
   });
 
   it("sends correct request body with web_search tool", async () => {
@@ -561,23 +653,37 @@ describe("OpenAINativeProvider", () => {
     expect(body.model).toBe("gpt-4.1-nano");
     expect(body.tools).toEqual([{ type: "web_search" }]);
     expect(body.input).toContain("my query");
+    expect(body.tool_choice).toBe("required");
 
     expect(fetchCall[1].headers["Authorization"]).toBe("Bearer my-openai-key");
     expect(fetchCall[1].headers["Content-Type"]).toBe("application/json");
   });
 
   it("limits results to maxResults", async () => {
-    const manyResults = Array.from({ length: 10 }, (_, i) => ({
+    const annotations = Array.from({ length: 10 }, (_, i) => ({
+      type: "url_citation",
+      url: `https://example.com/${i}`,
       title: `Result ${i}`,
-      url: `https://openai.com/${i}`,
-      snippet: `Snippet ${i}`,
+      start_index: i * 10,
+      end_index: i * 10 + 9,
     }));
     fetchStub.addResponse("api.openai.com/v1/responses", {
       body: {
         id: "resp_123",
         output: [
-          { type: "web_search_call", id: "ws_1", status: "completed" },
-          { type: "web_search_results", results: manyResults },
+          {
+            type: "web_search_call",
+            id: "ws_1",
+            status: "completed",
+            action: { type: "search", query: "test" },
+          },
+          {
+            type: "message",
+            id: "msg_1",
+            status: "completed",
+            role: "assistant",
+            content: [{ type: "output_text", text: "Results.", annotations }],
+          },
         ],
       },
     });
@@ -598,22 +704,36 @@ describe("OpenAINativeProvider", () => {
     );
   });
 
-  it("returns empty results when no web_search_results in output", async () => {
+  it("returns empty results when no message in output", async () => {
+    fetchStub.addResponse("api.openai.com/v1/responses", {
+      body: { id: "resp_123", output: [] },
+    });
+
+    const provider = new OpenAINativeProvider("key");
+    const results = await provider.search("obscure query", 5);
+    expect(results).toEqual([]);
+  });
+
+  it("returns empty results when message has no annotations", async () => {
     fetchStub.addResponse("api.openai.com/v1/responses", {
       body: {
         id: "resp_123",
         output: [
           {
             type: "message",
+            id: "msg_1",
+            status: "completed",
             role: "assistant",
-            content: [{ type: "output_text", text: "No results found." }],
+            content: [
+              { type: "output_text", text: "I could not find any results." },
+            ],
           },
         ],
       },
     });
 
     const provider = new OpenAINativeProvider("key");
-    const results = await provider.search("obscure query", 5);
+    const results = await provider.search("nothing found", 5);
     expect(results).toEqual([]);
   });
 });
@@ -635,20 +755,38 @@ import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 const OPENAI_RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses";
 const DEFAULT_MODEL = "gpt-4.1-nano";
 
-interface OpenAIResponsesResult {
-  id: string;
-  output: Array<OpenAIOutputItem>;
+interface UrlCitation {
+  type: "url_citation";
+  url: string;
+  title: string;
+  start_index: number;
+  end_index: number;
 }
 
-type OpenAIOutputItem =
-  | { type: "web_search_call"; id: string; status: string }
-  | { type: "web_search_results"; results: OpenAISearchResult[] }
-  | { type: "message"; role: string; content: Array<{ type: string; text: string }> };
+interface OutputText {
+  type: "output_text";
+  text: string;
+  annotations?: UrlCitation[];
+}
 
-interface OpenAISearchResult {
-  title: string;
-  url: string;
-  snippet: string;
+interface MessageOutput {
+  type: "message";
+  role: string;
+  content: OutputText[];
+}
+
+interface WebSearchCallOutput {
+  type: "web_search_call";
+  id: string;
+  status: string;
+  action?: { type: string; query?: string };
+}
+
+type OutputItem = MessageOutput | WebSearchCallOutput | { type: string };
+
+interface OpenAIResponsesResult {
+  id: string;
+  output: OutputItem[];
 }
 
 export class OpenAINativeProvider implements SearchProvider {
@@ -675,6 +813,7 @@ export class OpenAINativeProvider implements SearchProvider {
       body: JSON.stringify({
         model: DEFAULT_MODEL,
         tools: [{ type: "web_search" }],
+        tool_choice: "required",
         input: `Search the web for: ${query}`,
       }),
       signal,
@@ -688,18 +827,33 @@ export class OpenAINativeProvider implements SearchProvider {
 
     const data = (await response.json()) as OpenAIResponsesResult;
 
-    const searchOutput = data.output.find(
-      (item): item is Extract<OpenAIOutputItem, { type: "web_search_results" }> =>
-        item.type === "web_search_results",
+    // Find the message output containing url_citation annotations
+    const messageOutput = data.output.find(
+      (item): item is MessageOutput => item.type === "message",
     );
+    if (!messageOutput) return [];
 
-    if (!searchOutput) return [];
+    const textContent = messageOutput.content?.find(
+      (c): c is OutputText => c.type === "output_text",
+    );
+    if (!textContent?.annotations?.length) return [];
 
-    return searchOutput.results.slice(0, maxResults).map((r) => ({
-      title: r.title,
-      url: r.url,
-      snippet: r.snippet,
-    }));
+    // Deduplicate by URL, preserving order
+    const seen = new Set<string>();
+    const results: SearchResult[] = [];
+    for (const ann of textContent.annotations) {
+      if (ann.type !== "url_citation") continue;
+      if (seen.has(ann.url)) continue;
+      seen.add(ann.url);
+      results.push({
+        title: ann.title,
+        url: ann.url,
+        snippet: "",
+      });
+      if (results.length >= maxResults) break;
+    }
+
+    return results;
   }
 }
 ```
@@ -713,14 +867,14 @@ Expected: All tests PASS
 
 ```bash
 git add src/providers/openai-native.ts tests/providers/openai-native.test.ts
-git commit -m "feat: add OpenAI native provider (Responses API web search)"
+git commit -m "feat: add OpenAI native provider (Responses API url_citation parsing)"
 ```
 
 ---
 
 ### Task 4: Parallel provider
 
-Implements both `SearchProvider` and `FetchProvider`. POST request for search, GET-style fetch.
+Implements both `SearchProvider` and `FetchProvider`. Uses `https://api.parallel.ai/v1/search` (POST) and `https://api.parallel.ai/v1/extract` (POST). Auth via `x-api-key` header. Search results have `excerpts[]` arrays (joined as snippet). Extract returns `full_content` markdown.
 
 **Files:**
 - Create: `src/providers/parallel.ts`
@@ -754,21 +908,23 @@ describe("ParallelProvider", () => {
   });
 
   describe("search", () => {
-    it("returns normalized search results", async () => {
-      fetchStub.addResponse("search.parallel.ai", {
+    it("returns normalized search results with excerpts joined as snippet", async () => {
+      fetchStub.addResponse("api.parallel.ai/v1/search", {
         body: {
+          search_id: "search_abc123",
           results: [
             {
+              url: "https://example.com/page",
               title: "Parallel Result",
-              url: "https://parallel.ai/page",
-              snippet: "A snippet from Parallel",
+              excerpts: ["First excerpt.", "Second excerpt."],
             },
             {
+              url: "https://example.com/other",
               title: "Second Result",
-              url: "https://parallel.ai/other",
-              snippet: "Another snippet",
+              excerpts: ["Another snippet"],
             },
           ],
+          session_id: "session_abc123",
         },
       });
 
@@ -778,14 +934,19 @@ describe("ParallelProvider", () => {
       expect(results).toHaveLength(2);
       expect(results[0]).toEqual({
         title: "Parallel Result",
-        url: "https://parallel.ai/page",
-        snippet: "A snippet from Parallel",
+        url: "https://example.com/page",
+        snippet: "First excerpt. Second excerpt.",
+      });
+      expect(results[1]).toEqual({
+        title: "Second Result",
+        url: "https://example.com/other",
+        snippet: "Another snippet",
       });
     });
 
-    it("sends correct POST request with auth header", async () => {
-      fetchStub.addResponse("search.parallel.ai", {
-        body: { results: [] },
+    it("sends correct POST request with x-api-key header", async () => {
+      fetchStub.addResponse("api.parallel.ai/v1/search", {
+        body: { search_id: "s_1", results: [], session_id: "sess_1" },
       });
 
       const provider = new ParallelProvider("my-parallel-key");
@@ -793,27 +954,26 @@ describe("ParallelProvider", () => {
 
       const fetchCall = (globalThis.fetch as any).mock.calls[0];
       const url = fetchCall[0] as string;
-      expect(url).toBe("https://search.parallel.ai/search");
+      expect(url).toBe("https://api.parallel.ai/v1/search");
       expect(fetchCall[1].method).toBe("POST");
 
       const body = JSON.parse(fetchCall[1].body);
-      expect(body.query).toBe("my query");
-      expect(body.maxResults).toBe(7);
+      expect(body.search_queries).toEqual(["my query"]);
+      expect(body.objective).toBe("my query");
+      expect(body.mode).toBe("basic");
 
-      expect(fetchCall[1].headers["Authorization"]).toBe(
-        "Bearer my-parallel-key",
-      );
+      expect(fetchCall[1].headers["x-api-key"]).toBe("my-parallel-key");
       expect(fetchCall[1].headers["Content-Type"]).toBe("application/json");
     });
 
     it("limits results to maxResults", async () => {
       const manyResults = Array.from({ length: 10 }, (_, i) => ({
+        url: `https://example.com/${i}`,
         title: `Result ${i}`,
-        url: `https://parallel.ai/${i}`,
-        snippet: `Snippet ${i}`,
+        excerpts: [`Snippet ${i}`],
       }));
-      fetchStub.addResponse("search.parallel.ai", {
-        body: { results: manyResults },
+      fetchStub.addResponse("api.parallel.ai/v1/search", {
+        body: { search_id: "s_1", results: manyResults, session_id: "sess_1" },
       });
 
       const provider = new ParallelProvider("key");
@@ -822,7 +982,7 @@ describe("ParallelProvider", () => {
     });
 
     it("throws on error response", async () => {
-      fetchStub.addResponse("search.parallel.ai", {
+      fetchStub.addResponse("api.parallel.ai/v1/search", {
         status: 403,
         body: "Forbidden",
       });
@@ -833,35 +993,61 @@ describe("ParallelProvider", () => {
     });
 
     it("handles empty results array", async () => {
-      fetchStub.addResponse("search.parallel.ai", {
-        body: { results: [] },
+      fetchStub.addResponse("api.parallel.ai/v1/search", {
+        body: { search_id: "s_1", results: [], session_id: "sess_1" },
       });
 
       const provider = new ParallelProvider("key");
       const results = await provider.search("nothing", 5);
       expect(results).toEqual([]);
     });
+
+    it("handles results with empty excerpts", async () => {
+      fetchStub.addResponse("api.parallel.ai/v1/search", {
+        body: {
+          search_id: "s_1",
+          results: [{ url: "https://example.com", title: "No excerpts", excerpts: [] }],
+          session_id: "sess_1",
+        },
+      });
+
+      const provider = new ParallelProvider("key");
+      const results = await provider.search("test", 5);
+      expect(results[0].snippet).toBe("");
+    });
   });
 
   describe("fetch", () => {
-    it("returns fetched content", async () => {
-      fetchStub.addResponse("search.parallel.ai/fetch", {
+    it("returns fetched content from extract endpoint", async () => {
+      fetchStub.addResponse("api.parallel.ai/v1/extract", {
         body: {
-          content: "Fetched markdown content from the page.",
-          title: "Page Title",
+          extract_id: "extract_abc123",
+          results: [
+            {
+              url: "https://example.com/page",
+              title: "Page Title",
+              full_content: "# Page Title\n\nFetched markdown content from the page.",
+              excerpts: ["Some excerpt"],
+            },
+          ],
+          session_id: "session_abc123",
         },
       });
 
       const provider = new ParallelProvider("test-key");
       const result = await provider.fetch("https://example.com/page");
 
-      expect(result.text).toBe("Fetched markdown content from the page.");
+      expect(result.text).toBe("# Page Title\n\nFetched markdown content from the page.");
       expect(result.title).toBe("Page Title");
     });
 
-    it("sends correct POST request for fetch", async () => {
-      fetchStub.addResponse("search.parallel.ai/fetch", {
-        body: { content: "", title: "" },
+    it("sends correct POST request for extract", async () => {
+      fetchStub.addResponse("api.parallel.ai/v1/extract", {
+        body: {
+          extract_id: "e_1",
+          results: [{ url: "https://example.com/target", title: "", full_content: "" }],
+          session_id: "sess_1",
+        },
       });
 
       const provider = new ParallelProvider("my-key");
@@ -869,24 +1055,39 @@ describe("ParallelProvider", () => {
 
       const fetchCall = (globalThis.fetch as any).mock.calls[0];
       const url = fetchCall[0] as string;
-      expect(url).toBe("https://search.parallel.ai/fetch");
+      expect(url).toBe("https://api.parallel.ai/v1/extract");
       expect(fetchCall[1].method).toBe("POST");
 
       const body = JSON.parse(fetchCall[1].body);
-      expect(body.url).toBe("https://example.com/target");
+      expect(body.urls).toEqual(["https://example.com/target"]);
+      expect(body.full_content).toBe(true);
 
-      expect(fetchCall[1].headers["Authorization"]).toBe("Bearer my-key");
+      expect(fetchCall[1].headers["x-api-key"]).toBe("my-key");
     });
 
-    it("throws on fetch error response", async () => {
-      fetchStub.addResponse("search.parallel.ai/fetch", {
+    it("throws on extract error response", async () => {
+      fetchStub.addResponse("api.parallel.ai/v1/extract", {
         status: 500,
         body: "Server Error",
       });
       const provider = new ParallelProvider("key");
       await expect(
         provider.fetch("https://example.com/broken"),
-      ).rejects.toThrow("Parallel fetch error");
+      ).rejects.toThrow("Parallel extract error");
+    });
+
+    it("throws when extract returns no results for URL", async () => {
+      fetchStub.addResponse("api.parallel.ai/v1/extract", {
+        body: {
+          extract_id: "e_1",
+          results: [],
+          session_id: "sess_1",
+        },
+      });
+      const provider = new ParallelProvider("key");
+      await expect(
+        provider.fetch("https://example.com/missing"),
+      ).rejects.toThrow("Parallel extract error");
     });
   });
 });
@@ -911,20 +1112,29 @@ import type {
   SearchResult,
 } from "./types.ts";
 
-const PARALLEL_SEARCH_ENDPOINT = "https://search.parallel.ai/search";
-const PARALLEL_FETCH_ENDPOINT = "https://search.parallel.ai/fetch";
+const PARALLEL_SEARCH_ENDPOINT = "https://api.parallel.ai/v1/search";
+const PARALLEL_EXTRACT_ENDPOINT = "https://api.parallel.ai/v1/extract";
 
 interface ParallelSearchResponse {
+  search_id: string;
   results: Array<{
-    title: string;
     url: string;
-    snippet: string;
+    title: string;
+    excerpts: string[];
+    publish_date?: string;
   }>;
+  session_id: string;
 }
 
-interface ParallelFetchResponse {
-  content: string;
-  title?: string;
+interface ParallelExtractResponse {
+  extract_id: string;
+  results: Array<{
+    url: string;
+    title?: string;
+    excerpts?: string[];
+    full_content?: string;
+  }>;
+  session_id: string;
 }
 
 export class ParallelProvider implements SearchProvider, FetchProvider {
@@ -939,7 +1149,7 @@ export class ParallelProvider implements SearchProvider, FetchProvider {
   private headers(): Record<string, string> {
     return {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${this.apiKey}`,
+      "x-api-key": this.apiKey,
     };
   }
 
@@ -952,7 +1162,11 @@ export class ParallelProvider implements SearchProvider, FetchProvider {
     const response = await fetch(PARALLEL_SEARCH_ENDPOINT, {
       method: "POST",
       headers: this.headers(),
-      body: JSON.stringify({ query, maxResults }),
+      body: JSON.stringify({
+        search_queries: [query],
+        objective: query,
+        mode: "basic",
+      }),
       signal,
     });
 
@@ -966,28 +1180,33 @@ export class ParallelProvider implements SearchProvider, FetchProvider {
     return (data.results ?? []).slice(0, maxResults).map((r) => ({
       title: r.title,
       url: r.url,
-      snippet: r.snippet,
+      snippet: r.excerpts.join(" "),
     }));
   }
 
   async fetch(url: string, signal?: AbortSignal): Promise<FetchResult> {
-    const response = await fetch(PARALLEL_FETCH_ENDPOINT, {
+    const response = await fetch(PARALLEL_EXTRACT_ENDPOINT, {
       method: "POST",
       headers: this.headers(),
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ urls: [url], full_content: true }),
       signal,
     });
 
     if (!response.ok) {
       throw new Error(
-        `Parallel fetch error: ${response.status} ${response.statusText}`,
+        `Parallel extract error: ${response.status} ${response.statusText}`,
       );
     }
 
-    const data = (await response.json()) as ParallelFetchResponse;
+    const data = (await response.json()) as ParallelExtractResponse;
+    const result = data.results?.[0];
+    if (!result) {
+      throw new Error(`Parallel extract error: no results for ${url}`);
+    }
+
     return {
-      text: data.content,
-      title: data.title,
+      text: result.full_content ?? result.excerpts?.join("\n\n") ?? "",
+      title: result.title,
     };
   }
 }
@@ -1002,7 +1221,7 @@ Expected: All tests PASS
 
 ```bash
 git add src/providers/parallel.ts tests/providers/parallel.test.ts
-git commit -m "feat: add Parallel provider (search + fetch)"
+git commit -m "feat: add Parallel provider (search + extract)"
 ```
 
 ---
