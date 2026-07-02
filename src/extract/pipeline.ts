@@ -41,9 +41,14 @@ const BROWSER_HEADERS: Record<string, string> = {
   "Accept-Language": "en-US,en;q=0.5",
 };
 
+export interface ExtractOptions {
+  raw?: boolean;
+}
+
 export async function extractContent(
   url: string,
   signal?: AbortSignal,
+  options?: ExtractOptions,
 ): Promise<ExtractedContent> {
   validateUrl(url);
 
@@ -82,6 +87,22 @@ export async function extractContent(
         throw new Error(`Unsupported binary content type: ${contentType}`);
       }
     }
+  }
+
+  // Raw mode: return HTTP body as-is after SSRF + binary-type validation
+  if (options?.raw) {
+    const body = contentType.includes("application/pdf")
+      ? Buffer.from(await response.arrayBuffer()).toString("utf-8")
+      : await response.text();
+    chain.push("raw");
+    return {
+      text: body,
+      title: undefined,
+      url,
+      extractionChain: chain,
+      chars: body.length,
+      truncated: false,
+    };
   }
 
   // PDF extraction — must return or throw here since arrayBuffer() consumes

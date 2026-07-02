@@ -17,6 +17,7 @@ import { createWebSearchTool } from "./tools/web-search.ts";
 import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
 import { createCodeSearchTool } from "./tools/code-search.ts";
+import { ContentCache } from "./cache.ts";
 
 interface ProviderFactory {
   create: (key?: string) => {
@@ -138,7 +139,8 @@ export default function createExtension(pi: ExtensionAPI): void {
       (providerName) => registry.recordUsage(providerName),
     ),
   );
-  pi.registerTool(createWebFetchTool(store, () => registry.selectFetchCandidates()));
+  const fetchCache = new ContentCache(200, 5 * 60_000);
+  pi.registerTool(createWebFetchTool(store, () => registry.selectFetchCandidates(), fetchCache));
   pi.registerTool(createWebReadTool(store));
   pi.registerTool(
     createCodeSearchTool(

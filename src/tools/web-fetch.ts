@@ -3,15 +3,38 @@ import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { ContentStore } from "../storage.ts";
 import type { FetchProvider } from "../providers/types.ts";
-import { extractContent, RetryableExtractionError } from "../extract/pipeline.ts";
+import { extractContent, RetryableExtractionError, type ExtractedContent } from "../extract/pipeline.ts";
 import { truncateContent } from "../utils/truncate.ts";
 import { AggregateProviderError, sanitizeError } from "../utils/errors.ts";
+import type { ContentCache } from "../cache.ts";
 
 const INLINE_LIMIT = 15_000;
+const MANIFEST_PREVIEW_CHARS = 512;
+const MAX_CONCURRENT = 5;
 
 const WebFetchParams = Type.Object({
-  url: Type.String({ description: "HTTP(S) URL to fetch" }),
+  url: Type.Optional(Type.String({ description: "HTTP(S) URL to fetch" })),
+  urls: Type.Optional(
+    Type.Array(Type.String(), {
+      maxItems: 20,
+      description: "Multiple URLs to fetch concurrently",
+    }),
+  ),
+  raw: Type.Optional(
+    Type.Boolean({ default: false, description: "Return raw HTTP body without extraction" }),
+  ),
+  fresh: Type.Optional(
+    Type.Boolean({ default: false, description: "Bypass content cache" }),
+  ),
 });
+
+interface UrlResult {
+  url: string;
+  title?: string;
+  chars: number;
+  contentId?: string;
+  error?: string;
+}
 
 interface WebFetchDetails {
   url: string;
@@ -20,12 +43,117 @@ interface WebFetchDetails {
   truncated: boolean;
   contentId?: string;
   extractionChain: string[];
+  urlResults?: UrlResult[];
+}
+
+function perUrlCap(count: number): number {
+  return count <= 1 ? INLINE_LIMIT : count <= 5 ? Math.floor(INLINE_LIMIT / count) : MANIFEST_PREVIEW_CHARS;
+}
+
+async function fetchWithConcurrencyLimit<T>(
+  tasks: (() => Promise<T>)[],
+  maxConcurrent: number,
+): Promise<PromiseSettledResult<T>[]> {
+  const results: PromiseSettledResult<T>[] = new Array(tasks.length);
+  let nextIndex = 0;
+
+  async function runNext(): Promise<void> {
+    while (nextIndex < tasks.length) {
+      const index = nextIndex++;
+      try {
+        const value = await tasks[index]();
+        results[index] = { status: "fulfilled", value };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  }
+
+  const workers = Array.from(
+    { length: Math.min(maxConcurrent, tasks.length) },
+    () => runNext(),
+  );
+  await Promise.all(workers);
+  return results;
 }
 
 export function createWebFetchTool(
   store: ContentStore,
   resolveFetchCandidates?: () => FetchProvider[],
+  cache?: ContentCache,
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
+
+  async function executeSingleUrl(
+    url: string,
+    params: { raw?: boolean; fresh?: boolean },
+    signal: AbortSignal | undefined,
+  ) {
+    try {
+      // Check cache first (unless fresh)
+      if (!params.fresh) {
+        const cached = cache?.get(url);
+        if (cached) {
+          return buildResult(cached, url, store);
+        }
+      }
+
+      const extracted = await extractContent(
+        url,
+        signal,
+        params.raw ? { raw: true } : undefined,
+      );
+
+      // Write to cache
+      cache?.set(url, extracted);
+
+      return buildResult(extracted, url, store);
+    } catch (pipelineError) {
+      // Only fall back to providers for retryable errors
+      if (!(pipelineError instanceof RetryableExtractionError)) {
+        const msg = sanitizeError(pipelineError);
+        return errorResult(url, `Fetch error: ${msg}`);
+      }
+
+      // Try each registered FetchProvider as fallback
+      const candidates = resolveFetchCandidates?.() ?? [];
+      if (candidates.length === 0) {
+        const msg = sanitizeError(pipelineError);
+        return errorResult(url, `Fetch error: ${msg}`);
+      }
+
+      const errors: Array<{ provider: string; error: string }> = [
+        { provider: "http", error: pipelineError.message },
+      ];
+
+      for (const provider of candidates) {
+        try {
+          const fetchResult = await provider.fetch(url, signal);
+          const extracted: ExtractedContent = {
+            text: fetchResult.text,
+            title: fetchResult.title,
+            url,
+            extractionChain: [`fetch-provider:${provider.name}`],
+            chars: fetchResult.text.length,
+            truncated: false,
+          };
+
+          // Write provider result to cache
+          cache?.set(url, extracted);
+
+          return buildResult(extracted, url, store);
+        } catch (providerError) {
+          errors.push({
+            provider: provider.name,
+            error: providerError instanceof Error ? providerError.message : String(providerError),
+          });
+        }
+      }
+
+      const aggregate = new AggregateProviderError("fetch", errors);
+      return errorResult(url, `Fetch error: ${aggregate.message}`);
+    }
+  }
+
   return {
     name: "web_fetch",
     label: "Web Fetch",
@@ -39,54 +167,114 @@ export function createWebFetchTool(
     ],
     parameters: WebFetchParams,
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-      // Try the direct extraction pipeline first
-      try {
-        const extracted = await extractContent(params.url, signal ?? undefined);
-        return buildResult(extracted, params.url, store);
-      } catch (pipelineError) {
-        // Only fall back to providers for retryable errors
-        if (!(pipelineError instanceof RetryableExtractionError)) {
-          const msg = sanitizeError(pipelineError);
-          return errorResult(params.url, `Fetch error: ${msg}`);
-        }
+      const hasUrl = params.url !== undefined && params.url.trim() !== "";
+      const hasUrls = params.urls !== undefined && params.urls.length > 0;
 
-        // Try each registered FetchProvider as fallback
-        const candidates = resolveFetchCandidates?.() ?? [];
-        if (candidates.length === 0) {
-          const msg = sanitizeError(pipelineError);
-          return errorResult(params.url, `Fetch error: ${msg}`);
-        }
-
-        const errors: Array<{ provider: string; error: string }> = [
-          { provider: "http", error: pipelineError.message },
-        ];
-
-        for (const provider of candidates) {
-          try {
-            const fetchResult = await provider.fetch(params.url, signal ?? undefined);
-            return buildResult(
-              {
-                text: fetchResult.text,
-                title: fetchResult.title,
-                url: params.url,
-                extractionChain: [`fetch-provider:${provider.name}`],
-                chars: fetchResult.text.length,
-                truncated: false,
-              },
-              params.url,
-              store,
-            );
-          } catch (providerError) {
-            errors.push({
-              provider: provider.name,
-              error: providerError instanceof Error ? providerError.message : String(providerError),
-            });
-          }
-        }
-
-        const aggregate = new AggregateProviderError("fetch", errors);
-        return errorResult(params.url, `Fetch error: ${aggregate.message}`);
+      // Validation: exactly one of url or urls
+      if (hasUrl === hasUrls) {
+        return errorResult(
+          params.url ?? "",
+          "Fetch error: Provide exactly one of `url` or `urls`, not both or neither.",
+        );
       }
+
+      if (hasUrls && params.urls!.length > 20) {
+        return errorResult(
+          "",
+          "Fetch error: `urls` accepts at most 20 URLs.",
+        );
+      }
+
+      // Single-URL path
+      if (hasUrl) {
+        return executeSingleUrl(params.url!, params, signal ?? undefined);
+      }
+
+      // Multi-URL path
+      const urls = params.urls!;
+      const cap = perUrlCap(urls.length);
+      const isManifest = urls.length >= 6;
+
+      // Deduplicate URLs — fetch each unique URL once, reuse results
+      const uniqueUrls = [...new Set(urls)];
+      const tasks = uniqueUrls.map((u) => async () => {
+        if (!params.fresh) {
+          const cached = cache?.get(u);
+          if (cached) return cached;
+        }
+
+        const extracted = await extractContent(
+          u,
+          signal ?? undefined,
+          params.raw ? { raw: true } : undefined,
+        );
+
+        cache?.set(u, extracted);
+        return extracted;
+      });
+
+      const settled = await fetchWithConcurrencyLimit(tasks, MAX_CONCURRENT);
+
+      // Build a map from unique URL → result for O(1) lookup by duplicates
+      const resultByUrl = new Map<string, PromiseSettledResult<ExtractedContent>>();
+      for (let i = 0; i < uniqueUrls.length; i++) {
+        resultByUrl.set(uniqueUrls[i], settled[i]);
+      }
+
+      const urlResults: UrlResult[] = [];
+      const outputParts: string[] = [];
+
+      for (const u of urls) {
+        const outcome = resultByUrl.get(u)!;
+        if (outcome.status === "rejected") {
+          const errMsg = outcome.reason instanceof Error
+            ? outcome.reason.message
+            : String(outcome.reason);
+          urlResults.push({ url: u, chars: 0, error: errMsg });
+          outputParts.push(`## ${u}\n\nError: ${errMsg}\n`);
+          continue;
+        }
+
+        const extracted = outcome.value;
+
+        // Always store full content for retrieval via web_read
+        const contentId = store.store({
+          url: extracted.url,
+          title: extracted.title,
+          text: extracted.text,
+          source: "web_fetch",
+        });
+
+        const preview = extracted.chars > cap
+          ? truncateContent(extracted.text, cap).text
+          : extracted.text;
+
+        urlResults.push({
+          url: extracted.url,
+          title: extracted.title,
+          chars: extracted.chars,
+          contentId,
+        });
+
+        const header = extracted.title ? `## ${extracted.title}` : `## ${extracted.url}`;
+        const meta = `Source: ${extracted.url} | ${extracted.chars} chars | contentId: ${contentId}`;
+        outputParts.push(`${header}\n${meta}\n\n${preview}\n`);
+      }
+
+      const failed = urlResults.filter((r) => r.error).length;
+      const succeeded = urls.length - failed;
+      const summary = `Fetched ${succeeded}/${urls.length} URLs successfully${failed > 0 ? ` (${failed} failed)` : ""}${isManifest ? ". Use web_read with contentId for full text." : ""}\n\n`;
+
+      return {
+        content: [{ type: "text" as const, text: summary + outputParts.join("\n---\n\n") }],
+        details: {
+          url: urls[0],
+          chars: urlResults.reduce((sum, r) => sum + r.chars, 0),
+          truncated: urlResults.some((r) => !r.error && r.chars > cap),
+          extractionChain: ["multi-url"],
+          urlResults,
+        },
+      };
     },
     renderCall(args, theme: Theme, context) {
       const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
@@ -94,10 +282,16 @@ export function createWebFetchTool(
         text.setText(theme.fg("warning", "Fetching..."));
         return text;
       }
-      const u = args.url.length > 70 ? `${args.url.slice(0, 67)}...` : args.url;
-      text.setText(
-        `${theme.fg("toolTitle", theme.bold("web_fetch"))} ${theme.fg("accent", `"${u}"`)}`,
-      );
+      if (args.urls && args.urls.length > 0) {
+        text.setText(
+          `${theme.fg("toolTitle", theme.bold("web_fetch"))} ${theme.fg("accent", `${args.urls.length} URLs`)}`,
+        );
+      } else {
+        const u = (args.url ?? "").length > 70 ? `${(args.url ?? "").slice(0, 67)}...` : (args.url ?? "");
+        text.setText(
+          `${theme.fg("toolTitle", theme.bold("web_fetch"))} ${theme.fg("accent", `"${u}"`)}`,
+        );
+      }
       return text;
     },
     renderResult(result, options, theme: Theme, context) {

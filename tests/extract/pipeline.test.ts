@@ -205,3 +205,81 @@ describe("RetryableExtractionError", () => {
     }
   });
 });
+
+describe("extractContent raw mode", () => {
+  let fetchStub: ReturnType<typeof stubFetch>;
+
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+
+  afterEach(() => {
+    fetchStub.restore();
+  });
+
+  it("returns raw HTML body without parsing when raw is true", async () => {
+    const rawHtml = `<!DOCTYPE html><html><head><title>Raw</title></head><body>
+<div class="sidebar">Nav</div>
+<article><h1>Title</h1><p>Content</p></article>
+</body></html>`;
+
+    fetchStub.addResponse("example.com/raw", {
+      body: rawHtml,
+      headers: { "content-type": "text/html" },
+    });
+
+    const result = await extractContent(
+      "https://example.com/raw",
+      undefined,
+      { raw: true },
+    );
+    expect(result.text).toBe(rawHtml);
+    expect(result.extractionChain).toContain("raw");
+    expect(result.chars).toBe(rawHtml.length);
+  });
+
+  it("raw mode still blocks SSRF URLs", async () => {
+    await expect(
+      extractContent("http://127.0.0.1/admin", undefined, { raw: true }),
+    ).rejects.toThrow(/blocked/i);
+  });
+
+  it("raw mode still blocks binary content types", async () => {
+    fetchStub.addResponse("example.com/image", {
+      body: "binary-data",
+      headers: { "content-type": "image/png" },
+    });
+
+    await expect(
+      extractContent("https://example.com/image", undefined, { raw: true }),
+    ).rejects.toThrow(/unsupported binary/i);
+  });
+
+  it("raw mode returns body for non-HTML content types", async () => {
+    const jsonBody = '{"key": "value", "items": [1, 2, 3]}';
+    fetchStub.addResponse("example.com/api", {
+      body: jsonBody,
+      headers: { "content-type": "application/json" },
+    });
+
+    const result = await extractContent(
+      "https://example.com/api",
+      undefined,
+      { raw: true },
+    );
+    expect(result.text).toBe(jsonBody);
+    expect(result.extractionChain).toContain("raw");
+  });
+
+  it("raw mode propagates HTTP errors normally", async () => {
+    fetchStub.addResponse("example.com/err", {
+      status: 404,
+      body: "Not Found",
+      headers: { "content-type": "text/html" },
+    });
+
+    await expect(
+      extractContent("https://example.com/err", undefined, { raw: true }),
+    ).rejects.toThrow(/404/);
+  });
+});
