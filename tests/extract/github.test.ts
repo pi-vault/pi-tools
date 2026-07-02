@@ -8,6 +8,7 @@ import {
   fetchRaw,
   fetchViaApi,
   fetchViaClone,
+  extractGitHub,
   _resetCloneCache,
 } from "../../src/extract/github.ts";
 import type { GitHubConfig } from "../../src/extract/github.ts";
@@ -783,5 +784,152 @@ describe("fetchViaClone", () => {
     const fileLines = listing.split("\n").filter((l) => l.match(/file-\d+\.ts/));
     expect(fileLines.length).toBeLessThanOrEqual(200);
     expect(listing).toContain("truncated");
+  });
+});
+
+describe("extractGitHub", () => {
+  let fetchStub: ReturnType<typeof stubFetch>;
+
+  beforeEach(() => {
+    fetchStub = stubFetch();
+    _resetCloneCache();
+  });
+
+  afterEach(() => {
+    fetchStub.restore();
+  });
+
+  it("returns null for unknown URL type", async () => {
+    const parsed = parseGitHubUrl(
+      "https://github.com/owner/repo/issues/123",
+    )!;
+    const result = await extractGitHub(parsed);
+    expect(result).toBeNull();
+  });
+
+  it("uses Tier 1 (raw rewrite) for blob URLs when available", async () => {
+    fetchStub.addResponse(
+      "raw.githubusercontent.com/owner/repo/main/src/index.ts",
+      {
+        body: "export const x = 1;",
+        headers: { "content-type": "text/plain" },
+      },
+    );
+
+    const parsed = parseGitHubUrl(
+      "https://github.com/owner/repo/blob/main/src/index.ts",
+    )!;
+    const result = await extractGitHub(parsed);
+    expect(result).not.toBeNull();
+    expect(result!.text).toContain("export const x = 1");
+    expect(result!.extractionChain).toContain("github:raw");
+  });
+
+  it("skips Tier 1 for root URLs (goes to Tier 2 or 3)", async () => {
+    // Add more-specific mock first so it wins over the less-specific repo mock
+    fetchStub.addResponse("api.github.com/repos/owner/repo/contents/", {
+      body: [
+        { name: "README.md", type: "file", size: 5000 },
+        { name: "src", type: "dir", size: 0 },
+      ],
+      headers: { "content-type": "application/json" },
+    });
+    // Tier 2: maxRepoSizeMB=0 so any repo triggers skip; size check uses this mock
+    fetchStub.addResponse("api.github.com/repos/owner/repo", {
+      body: { size: 1024 }, // 1 MB
+      headers: { "content-type": "application/json" },
+    });
+
+    const parsed = parseGitHubUrl("https://github.com/owner/repo")!;
+    // Force Tier 2 to fail by setting maxRepoSizeMB=0 so size check fails
+    const config: GitHubConfig = {
+      enabled: true,
+      maxRepoSizeMB: 0,
+      cloneTimeoutSeconds: 30,
+    };
+    const result = await extractGitHub(parsed, undefined, config);
+    expect(result).not.toBeNull();
+    expect(result!.text).toContain("README.md");
+    expect(result!.extractionChain).toContain("github:api");
+  });
+
+  it("falls back to Tier 3 when Tier 1 fails for blob URL", async () => {
+    // Tier 1 fails (404 from raw)
+    fetchStub.addResponse(
+      "raw.githubusercontent.com/owner/repo/main/secret.ts",
+      { status: 404, body: "Not Found" },
+    );
+
+    // Tier 3 mock added BEFORE the less-specific repo mock so it wins
+    const content = Buffer.from('const secret = "tier3";').toString("base64");
+    fetchStub.addResponse(
+      "api.github.com/repos/owner/repo/contents/secret.ts",
+      {
+        body: {
+          type: "file",
+          name: "secret.ts",
+          content,
+          encoding: "base64",
+          size: 23,
+        },
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    // Tier 2 skipped (repo too large) - added after contents mock
+    fetchStub.addResponse("api.github.com/repos/owner/repo", {
+      body: { size: 500 * 1024 }, // 500 MB
+      headers: { "content-type": "application/json" },
+    });
+
+    const parsed = parseGitHubUrl(
+      "https://github.com/owner/repo/blob/main/secret.ts",
+    )!;
+    const result = await extractGitHub(parsed);
+    expect(result).not.toBeNull();
+    expect(result!.text).toContain("tier3");
+    expect(result!.extractionChain).toContain("github:api");
+  });
+
+  it("returns null when all tiers fail", async () => {
+    fetchStub.addResponse(
+      "raw.githubusercontent.com/owner/repo/main/gone.ts",
+      { status: 404, body: "Not Found" },
+    );
+    fetchStub.addResponse("api.github.com/repos/owner/repo", {
+      body: { size: 500 * 1024 },
+      headers: { "content-type": "application/json" },
+    });
+    fetchStub.addResponse(
+      "api.github.com/repos/owner/repo/contents/gone.ts",
+      {
+        status: 404,
+        body: { message: "Not Found" },
+        headers: { "content-type": "application/json" },
+      },
+    );
+
+    const parsed = parseGitHubUrl(
+      "https://github.com/owner/repo/blob/main/gone.ts",
+    )!;
+    const result = await extractGitHub(parsed);
+    expect(result).toBeNull();
+  });
+
+  it("handles raw.githubusercontent.com URLs via Tier 1", async () => {
+    fetchStub.addResponse(
+      "raw.githubusercontent.com/owner/repo/main/data.json",
+      {
+        body: '{"key": "value"}',
+        headers: { "content-type": "text/plain" },
+      },
+    );
+
+    const parsed = parseGitHubUrl(
+      "https://raw.githubusercontent.com/owner/repo/main/data.json",
+    )!;
+    const result = await extractGitHub(parsed);
+    expect(result).not.toBeNull();
+    expect(result!.text).toContain('"key": "value"');
   });
 });

@@ -686,3 +686,35 @@ export async function fetchViaClone(
     truncated: false,
   };
 }
+
+// ── Orchestrator ──────────────────────────────────────────────────────────────
+
+/**
+ * Main GitHub content extraction orchestrator.
+ * Tries three tiers in order: raw rewrite -> clone cache -> API fallback.
+ * Returns null if the URL type is "unknown" or all tiers fail,
+ * letting the main extraction pipeline handle it.
+ */
+export async function extractGitHub(
+  parsed: GitHubUrl,
+  signal?: AbortSignal,
+  config?: GitHubConfig,
+): Promise<ExtractedContent | null> {
+  if (parsed.type === "unknown") return null;
+
+  // Tier 1: Raw URL rewrite (blob and raw URLs only)
+  if (parsed.type === "blob" || parsed.type === "raw") {
+    const rawResult = await fetchRaw(parsed, signal);
+    if (rawResult) return rawResult;
+  }
+
+  // Tier 2: Clone cache (all content URL types)
+  const cloneResult = await fetchViaClone(parsed, signal, config);
+  if (cloneResult) return cloneResult;
+
+  // Tier 3: API fallback
+  const apiResult = await fetchViaApi(parsed, signal);
+  if (apiResult) return apiResult;
+
+  return null;
+}
