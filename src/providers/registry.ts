@@ -81,6 +81,32 @@ export class ProviderRegistry {
     return undefined;
   }
 
+  selectSearchCandidates(name?: string): SearchProvider[] {
+    if (name && name !== "auto") {
+      const provider = this.searchProviders.get(name)?.provider;
+      return provider ? [provider] : [];
+    }
+
+    const candidates: SearchProvider[] = [];
+    for (const tier of [1, 2, 3] as ProviderTier[]) {
+      const tierCandidates = [...this.searchProviders.values()]
+        .filter((r) => r.tier === tier)
+        .filter((r) => {
+          if (r.monthlyQuota === null) return true;
+          return this.tracker.getCount(r.provider.name) < r.monthlyQuota;
+        })
+        .sort((a, b) => {
+          const remA = this.tracker.getRemaining(a.provider.name, a.monthlyQuota);
+          const remB = this.tracker.getRemaining(b.provider.name, b.monthlyQuota);
+          return remB - remA;
+        });
+      for (const c of tierCandidates) {
+        candidates.push(c.provider);
+      }
+    }
+    return candidates;
+  }
+
   selectFetch(name?: string): FetchProvider | undefined {
     if (name) return this.fetchProviders.get(name)?.provider;
     const first = this.fetchProviders.values().next();
