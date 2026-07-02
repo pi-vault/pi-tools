@@ -239,6 +239,67 @@ describe("web_search filter parameters", () => {
     expect(captured).toHaveLength(1);
     expect(captured[0].filters).toBeUndefined();
   });
+
+  it("filters out empty strings from domain arrays", async () => {
+    const { provider, captured } = makeCapturingProvider();
+    const tool = createWebSearchTool(() => [provider]);
+    const ctx = makeCtx();
+    await tool.execute(
+      "call-f6",
+      { query: "test", includeDomains: ["", "example.com", "  "] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(captured).toHaveLength(1);
+    expect(captured[0].filters?.includeDomains).toEqual(["example.com"]);
+  });
+
+  it("returns undefined filters when all domains are empty strings", async () => {
+    const { provider, captured } = makeCapturingProvider();
+    const tool = createWebSearchTool(() => [provider]);
+    const ctx = makeCtx();
+    await tool.execute(
+      "call-f7",
+      { query: "test", includeDomains: ["", "  "] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(captured).toHaveLength(1);
+    expect(captured[0].filters).toBeUndefined();
+  });
+
+  it("strips invalid date formats (non-ISO)", async () => {
+    const { provider, captured } = makeCapturingProvider();
+    const tool = createWebSearchTool(() => [provider]);
+    const ctx = makeCtx();
+    await tool.execute(
+      "call-f8",
+      { query: "test", startDate: "01/01/2025", endDate: "not-a-date" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(captured).toHaveLength(1);
+    expect(captured[0].filters).toBeUndefined();
+  });
+
+  it("keeps valid ISO dates and strips invalid ones", async () => {
+    const { provider, captured } = makeCapturingProvider();
+    const tool = createWebSearchTool(() => [provider]);
+    const ctx = makeCtx();
+    await tool.execute(
+      "call-f9",
+      { query: "test", startDate: "2025-01-01", endDate: "invalid" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(captured).toHaveLength(1);
+    expect(captured[0].filters?.startDate).toBe("2025-01-01");
+    expect(captured[0].filters?.endDate).toBeUndefined();
+  });
 });
 
 describe("web_search compact output", () => {

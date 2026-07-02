@@ -63,25 +63,32 @@ function formatResultsCompact(results: SearchResult[]): string {
     .join("\n");
 }
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 function buildFilters(params: {
   includeDomains?: string[];
   excludeDomains?: string[];
   startDate?: string;
   endDate?: string;
 }): SearchFilters | undefined {
+  const includeDomains = params.includeDomains?.filter((d) => d.trim().length > 0);
+  const excludeDomains = params.excludeDomains?.filter((d) => d.trim().length > 0);
+  const startDate = params.startDate && ISO_DATE_RE.test(params.startDate) ? params.startDate : undefined;
+  const endDate = params.endDate && ISO_DATE_RE.test(params.endDate) ? params.endDate : undefined;
+
   const hasAny =
-    params.includeDomains?.length ||
-    params.excludeDomains?.length ||
-    params.startDate ||
-    params.endDate;
+    (includeDomains?.length) ||
+    (excludeDomains?.length) ||
+    startDate ||
+    endDate;
 
   if (!hasAny) return undefined;
 
   return {
-    includeDomains: params.includeDomains,
-    excludeDomains: params.excludeDomains,
-    startDate: params.startDate,
-    endDate: params.endDate,
+    ...(includeDomains?.length ? { includeDomains } : {}),
+    ...(excludeDomains?.length ? { excludeDomains } : {}),
+    ...(startDate ? { startDate } : {}),
+    ...(endDate ? { endDate } : {}),
   };
 }
 

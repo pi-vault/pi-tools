@@ -159,6 +159,7 @@ function computeTimelimit(filters?: SearchFilters): string | undefined {
   const now = new Date();
   const diffDays = Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
 
+  if (diffDays < 0) return undefined; // future date — ignore
   if (diffDays <= 1) return "d";
   if (diffDays <= 7) return "w";
   if (diffDays <= 30) return "m";

@@ -207,6 +207,17 @@ describe("DuckDuckGoProvider", () => {
       expect(args?.[tIdx + 1]).toBe("m");
     });
 
+    it("ignores future startDate (does not pass timelimit)", async () => {
+      const provider = new DuckDuckGoProvider(execStub.fn);
+      const future = new Date();
+      future.setDate(future.getDate() + 30);
+      const filters: SearchFilters = { startDate: future.toISOString().slice(0, 10) };
+      await provider.search("test", 5, undefined, filters);
+
+      const args = execStub.lastArgs();
+      expect(args).not.toContain("-t");
+    });
+
     it("works normally without filters", async () => {
       const provider = new DuckDuckGoProvider(execStub.fn);
       const results = await provider.search("test query", 5);
