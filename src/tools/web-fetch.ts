@@ -11,7 +11,6 @@ import type { ContentCache } from "../cache.ts";
 const INLINE_LIMIT = 15_000;
 const MANIFEST_PREVIEW_CHARS = 512;
 const MAX_CONCURRENT = 5;
-const MANIFEST_THRESHOLD = 6;
 
 const WebFetchParams = Type.Object({
   url: Type.Optional(Type.String({ description: "HTTP(S) URL to fetch" })),
@@ -47,10 +46,8 @@ interface WebFetchDetails {
   urlResults?: UrlResult[];
 }
 
-function computePerUrlCap(count: number): number {
-  if (count <= 1) return INLINE_LIMIT;
-  if (count <= 5) return Math.floor(INLINE_LIMIT / count);
-  return MANIFEST_PREVIEW_CHARS;
+function perUrlCap(count: number): number {
+  return count <= 1 ? INLINE_LIMIT : count <= 5 ? Math.floor(INLINE_LIMIT / count) : MANIFEST_PREVIEW_CHARS;
 }
 
 async function fetchWithConcurrencyLimit<T>(
@@ -195,8 +192,8 @@ export function createWebFetchTool(
 
       // Multi-URL path
       const urls = params.urls!;
-      const perUrlCap = computePerUrlCap(urls.length);
-      const isManifest = urls.length >= MANIFEST_THRESHOLD;
+      const cap = perUrlCap(urls.length);
+      const isManifest = urls.length >= 6;
 
       // Deduplicate URLs — fetch each unique URL once, reuse results
       const uniqueUrls = [...new Set(urls)];
@@ -248,8 +245,8 @@ export function createWebFetchTool(
           source: "web_fetch",
         });
 
-        const preview = extracted.chars > perUrlCap
-          ? truncateContent(extracted.text, perUrlCap).text
+        const preview = extracted.chars > cap
+          ? truncateContent(extracted.text, cap).text
           : extracted.text;
 
         urlResults.push({
@@ -264,8 +261,8 @@ export function createWebFetchTool(
         outputParts.push(`${header}\n${meta}\n\n${preview}\n`);
       }
 
-      const succeeded = urlResults.filter((r) => !r.error).length;
       const failed = urlResults.filter((r) => r.error).length;
+      const succeeded = urls.length - failed;
       const summary = `Fetched ${succeeded}/${urls.length} URLs successfully${failed > 0 ? ` (${failed} failed)` : ""}${isManifest ? ". Use web_read with contentId for full text." : ""}\n\n`;
 
       return {
@@ -273,7 +270,7 @@ export function createWebFetchTool(
         details: {
           url: urls[0],
           chars: urlResults.reduce((sum, r) => sum + r.chars, 0),
-          truncated: urlResults.some((r) => !r.error && r.chars > perUrlCap),
+          truncated: urlResults.some((r) => !r.error && r.chars > cap),
           extractionChain: ["multi-url"],
           urlResults,
         },
