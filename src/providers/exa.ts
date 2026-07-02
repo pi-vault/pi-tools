@@ -4,6 +4,7 @@ import type {
   CodeSearchResult,
   FetchProvider,
   FetchResult,
+  SearchFilters,
   SearchProvider,
   SearchResult,
 } from "./types.ts";
@@ -32,16 +33,36 @@ export class ExaProvider implements SearchProvider, FetchProvider, CodeSearchPro
     };
   }
 
-  async search(query: string, maxResults: number, signal?: AbortSignal): Promise<SearchResult[]> {
+  async search(
+    query: string,
+    maxResults: number,
+    signal?: AbortSignal,
+    filters?: SearchFilters,
+  ): Promise<SearchResult[]> {
+    const body: Record<string, unknown> = {
+      query,
+      numResults: maxResults,
+      useAutoprompt: true,
+      type: "auto",
+    };
+
+    if (filters?.includeDomains?.length) {
+      body.includeDomains = filters.includeDomains;
+    }
+    if (filters?.excludeDomains?.length) {
+      body.excludeDomains = filters.excludeDomains;
+    }
+    if (filters?.startDate) {
+      body.startPublishedDate = filters.startDate;
+    }
+    if (filters?.endDate) {
+      body.endPublishedDate = filters.endDate;
+    }
+
     const response = await fetch("https://api.exa.ai/search", {
       method: "POST",
       headers: this.headers(),
-      body: JSON.stringify({
-        query,
-        numResults: maxResults,
-        useAutoprompt: true,
-        type: "auto",
-      }),
+      body: JSON.stringify(body),
       signal,
     });
     if (!response.ok) throw new Error(`Exa API error: ${response.status} ${response.statusText}`);
