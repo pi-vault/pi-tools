@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
 import { UsageTracker } from "../../src/providers/usage.ts";
-import type { SearchProvider } from "../../src/providers/types.ts";
+import type { FetchProvider, SearchProvider } from "../../src/providers/types.ts";
 import * as fs from "node:fs";
 
 vi.mock("node:fs");
@@ -110,6 +110,69 @@ describe("ProviderRegistry", () => {
     expect(selected?.name).toBe("duckduckgo");
   });
 
+  describe("selectSearchCandidates", () => {
+    it("returns all providers ordered by tier then remaining quota", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      const serper = mockProvider("serper", "Serper");
+      const perplexity = mockProvider("perplexity", "Perplexity");
+      const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(serper, { tier: 1, monthlyQuota: 2500 });
+      registry.registerSearch(perplexity, { tier: 2, monthlyQuota: null });
+      registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+      const candidates = registry.selectSearchCandidates();
+      expect(candidates.map((c) => c.name)).toEqual([
+        "serper", // tier 1, highest remaining (2500)
+        "brave", // tier 1, lower remaining (2000)
+        "perplexity", // tier 2
+        "duckduckgo", // tier 3
+      ]);
+    });
+
+    it("excludes exhausted providers", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 1 });
+      registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+      registry.recordUsage("brave"); // exhausted
+      const candidates = registry.selectSearchCandidates();
+      expect(candidates.map((c) => c.name)).toEqual(["duckduckgo"]);
+    });
+
+    it("returns single-element array for explicit provider name", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+      const candidates = registry.selectSearchCandidates("duckduckgo");
+      expect(candidates.map((c) => c.name)).toEqual(["duckduckgo"]);
+    });
+
+    it("returns empty array for unknown explicit provider", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      expect(registry.selectSearchCandidates("nonexistent")).toEqual([]);
+    });
+
+    it("returns empty array when no providers registered", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      expect(registry.selectSearchCandidates()).toEqual([]);
+    });
+  });
+
   it("persists usage across registry instances sharing the same tracker state", () => {
     // Simulate: tracker loaded from disk with existing counts
     vi.mocked(fs.readFileSync).mockReturnValue(
@@ -132,5 +195,32 @@ describe("ProviderRegistry", () => {
     registry.recordUsage("brave"); // 2000 used, 0 remaining
     const afterExhaust = registry.selectSearch();
     expect(afterExhaust?.name).toBe("duckduckgo");
+  });
+
+  describe("selectFetchCandidates", () => {
+    it("returns all registered fetch providers", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const jina: FetchProvider = {
+        name: "jina",
+        fetch: vi.fn().mockResolvedValue({ text: "content", title: "Title" }),
+      };
+      const exa: FetchProvider = {
+        name: "exa",
+        fetch: vi.fn().mockResolvedValue({ text: "content", title: "Title" }),
+      };
+
+      registry.registerFetch(jina);
+      registry.registerFetch(exa);
+
+      const candidates = registry.selectFetchCandidates();
+      expect(candidates.map((c) => c.name)).toEqual(["jina", "exa"]);
+    });
+
+    it("returns empty array when no fetch providers registered", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      expect(registry.selectFetchCandidates()).toEqual([]);
+    });
   });
 });

@@ -55,13 +55,18 @@ export class ProviderRegistry {
   }
 
   selectSearch(name?: string): SearchProvider | undefined {
+    return this.selectSearchCandidates(name)[0];
+  }
+
+  selectSearchCandidates(name?: string): SearchProvider[] {
     if (name && name !== "auto") {
-      return this.searchProviders.get(name)?.provider;
+      const provider = this.searchProviders.get(name)?.provider;
+      return provider ? [provider] : [];
     }
 
-    // Auto selection: tier 1 by highest remaining, then tier 2, then tier 3
+    const candidates: SearchProvider[] = [];
     for (const tier of [1, 2, 3] as ProviderTier[]) {
-      const candidates = [...this.searchProviders.values()]
+      const tierCandidates = [...this.searchProviders.values()]
         .filter((r) => r.tier === tier)
         .filter((r) => {
           if (r.monthlyQuota === null) return true;
@@ -72,19 +77,13 @@ export class ProviderRegistry {
           const remB = this.tracker.getRemaining(b.provider.name, b.monthlyQuota);
           return remB - remA;
         });
-
-      if (candidates.length > 0) {
-        return candidates[0].provider;
-      }
+      candidates.push(...tierCandidates.map((c) => c.provider));
     }
-
-    return undefined;
+    return candidates;
   }
 
-  selectFetch(name?: string): FetchProvider | undefined {
-    if (name) return this.fetchProviders.get(name)?.provider;
-    const first = this.fetchProviders.values().next();
-    return first.done ? undefined : first.value.provider;
+  selectFetchCandidates(): FetchProvider[] {
+    return [...this.fetchProviders.values()].map((r) => r.provider);
   }
 
   selectCodeSearch(): CodeSearchProvider | undefined {

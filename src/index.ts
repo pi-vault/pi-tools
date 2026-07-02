@@ -12,7 +12,7 @@ import { TavilyProvider } from "./providers/tavily.ts";
 import { ExaProvider } from "./providers/exa.ts";
 import { PerplexityProvider } from "./providers/perplexity.ts";
 import { FirecrawlProvider } from "./providers/firecrawl.ts";
-import type { SearchProvider, FetchProvider, CodeSearchProvider } from "./providers/types.ts";
+import type { FetchProvider, SearchProvider, CodeSearchProvider } from "./providers/types.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
@@ -120,14 +120,6 @@ export default function createExtension(pi: ExtensionAPI): void {
     }
   }
 
-  function resolveSearchProvider(name?: string): SearchProvider {
-    const provider = registry.selectSearch(name);
-    if (!provider) {
-      throw new Error("No search providers available");
-    }
-    return provider;
-  }
-
   // Restore stored content from previous session
   pi.on("session_start", (_event, ctx) => {
     const entries = ctx.sessionManager.getEntries();
@@ -142,11 +134,11 @@ export default function createExtension(pi: ExtensionAPI): void {
 
   pi.registerTool(
     createWebSearchTool(
-      (name) => resolveSearchProvider(name),
+      (name) => registry.selectSearchCandidates(name),
       (providerName) => registry.recordUsage(providerName),
     ),
   );
-  pi.registerTool(createWebFetchTool(store));
+  pi.registerTool(createWebFetchTool(store, () => registry.selectFetchCandidates()));
   pi.registerTool(createWebReadTool(store));
   pi.registerTool(
     createCodeSearchTool(

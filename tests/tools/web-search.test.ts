@@ -1,22 +1,22 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createWebSearchTool } from "../../src/tools/web-search.ts";
 import { makeCtx } from "../helpers.ts";
 import type { SearchProvider, SearchResult } from "../../src/providers/types.ts";
 
-function makeStubProvider(results: SearchResult[]): SearchProvider {
+function makeProvider(name: string, results: SearchResult[]): SearchProvider {
   return {
-    name: "stub",
-    label: "Stub",
+    name,
+    label: name,
     async search(_query: string, maxResults: number, _signal?: AbortSignal) {
       return results.slice(0, maxResults);
     },
   };
 }
 
-function makeFailingProvider(message: string): SearchProvider {
+function makeFailingProvider(name: string, message: string): SearchProvider {
   return {
-    name: "stub",
-    label: "Stub",
+    name,
+    label: name,
     async search() {
       throw new Error(message);
     },
@@ -38,14 +38,14 @@ describe("web_search tool", () => {
   ];
 
   it("has correct tool metadata", () => {
-    const tool = createWebSearchTool(() => makeStubProvider(sampleResults));
+    const tool = createWebSearchTool(() => [makeProvider("stub", sampleResults)]);
     expect(tool.name).toBe("web_search");
     expect(tool.label).toBe("Web Search");
     expect(tool.parameters).toBeDefined();
   });
 
   it("executes search and returns formatted results", async () => {
-    const tool = createWebSearchTool(() => makeStubProvider(sampleResults));
+    const tool = createWebSearchTool(() => [makeProvider("stub", sampleResults)]);
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-1",
@@ -63,9 +63,7 @@ describe("web_search tool", () => {
   });
 
   it("returns error result on provider failure", async () => {
-    const tool = createWebSearchTool(() =>
-      makeFailingProvider("Provider exploded"),
-    );
+    const tool = createWebSearchTool(() => [makeFailingProvider("stub", "Provider exploded")]);
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-2",
@@ -78,5 +76,55 @@ describe("web_search tool", () => {
     expect(result.content[0]).toHaveProperty("type", "text");
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text.toLowerCase()).toContain("error");
+  });
+});
+
+describe("web_search fallback chain", () => {
+  const sampleResults: SearchResult[] = [
+    { title: "Result", url: "https://example.com", snippet: "test" },
+  ];
+
+  it("falls back to second provider when first fails", async () => {
+    const failing = makeFailingProvider("brave", "429 Too Many Requests");
+    const working = makeProvider("exa", sampleResults);
+
+    const tool = createWebSearchTool(() => [failing, working], vi.fn());
+    const ctx = makeCtx();
+    const result = await tool.execute("call-1", { query: "test" }, undefined, undefined, ctx);
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("Result");
+    expect(result.details.provider).toBe("exa");
+  });
+
+  it("returns aggregate error when all providers fail", async () => {
+    const fail1 = makeFailingProvider("brave", "429 Too Many Requests");
+    const fail2 = makeFailingProvider("exa", "Request timeout");
+
+    const tool = createWebSearchTool(() => [fail1, fail2], vi.fn());
+    const ctx = makeCtx();
+    const result = await tool.execute("call-2", { query: "test" }, undefined, undefined, ctx);
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("brave: 429 Too Many Requests");
+    expect(text).toContain("exa: Request timeout");
+  });
+
+  it("records usage only for the successful provider", async () => {
+    const failing = makeFailingProvider("brave", "429");
+    const working = makeProvider("exa", sampleResults);
+    const onSuccess = vi.fn();
+
+    const tool = createWebSearchTool(() => [failing, working], onSuccess);
+    const ctx = makeCtx();
+    await tool.execute("call-3", { query: "test" }, undefined, undefined, ctx);
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(onSuccess).toHaveBeenCalledWith("exa");
+  });
+
+  it("returns error when candidates list is empty", async () => {
+    const tool = createWebSearchTool(() => [], vi.fn());
+    const ctx = makeCtx();
+    const result = await tool.execute("call-4", { query: "test" }, undefined, undefined, ctx);
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text.toLowerCase()).toContain("no search providers available");
   });
 });

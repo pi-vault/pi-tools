@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { SearchProvider, SearchResult } from "../providers/types.ts";
-import { sanitizeError } from "../utils/errors.ts";
+import { AggregateProviderError } from "../utils/errors.ts";
 
 const WebSearchParams = Type.Object({
   query: Type.String({ description: "Search query" }),
@@ -32,7 +32,7 @@ function formatResults(results: SearchResult[]): string {
 }
 
 export function createWebSearchTool(
-  resolveProvider: (name?: string) => SearchProvider,
+  resolveCandidates: (name?: string) => SearchProvider[],
   onSuccess?: (providerName: string) => void,
 ): ToolDefinition<typeof WebSearchParams, WebSearchDetails> {
   return {
@@ -47,30 +47,45 @@ export function createWebSearchTool(
     ],
     parameters: WebSearchParams,
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-      try {
-        const provider = resolveProvider(params.provider);
-        const maxResults = params.numResults ?? 5;
-        const results = await provider.search(
-          params.query,
-          maxResults,
-          signal ?? undefined,
-        );
-        const text = formatResults(results);
+      const candidates = resolveCandidates(params.provider);
 
-        // Record successful usage for quota tracking (increment on success only)
-        onSuccess?.(provider.name);
-
+      if (candidates.length === 0) {
         return {
-          content: [{ type: "text" as const, text }],
-          details: { provider: provider.name, resultCount: results.length },
-        };
-      } catch (error) {
-        const msg = sanitizeError(error);
-        return {
-          content: [{ type: "text" as const, text: `Search error: ${msg}` }],
-          details: { provider: "unknown", resultCount: 0 },
+          content: [{ type: "text" as const, text: "Search error: No search providers available" }],
+          details: { provider: "none", resultCount: 0 },
         };
       }
+
+      const maxResults = params.numResults ?? 5;
+      const errors: Array<{ provider: string; error: string }> = [];
+
+      for (const provider of candidates) {
+        try {
+          const results = await provider.search(
+            params.query,
+            maxResults,
+            signal ?? undefined,
+          );
+          const text = formatResults(results);
+          onSuccess?.(provider.name);
+
+          return {
+            content: [{ type: "text" as const, text }],
+            details: { provider: provider.name, resultCount: results.length },
+          };
+        } catch (error) {
+          errors.push({
+            provider: provider.name,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      const aggregate = new AggregateProviderError("search", errors);
+      return {
+        content: [{ type: "text" as const, text: `Search error: ${aggregate.message}` }],
+        details: { provider: "none", resultCount: 0 },
+      };
     },
     renderCall(args, theme: Theme, context) {
       const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
@@ -104,3 +119,4 @@ export function createWebSearchTool(
     },
   };
 }
+

@@ -2,9 +2,10 @@ import { Type } from "typebox";
 import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { ContentStore } from "../storage.ts";
-import { extractContent } from "../extract/pipeline.ts";
+import type { FetchProvider } from "../providers/types.ts";
+import { extractContent, RetryableExtractionError } from "../extract/pipeline.ts";
 import { truncateContent } from "../utils/truncate.ts";
-import { sanitizeError } from "../utils/errors.ts";
+import { AggregateProviderError, sanitizeError } from "../utils/errors.ts";
 
 const INLINE_LIMIT = 15_000;
 
@@ -23,6 +24,7 @@ interface WebFetchDetails {
 
 export function createWebFetchTool(
   store: ContentStore,
+  resolveFetchCandidates?: () => FetchProvider[],
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
   return {
     name: "web_fetch",
@@ -37,56 +39,53 @@ export function createWebFetchTool(
     ],
     parameters: WebFetchParams,
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+      // Try the direct extraction pipeline first
       try {
         const extracted = await extractContent(params.url, signal ?? undefined);
-
-        let contentId: string | undefined;
-        let outputText: string;
-        let truncated = false;
-
-        if (extracted.chars > INLINE_LIMIT) {
-          contentId = store.store({
-            url: extracted.url,
-            title: extracted.title,
-            text: extracted.text,
-            source: "web_fetch",
-          });
-          const trunc = truncateContent(extracted.text, INLINE_LIMIT);
-          outputText = trunc.text;
-          truncated = true;
-        } else {
-          outputText = extracted.text;
+        return buildResult(extracted, params.url, store);
+      } catch (pipelineError) {
+        // Only fall back to providers for retryable errors
+        if (!(pipelineError instanceof RetryableExtractionError)) {
+          const msg = sanitizeError(pipelineError);
+          return errorResult(params.url, `Fetch error: ${msg}`);
         }
 
-        const header = [
-          extracted.title ? `# ${extracted.title}` : `# ${extracted.url}`,
-          `Source: ${extracted.url}`,
-          `Chars: ${extracted.chars}${truncated ? ` (truncated, use web_read with contentId "${contentId}" for full text)` : ""}`,
-          "",
-        ].join("\n");
+        // Try each registered FetchProvider as fallback
+        const candidates = resolveFetchCandidates?.() ?? [];
+        if (candidates.length === 0) {
+          const msg = sanitizeError(pipelineError);
+          return errorResult(params.url, `Fetch error: ${msg}`);
+        }
 
-        return {
-          content: [{ type: "text" as const, text: header + outputText }],
-          details: {
-            url: extracted.url,
-            title: extracted.title,
-            chars: extracted.chars,
-            truncated,
-            contentId,
-            extractionChain: extracted.extractionChain,
-          },
-        };
-      } catch (error) {
-        const msg = sanitizeError(error);
-        return {
-          content: [{ type: "text" as const, text: `Fetch error: ${msg}` }],
-          details: {
-            url: params.url,
-            chars: 0,
-            truncated: false,
-            extractionChain: [],
-          },
-        };
+        const errors: Array<{ provider: string; error: string }> = [
+          { provider: "http", error: pipelineError.message },
+        ];
+
+        for (const provider of candidates) {
+          try {
+            const fetchResult = await provider.fetch(params.url, signal ?? undefined);
+            return buildResult(
+              {
+                text: fetchResult.text,
+                title: fetchResult.title,
+                url: params.url,
+                extractionChain: [`fetch-provider:${provider.name}`],
+                chars: fetchResult.text.length,
+                truncated: false,
+              },
+              params.url,
+              store,
+            );
+          } catch (providerError) {
+            errors.push({
+              provider: provider.name,
+              error: providerError instanceof Error ? providerError.message : String(providerError),
+            });
+          }
+        }
+
+        const aggregate = new AggregateProviderError("fetch", errors);
+        return errorResult(params.url, `Fetch error: ${aggregate.message}`);
       }
     },
     renderCall(args, theme: Theme, context) {
@@ -122,6 +121,68 @@ export function createWebFetchTool(
         text.setText(theme.fg("toolOutput", `${details.chars} chars`) + truncNote);
       }
       return text;
+    },
+  };
+}
+
+function buildResult(
+  extracted: {
+    text: string;
+    title?: string;
+    url: string;
+    extractionChain: string[];
+    chars: number;
+    truncated: boolean;
+  },
+  originalUrl: string,
+  store: ContentStore,
+) {
+  let contentId: string | undefined;
+  let outputText: string;
+  let truncated = extracted.truncated;
+
+  if (extracted.chars > INLINE_LIMIT) {
+    contentId = store.store({
+      url: extracted.url,
+      title: extracted.title,
+      text: extracted.text,
+      source: "web_fetch",
+    });
+    const trunc = truncateContent(extracted.text, INLINE_LIMIT);
+    outputText = trunc.text;
+    truncated = true;
+  } else {
+    outputText = extracted.text;
+  }
+
+  const header = [
+    extracted.title ? `# ${extracted.title}` : `# ${extracted.url}`,
+    `Source: ${extracted.url}`,
+    `Chars: ${extracted.chars}${truncated ? ` (truncated, use web_read with contentId "${contentId}" for full text)` : ""}`,
+    "",
+  ].join("\n");
+
+  return {
+    content: [{ type: "text" as const, text: header + outputText }],
+    details: {
+      url: originalUrl,
+      title: extracted.title,
+      chars: extracted.chars,
+      truncated,
+      contentId,
+      extractionChain: extracted.extractionChain,
+    },
+  };
+}
+
+function errorResult(url: string, message: string) {
+  return {
+    content: [{ type: "text" as const, text: message }],
+    details: {
+      url,
+      chars: 0,
+      truncated: false,
+      extractionChain: [] as string[],
     },
   };
 }

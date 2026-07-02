@@ -4,6 +4,17 @@ import { extractPdf } from "./pdf.ts";
 import { extractRsc } from "./rsc.ts";
 import { extractViaJinaReader } from "./jina-reader.ts";
 
+/**
+ * Error thrown when the HTTP fetch fails in a way that a different fetch
+ * provider might succeed (network errors, 5xx, 429).
+ */
+export class RetryableExtractionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RetryableExtractionError";
+  }
+}
+
 export interface ExtractedContent {
   text: string;
   title?: string;
@@ -38,16 +49,28 @@ export async function extractContent(
 
   const chain: string[] = [];
 
-  const response = await fetch(url, {
-    headers: BROWSER_HEADERS,
-    signal,
-    redirect: "follow",
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: BROWSER_HEADERS,
+      signal,
+      redirect: "follow",
+    });
+  } catch (err) {
+    throw new RetryableExtractionError(
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 
   chain.push(`http:${response.status}`);
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    const status = response.status;
+    // 429 and 5xx are retryable — a different provider might succeed
+    if (status === 429 || status >= 500) {
+      throw new RetryableExtractionError(`HTTP ${status}: ${response.statusText}`);
+    }
+    throw new Error(`HTTP ${status}: ${response.statusText}`);
   }
 
   const contentType = response.headers.get("content-type") ?? "";

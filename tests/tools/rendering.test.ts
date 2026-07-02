@@ -38,7 +38,7 @@ function makeContext(
 }
 
 describe("web_search rendering", () => {
-  const tool = createWebSearchTool(() => new DuckDuckGoProvider());
+  const tool = createWebSearchTool(() => [new DuckDuckGoProvider()]);
 
   it("renderCall returns a Text component showing tool name and query", () => {
     const ctx = makeContext();
@@ -170,7 +170,7 @@ describe("web_read rendering", () => {
 
 describe("long input truncation", () => {
   it("web_search renderCall truncates queries over 70 chars", () => {
-    const tool = createWebSearchTool(() => new DuckDuckGoProvider());
+    const tool = createWebSearchTool(() => [new DuckDuckGoProvider()]);
     const longQuery = "a".repeat(100);
     const component = tool.renderCall!({ query: longQuery }, mockTheme, makeContext());
     const output = component.render(120).join("");
@@ -190,7 +190,7 @@ describe("long input truncation", () => {
 
 describe("component reuse across renders", () => {
   it("web_search renderCall reuses lastComponent instance", () => {
-    const tool = createWebSearchTool(() => new DuckDuckGoProvider());
+    const tool = createWebSearchTool(() => [new DuckDuckGoProvider()]);
     const existing = new Text("old text");
     const ctx = makeContext({ lastComponent: existing });
     const returned = tool.renderCall!({ query: "test" }, mockTheme, ctx);
