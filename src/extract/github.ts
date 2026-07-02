@@ -92,23 +92,13 @@ export function parseGitHubUrl(url: string): GitHubUrl | null {
   }
 
   // Content URL types
-  if (action === "tree") {
+  if (action === "tree" || action === "blob") {
     return {
       owner,
       repo,
       ref: ref ?? undefined,
       path: rest.length > 0 ? rest.join("/") : undefined,
-      type: "tree",
-    };
-  }
-
-  if (action === "blob") {
-    return {
-      owner,
-      repo,
-      ref: ref ?? undefined,
-      path: rest.length > 0 ? rest.join("/") : undefined,
-      type: "blob",
+      type: action,
     };
   }
 
@@ -155,11 +145,8 @@ export function isBinaryFile(path: string, content?: Buffer): boolean {
   }
 
   // Content-based check: scan first 8KB for null bytes
-  if (content) {
-    const scanLength = Math.min(content.length, BINARY_CHECK_SIZE);
-    for (let i = 0; i < scanLength; i++) {
-      if (content[i] === 0x00) return true;
-    }
+  if (content?.subarray(0, BINARY_CHECK_SIZE).includes(0x00)) {
+    return true;
   }
 
   return false;
@@ -288,22 +275,8 @@ export async function fetchViaApi(
     const data = (await response.json()) as GitHubContentsFile;
     if (data.type !== "file") return null;
 
-    // Binary check by extension
-    if (isBinaryFile(parsed.path)) {
-      return {
-        text: `Binary file: ${parsed.path} (${data.size} bytes)`,
-        title: `${parsed.owner}/${parsed.repo} - ${parsed.path}`,
-        url: originalUrl,
-        extractionChain: ["github:api", "binary-skip"],
-        chars: 0,
-        truncated: false,
-      };
-    }
-
-    // Decode base64 content
+    // Decode base64 content; check binary by extension then content
     const rawContent = Buffer.from(data.content, "base64");
-
-    // Binary check by content
     if (isBinaryFile(parsed.path, rawContent)) {
       return {
         text: `Binary file: ${parsed.path} (${data.size} bytes)`,
@@ -409,8 +382,6 @@ export async function fetchRaw(
 
 // ── Clone cache (Tier 2) ──────────────────────────────────────────────────────
 
-// GitHubConfig is the canonical definition from src/config.ts (imported above).
-
 const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
   enabled: true,
   maxRepoSizeMB: 350,
@@ -431,6 +402,7 @@ const NOISE_DIRS = new Set([
   ".cache",
 ]);
 
+const README_NAMES = ["README.md", "README", "README.txt", "readme.md"];
 const README_LIMIT = 8_000;
 const CACHE_BASE = nodePath.join(os.tmpdir(), "pi-tools-github-cache");
 
@@ -458,8 +430,7 @@ export function listCloneDir(
   lines.push("");
 
   if (includeReadme) {
-    const readmeNames = ["README.md", "README", "README.txt", "readme.md"];
-    for (const name of readmeNames) {
+    for (const name of README_NAMES) {
       const readmePath = nodePath.join(cloneDir, name);
       if (fs.existsSync(readmePath)) {
         let readmeContent = fs.readFileSync(readmePath, "utf-8");
@@ -560,12 +531,11 @@ async function getRepoSizeMB(
 }
 
 function isValidRef(ref: string): boolean {
-  // Reject refs that could be interpreted as git CLI flags
-  if (ref.startsWith("-")) return false;
-  // Reject empty refs
-  if (ref.length === 0) return false;
-  // Reject refs with control characters or spaces
-  if (/[\x00-\x1f\x7f ]/.test(ref)) return false;
+  if (ref.length === 0 || ref.startsWith("-")) return false;
+  for (let i = 0; i < ref.length; i++) {
+    const c = ref.charCodeAt(i);
+    if (c <= 0x20 || c === 0x7f) return false;
+  }
   return true;
 }
 
@@ -613,8 +583,7 @@ async function cloneRepo(
 }
 
 function hasReadme(dir: string): boolean {
-  const readmeNames = ["README.md", "README", "README.txt", "readme.md"];
-  return readmeNames.some((name) => fs.existsSync(nodePath.join(dir, name)));
+  return README_NAMES.some((name) => fs.existsSync(nodePath.join(dir, name)));
 }
 
 /**
