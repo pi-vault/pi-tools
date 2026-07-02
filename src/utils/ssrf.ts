@@ -40,7 +40,30 @@ function isPrivateIP(hostname: string): boolean {
   return false;
 }
 
-export function validateUrl(url: string): URL {
+interface ValidateUrlOptions {
+  /** Explicit base URLs (scheme + host + port) that bypass hostname/IP blocks. */
+  allowedBaseUrls?: string[];
+}
+
+function matchesAllowedBase(parsed: URL, allowedBaseUrls: string[]): boolean {
+  for (const base of allowedBaseUrls) {
+    try {
+      const b = new URL(base);
+      if (
+        b.protocol === parsed.protocol &&
+        b.hostname === parsed.hostname &&
+        b.port === parsed.port
+      ) {
+        return true;
+      }
+    } catch {
+      // ignore malformed allowed base URL
+    }
+  }
+  return false;
+}
+
+export function validateUrl(url: string, opts?: ValidateUrlOptions): URL {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -48,12 +71,12 @@ export function validateUrl(url: string): URL {
     throw new SSRFError(`Invalid URL: ${url}`);
   }
 
-  // Protocol check
+  // Protocol check (allowedBaseUrls cannot bypass this)
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new SSRFError(`Blocked protocol: ${parsed.protocol}`);
   }
 
-  // Credentials check
+  // Credentials check (allowedBaseUrls cannot bypass this)
   if (parsed.username || parsed.password) {
     throw new SSRFError("URLs with credentials are not allowed");
   }
@@ -64,12 +87,18 @@ export function validateUrl(url: string): URL {
     throw new SSRFError("URL has no hostname");
   }
 
-  if (isBlockedHostname(hostname)) {
-    throw new SSRFError(`Blocked hostname: ${hostname}`);
-  }
+  const allowed =
+    opts?.allowedBaseUrls?.length &&
+    matchesAllowedBase(parsed, opts.allowedBaseUrls);
 
-  if (isPrivateIP(hostname)) {
-    throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
+  if (!allowed) {
+    if (isBlockedHostname(hostname)) {
+      throw new SSRFError(`Blocked hostname: ${hostname}`);
+    }
+
+    if (isPrivateIP(hostname)) {
+      throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
+    }
   }
 
   return parsed;
