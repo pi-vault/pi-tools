@@ -11,6 +11,7 @@ import type { ContentCache } from "../cache.ts";
 const INLINE_LIMIT = 15_000;
 const MANIFEST_PREVIEW_CHARS = 512;
 const MAX_CONCURRENT = 5;
+const MANIFEST_THRESHOLD = 6;
 
 const WebFetchParams = Type.Object({
   url: Type.Optional(Type.String({ description: "HTTP(S) URL to fetch" })),
@@ -169,7 +170,7 @@ export function createWebFetchTool(
     ],
     parameters: WebFetchParams,
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-      const hasUrl = params.url !== undefined && params.url !== "";
+      const hasUrl = params.url !== undefined && params.url.trim() !== "";
       const hasUrls = params.urls !== undefined && params.urls.length > 0;
 
       // Validation: exactly one of url or urls
@@ -195,9 +196,11 @@ export function createWebFetchTool(
       // Multi-URL path
       const urls = params.urls!;
       const perUrlCap = computePerUrlCap(urls.length);
-      const isManifest = urls.length >= 6;
+      const isManifest = urls.length >= MANIFEST_THRESHOLD;
 
-      const tasks = urls.map((u) => async () => {
+      // Deduplicate URLs — fetch each unique URL once, reuse results
+      const uniqueUrls = [...new Set(urls)];
+      const tasks = uniqueUrls.map((u) => async () => {
         if (!params.fresh) {
           const cached = cache?.get(u);
           if (cached) return cached;
@@ -215,17 +218,23 @@ export function createWebFetchTool(
 
       const settled = await fetchWithConcurrencyLimit(tasks, MAX_CONCURRENT);
 
+      // Build a map from unique URL → result for O(1) lookup by duplicates
+      const resultByUrl = new Map<string, PromiseSettledResult<ExtractedContent>>();
+      for (let i = 0; i < uniqueUrls.length; i++) {
+        resultByUrl.set(uniqueUrls[i], settled[i]);
+      }
+
       const urlResults: UrlResult[] = [];
       const outputParts: string[] = [];
 
-      for (let i = 0; i < urls.length; i++) {
-        const outcome = settled[i];
+      for (const u of urls) {
+        const outcome = resultByUrl.get(u)!;
         if (outcome.status === "rejected") {
           const errMsg = outcome.reason instanceof Error
             ? outcome.reason.message
             : String(outcome.reason);
-          urlResults.push({ url: urls[i], chars: 0, error: errMsg });
-          outputParts.push(`## ${urls[i]}\n\nError: ${errMsg}\n`);
+          urlResults.push({ url: u, chars: 0, error: errMsg });
+          outputParts.push(`## ${u}\n\nError: ${errMsg}\n`);
           continue;
         }
 

@@ -510,6 +510,28 @@ describe("web_fetch multi-URL", () => {
       }
     }
   });
+
+  it("deduplicates identical URLs and returns results for each", async () => {
+    fetchStub.addResponse("example.com/dup", {
+      body: GOOD_HTML,
+      headers: { "content-type": "text/html" },
+    });
+
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-m-dup",
+      { urls: ["https://example.com/dup", "https://example.com/dup", "https://example.com/dup"] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    // Should have results for all 3 input positions
+    expect(result.details.urlResults).toHaveLength(3);
+    // But only 1 fetch should have occurred — verify via fetchStub call count
+    expect((globalThis.fetch as any).mock.calls.length).toBe(1);
+  });
 });
 
 describe("web_fetch fresh parameter", () => {
@@ -624,6 +646,63 @@ describe("web_fetch fresh parameter", () => {
     expect((result.content[0] as { type: "text"; text: string }).text).toContain("Article Title");
 
     emptyStub.restore();
+  });
+
+  it("fresh bypasses cache in multi-URL mode", async () => {
+    const htmlV1 = `<!DOCTYPE html><html><head><title>V1</title></head><body>
+<article><h1>Multi V1</h1><p>${"Version one content. ".repeat(30)}</p></article></body></html>`;
+    const htmlV2 = `<!DOCTYPE html><html><head><title>V2</title></head><body>
+<article><h1>Multi V2</h1><p>${"Version two content. ".repeat(30)}</p></article></body></html>`;
+
+    fetchStub.addResponse("example.com/multi-fresh", {
+      body: htmlV1,
+      headers: { "content-type": "text/html" },
+    });
+
+    const store = new ContentStore(() => {});
+    const cache = new ContentCache(100, 300_000);
+    const tool = createWebFetchTool(store, undefined, cache);
+    const ctx = makeCtx();
+
+    // First multi-URL call — populates cache with V1
+    const result1 = await tool.execute(
+      "call-mf1",
+      { urls: ["https://example.com/multi-fresh"] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect((result1.content[0] as { type: "text"; text: string }).text).toContain("Multi V1");
+
+    // Update response to V2
+    fetchStub.restore();
+    const freshStub = stubFetch();
+    freshStub.addResponse("example.com/multi-fresh", {
+      body: htmlV2,
+      headers: { "content-type": "text/html" },
+    });
+
+    // Without fresh: still gets V1 from cache
+    const result2 = await tool.execute(
+      "call-mf2",
+      { urls: ["https://example.com/multi-fresh"] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect((result2.content[0] as { type: "text"; text: string }).text).toContain("Multi V1");
+
+    // With fresh: bypasses cache, gets V2
+    const result3 = await tool.execute(
+      "call-mf3",
+      { urls: ["https://example.com/multi-fresh"], fresh: true },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect((result3.content[0] as { type: "text"; text: string }).text).toContain("Multi V2");
+
+    freshStub.restore();
   });
 });
 

@@ -36,7 +36,8 @@ export class ContentCache {
     }
 
     while (this.entries.size >= this.maxSize) {
-      const oldest = this.entries.keys().next().value!;
+      const oldest = this.entries.keys().next().value;
+      if (oldest === undefined) break;
       this.entries.delete(oldest);
     }
 
