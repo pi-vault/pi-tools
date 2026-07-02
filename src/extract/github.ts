@@ -110,3 +110,47 @@ export function parseGitHubUrl(url: string): GitHubUrl | null {
   // Any other action segment we don't recognize -> unknown
   return { owner, repo, ref: undefined, path: undefined, type: "unknown" };
 }
+
+const BINARY_EXTENSIONS = new Set([
+  // Images
+  ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp", ".tiff", ".tif",
+  // Fonts
+  ".woff", ".woff2", ".ttf", ".eot", ".otf",
+  // Archives
+  ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar",
+  // Compiled / native
+  ".exe", ".dll", ".so", ".dylib", ".o", ".a", ".lib",
+  ".class", ".pyc", ".pyo", ".wasm",
+  // Media
+  ".mp3", ".mp4", ".wav", ".avi", ".mov", ".flac", ".ogg", ".webm",
+  // Databases
+  ".sqlite", ".db",
+  // Documents (binary)
+  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+]);
+
+const BINARY_CHECK_SIZE = 8 * 1024; // 8KB
+
+/**
+ * Check if a file is binary based on its extension and optionally its content.
+ * Extension check runs first; content check (null-byte scan in first 8KB)
+ * runs only if extension is inconclusive and a buffer is provided.
+ */
+export function isBinaryFile(path: string, content?: Buffer): boolean {
+  // Extension-based check
+  const lastDot = path.lastIndexOf(".");
+  if (lastDot !== -1) {
+    const ext = path.slice(lastDot).toLowerCase();
+    if (BINARY_EXTENSIONS.has(ext)) return true;
+  }
+
+  // Content-based check: scan first 8KB for null bytes
+  if (content) {
+    const scanLength = Math.min(content.length, BINARY_CHECK_SIZE);
+    for (let i = 0; i < scanLength; i++) {
+      if (content[i] === 0x00) return true;
+    }
+  }
+
+  return false;
+}
