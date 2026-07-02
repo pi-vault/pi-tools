@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SSRFError, validateUrl } from "../../src/utils/ssrf.ts";
 
+
 describe("validateUrl", () => {
   it("allows valid HTTPS URLs", () => {
     expect(() => validateUrl("https://example.com")).not.toThrow();
@@ -52,5 +53,67 @@ describe("validateUrl", () => {
   it("blocks invalid URLs", () => {
     expect(() => validateUrl("not-a-url")).toThrow(SSRFError);
     expect(() => validateUrl("")).toThrow(SSRFError);
+  });
+});
+
+describe("validateUrl with allowedBaseUrls", () => {
+  it("allows localhost URL when it matches an allowed base URL", () => {
+    const result = validateUrl(
+      "http://localhost:8080/search?q=test&format=json",
+      { allowedBaseUrls: ["http://localhost:8080"] },
+    );
+    expect(result.hostname).toBe("localhost");
+  });
+
+  it("allows private IP URL when it matches an allowed base URL", () => {
+    const result = validateUrl(
+      "http://192.168.1.100:8080/search?q=hello",
+      { allowedBaseUrls: ["http://192.168.1.100:8080"] },
+    );
+    expect(result.hostname).toBe("192.168.1.100");
+  });
+
+  it("still blocks localhost without allowedBaseUrls", () => {
+    expect(() => validateUrl("http://localhost:8080/search")).toThrow(
+      "Blocked hostname",
+    );
+  });
+
+  it("blocks localhost when URL does not match any allowed base URL", () => {
+    expect(() =>
+      validateUrl("http://localhost:9090/search", {
+        allowedBaseUrls: ["http://localhost:8080"],
+      }),
+    ).toThrow("Blocked hostname");
+  });
+
+  it("requires the allowed URL to be a prefix match (scheme + host + port)", () => {
+    // Port mismatch
+    expect(() =>
+      validateUrl("http://localhost:3000/path", {
+        allowedBaseUrls: ["http://localhost:8080"],
+      }),
+    ).toThrow("Blocked hostname");
+
+    // Scheme mismatch
+    expect(() =>
+      validateUrl("https://localhost:8080/path", {
+        allowedBaseUrls: ["http://localhost:8080"],
+      }),
+    ).toThrow("Blocked hostname");
+  });
+
+  it("does not bypass protocol or credential checks for allowed URLs", () => {
+    expect(() =>
+      validateUrl("ftp://localhost:8080/path", {
+        allowedBaseUrls: ["ftp://localhost:8080"],
+      }),
+    ).toThrow("Blocked protocol");
+
+    expect(() =>
+      validateUrl("http://user:pass@localhost:8080/path", {
+        allowedBaseUrls: ["http://localhost:8080"],
+      }),
+    ).toThrow("credentials");
   });
 });
