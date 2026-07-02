@@ -590,7 +590,7 @@ describe("web_fetch fresh parameter", () => {
     freshStub.restore();
   });
 
-  it("fresh still writes back to cache", async () => {
+  it("fresh still writes back to cache after bypassing", async () => {
     fetchStub.addResponse("example.com/writeback", {
       body: GOOD_HTML,
       headers: { "content-type": "text/html" },
@@ -624,5 +624,102 @@ describe("web_fetch fresh parameter", () => {
     expect((result.content[0] as { type: "text"; text: string }).text).toContain("Article Title");
 
     emptyStub.restore();
+  });
+});
+
+describe("web_fetch raw mode", () => {
+  let fetchStub: ReturnType<typeof stubFetch>;
+
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+
+  afterEach(() => {
+    fetchStub.restore();
+  });
+
+  it("returns raw HTML when raw is true", async () => {
+    const rawHtml = `<!DOCTYPE html><html><head><title>Raw</title></head><body>
+<div class="sidebar">Sidebar nav content</div>
+<article><h1>Article</h1><p>Article text</p></article>
+</body></html>`;
+
+    fetchStub.addResponse("example.com/raw", {
+      body: rawHtml,
+      headers: { "content-type": "text/html" },
+    });
+
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+
+    const result = await tool.execute(
+      "call-r1",
+      { url: "https://example.com/raw", raw: true },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    // Raw mode preserves HTML tags that would normally be stripped
+    expect(text).toContain("<div class=\"sidebar\">");
+    expect(text).toContain("Sidebar nav content");
+  });
+
+  it("returns extracted content when raw is false (default)", async () => {
+    const htmlWithSidebar = `<!DOCTYPE html><html><head><title>Normal</title></head><body>
+<div class="sidebar">Nav stuff</div>
+<article><h1>Article</h1><p>${"Meaningful paragraph. ".repeat(30)}</p></article>
+</body></html>`;
+
+    fetchStub.addResponse("example.com/normal", {
+      body: htmlWithSidebar,
+      headers: { "content-type": "text/html" },
+    });
+
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+
+    const result = await tool.execute(
+      "call-r2",
+      { url: "https://example.com/normal" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    // Normal mode strips nav/sidebar via Readability
+    expect(text).toContain("Article");
+    expect(text).not.toContain("<div class=\"sidebar\">");
+  });
+
+  it("raw mode works with multi-URL", async () => {
+    fetchStub.addResponse("example.com/raw1", {
+      body: "<html><body><p>Raw 1</p></body></html>",
+      headers: { "content-type": "text/html" },
+    });
+    fetchStub.addResponse("example.com/raw2", {
+      body: "<html><body><p>Raw 2</p></body></html>",
+      headers: { "content-type": "text/html" },
+    });
+
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+
+    const result = await tool.execute(
+      "call-r3",
+      {
+        urls: ["https://example.com/raw1", "https://example.com/raw2"],
+        raw: true,
+      },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("<p>Raw 1</p>");
+    expect(text).toContain("<p>Raw 2</p>");
   });
 });
