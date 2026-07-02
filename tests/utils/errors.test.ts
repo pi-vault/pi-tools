@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeError } from "../../src/utils/errors.ts";
+import { AggregateProviderError, sanitizeError } from "../../src/utils/errors.ts";
 
 describe("sanitizeError", () => {
   it("redacts Bearer tokens", () => {
@@ -58,5 +58,36 @@ describe("sanitizeError", () => {
     expect(sanitizeError(42)).toBe("42");
     expect(sanitizeError(null)).toBe("Unknown error");
     expect(sanitizeError(undefined)).toBe("Unknown error");
+  });
+});
+
+describe("AggregateProviderError", () => {
+  it("formats multiple provider errors into a readable message", () => {
+    const err = new AggregateProviderError("search", [
+      { provider: "brave", error: "429 Too Many Requests" },
+      { provider: "exa", error: "Request timeout" },
+    ]);
+    expect(err.message).toContain("All search providers failed");
+    expect(err.message).toContain("brave: 429 Too Many Requests");
+    expect(err.message).toContain("exa: Request timeout");
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  it("sanitizes secrets in individual error messages", () => {
+    const err = new AggregateProviderError("search", [
+      { provider: "brave", error: "token=sk-abc123456789xyz failed" },
+    ]);
+    expect(err.message).toContain("[redacted]");
+    expect(err.message).not.toContain("sk-abc123456789xyz");
+  });
+
+  it("exposes the errors array for programmatic access", () => {
+    const errors = [
+      { provider: "brave", error: "429" },
+      { provider: "exa", error: "timeout" },
+    ];
+    const err = new AggregateProviderError("fetch", errors);
+    expect(err.errors).toEqual(errors);
+    expect(err.message).toContain("All fetch providers failed");
   });
 });

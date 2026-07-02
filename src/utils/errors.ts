@@ -23,3 +23,19 @@ export function sanitizeError(error: unknown): string {
 
   return msg;
 }
+
+export interface ProviderError {
+  provider: string;
+  error: string;
+}
+
+export class AggregateProviderError extends Error {
+  readonly errors: ProviderError[];
+
+  constructor(context: string, errors: ProviderError[]) {
+    const lines = errors.map((e) => `- ${e.provider}: ${sanitizeError(e.error)}`);
+    super(`All ${context} providers failed:\n${lines.join("\n")}`);
+    this.name = "AggregateProviderError";
+    this.errors = errors;
+  }
+}
