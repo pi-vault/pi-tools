@@ -49,11 +49,18 @@ export async function extractContent(
 
   const chain: string[] = [];
 
-  const response = await fetch(url, {
-    headers: BROWSER_HEADERS,
-    signal,
-    redirect: "follow",
-  });
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      headers: BROWSER_HEADERS,
+      signal,
+      redirect: "follow",
+    });
+  } catch (err) {
+    throw new RetryableExtractionError(
+      err instanceof Error ? err.message : String(err),
+    );
+  }
 
   chain.push(`http:${response.status}`);
 

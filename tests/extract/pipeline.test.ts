@@ -185,4 +185,23 @@ describe("RetryableExtractionError", () => {
       RetryableExtractionError,
     );
   });
+
+  it("is thrown for network-level failures (DNS, connection refused, etc)", async () => {
+    // Override the stubFetch to throw a TypeError (what fetch() throws on network failure)
+    fetchStub.restore();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new TypeError("fetch failed");
+    };
+    try {
+      await expect(extractContent("https://unreachable.example.com")).rejects.toThrow(
+        RetryableExtractionError,
+      );
+      await expect(extractContent("https://unreachable.example.com")).rejects.toThrow(
+        /fetch failed/,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });
