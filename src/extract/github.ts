@@ -1,3 +1,5 @@
+import type { ExtractedContent } from "./pipeline.ts";
+
 export interface GitHubUrl {
   owner: string;
   repo: string;
@@ -153,4 +155,63 @@ export function isBinaryFile(path: string, content?: Buffer): boolean {
   }
 
   return false;
+}
+
+const RAW_CONTENT_LIMIT = 100_000;
+
+/**
+ * Tier 1: Rewrite a blob (or raw) URL to raw.githubusercontent.com and
+ * fetch the file content directly.
+ * Returns null if the URL type is not blob/raw or the fetch fails.
+ */
+export async function fetchRaw(
+  parsed: GitHubUrl,
+  signal?: AbortSignal,
+): Promise<ExtractedContent | null> {
+  if (parsed.type !== "blob" && parsed.type !== "raw") return null;
+  if (!parsed.ref || !parsed.path) return null;
+
+  // Binary check by extension before fetching
+  if (isBinaryFile(parsed.path)) {
+    const url = `https://github.com/${parsed.owner}/${parsed.repo}/blob/${parsed.ref}/${parsed.path}`;
+    return {
+      text: `Binary file: ${parsed.path}`,
+      title: `${parsed.owner}/${parsed.repo} - ${parsed.path}`,
+      url,
+      extractionChain: ["github:raw", "binary-skip"],
+      chars: 0,
+      truncated: false,
+    };
+  }
+
+  const rawUrl = `https://raw.githubusercontent.com/${parsed.owner}/${parsed.repo}/${parsed.ref}/${parsed.path}`;
+
+  let response: Response;
+  try {
+    response = await fetch(rawUrl, { signal });
+  } catch {
+    return null;
+  }
+
+  if (!response.ok) return null;
+
+  const text = await response.text();
+  const originalUrl = `https://github.com/${parsed.owner}/${parsed.repo}/blob/${parsed.ref}/${parsed.path}`;
+  const totalChars = text.length;
+
+  let outputText = text;
+  let truncated = false;
+  if (totalChars > RAW_CONTENT_LIMIT) {
+    outputText = text.slice(0, RAW_CONTENT_LIMIT);
+    truncated = true;
+  }
+
+  return {
+    text: outputText,
+    title: `${parsed.owner}/${parsed.repo} - ${parsed.path}`,
+    url: originalUrl,
+    extractionChain: ["github:raw"],
+    chars: totalChars,
+    truncated,
+  };
 }

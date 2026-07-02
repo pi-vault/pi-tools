@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { parseGitHubUrl, isBinaryFile } from "../../src/extract/github.ts";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parseGitHubUrl, isBinaryFile, fetchRaw } from "../../src/extract/github.ts";
+import { stubFetch } from "../helpers.ts";
 
 describe("parseGitHubUrl", () => {
   describe("root URLs", () => {
@@ -364,5 +365,109 @@ describe("isBinaryFile", () => {
       const textBuf = Buffer.from("this is text");
       expect(isBinaryFile("image.png", textBuf)).toBe(true);
     });
+  });
+});
+
+describe("fetchRaw", () => {
+  let fetchStub: ReturnType<typeof stubFetch>;
+
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+
+  afterEach(() => {
+    fetchStub.restore();
+  });
+
+  it("rewrites blob URL to raw.githubusercontent.com and fetches content", async () => {
+    fetchStub.addResponse(
+      "raw.githubusercontent.com/facebook/react/main/README.md",
+      {
+        body: "# React\n\nA JavaScript library for building UIs.",
+        headers: { "content-type": "text/plain" },
+      },
+    );
+
+    const parsed = parseGitHubUrl(
+      "https://github.com/facebook/react/blob/main/README.md",
+    )!;
+    const result = await fetchRaw(parsed);
+    expect(result).not.toBeNull();
+    expect(result!.text).toContain("React");
+    expect(result!.extractionChain).toContain("github:raw");
+  });
+
+  it("returns null for non-blob URLs", async () => {
+    const parsed = parseGitHubUrl("https://github.com/facebook/react")!;
+    const result = await fetchRaw(parsed);
+    expect(result).toBeNull();
+  });
+
+  it("returns null when raw fetch fails (non-2xx)", async () => {
+    fetchStub.addResponse(
+      "raw.githubusercontent.com/facebook/react/main/missing.md",
+      { status: 404, body: "Not Found" },
+    );
+
+    const parsed = parseGitHubUrl(
+      "https://github.com/facebook/react/blob/main/missing.md",
+    )!;
+    const result = await fetchRaw(parsed);
+    expect(result).toBeNull();
+  });
+
+  it("truncates content at 100,000 chars", async () => {
+    const longContent = "x".repeat(150_000);
+    fetchStub.addResponse(
+      "raw.githubusercontent.com/owner/repo/main/big.txt",
+      {
+        body: longContent,
+        headers: { "content-type": "text/plain" },
+      },
+    );
+
+    const parsed = parseGitHubUrl(
+      "https://github.com/owner/repo/blob/main/big.txt",
+    )!;
+    const result = await fetchRaw(parsed);
+    expect(result).not.toBeNull();
+    expect(result!.chars).toBe(150_000);
+    expect(result!.truncated).toBe(true);
+    expect(result!.text.length).toBeLessThanOrEqual(100_000);
+  });
+
+  it("returns binary placeholder for binary files", async () => {
+    fetchStub.addResponse(
+      "raw.githubusercontent.com/owner/repo/main/logo.png",
+      {
+        body: "fake-binary-data",
+        headers: { "content-type": "image/png" },
+      },
+    );
+
+    const parsed = parseGitHubUrl(
+      "https://github.com/owner/repo/blob/main/logo.png",
+    )!;
+    const result = await fetchRaw(parsed);
+    expect(result).not.toBeNull();
+    expect(result!.text).toContain("Binary file");
+    expect(result!.text).toContain("logo.png");
+  });
+
+  it("handles raw.githubusercontent.com URLs directly", async () => {
+    fetchStub.addResponse(
+      "raw.githubusercontent.com/facebook/react/main/README.md",
+      {
+        body: "# React\n\nContent here.",
+        headers: { "content-type": "text/plain" },
+      },
+    );
+
+    const parsed = parseGitHubUrl(
+      "https://raw.githubusercontent.com/facebook/react/main/README.md",
+    )!;
+    const result = await fetchRaw(parsed);
+    expect(result).not.toBeNull();
+    expect(result!.text).toContain("React");
   });
 });
