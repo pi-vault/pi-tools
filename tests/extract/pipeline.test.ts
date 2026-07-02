@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { extractContent } from "../../src/extract/pipeline.ts";
+import { RetryableExtractionError, extractContent } from "../../src/extract/pipeline.ts";
 import { stubFetch } from "../helpers.ts";
 
 const GOOD_HTML = `
@@ -110,5 +110,79 @@ describe("extractContent", () => {
       headers: { "content-type": "image/jpeg" },
     });
     await expect(extractContent("https://example.com/photo.jpg")).rejects.toThrow(/binary/i);
+  });
+});
+
+describe("RetryableExtractionError", () => {
+  let fetchStub: ReturnType<typeof stubFetch>;
+
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+
+  afterEach(() => {
+    fetchStub.restore();
+  });
+
+  it("is thrown for HTTP 500", async () => {
+    fetchStub.addResponse("example.com/server-error", {
+      status: 500,
+      body: "Internal Server Error",
+      headers: { "content-type": "text/html" },
+    });
+
+    await expect(extractContent("https://example.com/server-error")).rejects.toThrow(
+      RetryableExtractionError,
+    );
+  });
+
+  it("is thrown for HTTP 503", async () => {
+    fetchStub.addResponse("example.com/unavailable", {
+      status: 503,
+      body: "Service Unavailable",
+      headers: { "content-type": "text/html" },
+    });
+
+    await expect(extractContent("https://example.com/unavailable")).rejects.toThrow(
+      RetryableExtractionError,
+    );
+  });
+
+  it("is thrown for HTTP 429", async () => {
+    fetchStub.addResponse("example.com/rate-limited", {
+      status: 429,
+      body: "Too Many Requests",
+      headers: { "content-type": "text/html" },
+    });
+
+    await expect(extractContent("https://example.com/rate-limited")).rejects.toThrow(
+      RetryableExtractionError,
+    );
+  });
+
+  it("is NOT thrown for HTTP 404", async () => {
+    fetchStub.addResponse("example.com/missing", {
+      status: 404,
+      body: "Not Found",
+      headers: { "content-type": "text/html" },
+    });
+
+    await expect(extractContent("https://example.com/missing")).rejects.toThrow(Error);
+    await expect(extractContent("https://example.com/missing")).rejects.not.toThrow(
+      RetryableExtractionError,
+    );
+  });
+
+  it("is NOT thrown for HTTP 403", async () => {
+    fetchStub.addResponse("example.com/forbidden", {
+      status: 403,
+      body: "Forbidden",
+      headers: { "content-type": "text/html" },
+    });
+
+    await expect(extractContent("https://example.com/forbidden")).rejects.toThrow(Error);
+    await expect(extractContent("https://example.com/forbidden")).rejects.not.toThrow(
+      RetryableExtractionError,
+    );
   });
 });
