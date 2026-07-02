@@ -7,6 +7,7 @@ export interface ProviderConfigEntry {
   enabled: boolean;
   monthlyQuota?: number;
   apiKey?: string;
+  instanceUrl?: string;
 }
 
 export interface PiToolsConfig {
@@ -29,6 +30,11 @@ const DEFAULT_CONFIG: PiToolsConfig = {
     serper: { enabled: false, apiKey: "SERPER_API_KEY" },
     perplexity: { enabled: true, apiKey: "PERPLEXITY_API_KEY" },
     firecrawl: { enabled: true, apiKey: "FIRECRAWL_API_KEY" },
+    "exa-mcp": { enabled: true },
+    "openai-native": { enabled: true, apiKey: "OPENAI_API_KEY" },
+    parallel: { enabled: false, apiKey: "PARALLEL_API_KEY" },
+    searxng: { enabled: false, instanceUrl: "http://localhost:8080" },
+    websearchapi: { enabled: false, apiKey: "WEBSEARCHAPI_API_KEY" },
   },
 };
 

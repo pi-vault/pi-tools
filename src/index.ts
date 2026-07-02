@@ -1,6 +1,6 @@
 // src/index.ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadConfig, resolveApiKey } from "./config.ts";
+import { loadConfig, resolveApiKey, type ProviderConfigEntry } from "./config.ts";
 import { ContentStore, type StoredContent } from "./storage.ts";
 import { UsageTracker } from "./providers/usage.ts";
 import { ProviderRegistry } from "./providers/registry.ts";
@@ -12,6 +12,11 @@ import { TavilyProvider } from "./providers/tavily.ts";
 import { ExaProvider } from "./providers/exa.ts";
 import { PerplexityProvider } from "./providers/perplexity.ts";
 import { FirecrawlProvider } from "./providers/firecrawl.ts";
+import { ExaMcpProvider } from "./providers/exa-mcp.ts";
+import { OpenAINativeProvider } from "./providers/openai-native.ts";
+import { ParallelProvider } from "./providers/parallel.ts";
+import { SearXNGProvider } from "./providers/searxng.ts";
+import { WebSearchApiProvider } from "./providers/websearchapi.ts";
 import type { FetchProvider, SearchProvider, CodeSearchProvider } from "./providers/types.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { createWebFetchTool } from "./tools/web-fetch.ts";
@@ -20,7 +25,7 @@ import { createCodeSearchTool } from "./tools/code-search.ts";
 import { ContentCache } from "./cache.ts";
 
 interface ProviderFactory {
-  create: (key?: string) => {
+  create: (key?: string, providerConfig?: ProviderConfigEntry) => {
     search?: SearchProvider;
     fetch?: FetchProvider;
     codeSearch?: CodeSearchProvider;
@@ -75,6 +80,34 @@ const providerFactories: Record<string, ProviderFactory> = {
     },
     tier: 1, monthlyQuota: 1000, requiresKey: true,
   },
+  "exa-mcp": {
+    create: () => ({ search: new ExaMcpProvider() }),
+    tier: 3, monthlyQuota: null, requiresKey: false,
+  },
+  "openai-native": {
+    create: (key) => ({ search: new OpenAINativeProvider(key!) }),
+    tier: 1, monthlyQuota: null, requiresKey: true,
+  },
+  parallel: {
+    create: (key) => {
+      const p = new ParallelProvider(key!);
+      return { search: p, fetch: p };
+    },
+    tier: 1, monthlyQuota: null, requiresKey: true,
+  },
+  searxng: {
+    create: (_key, providerConfig) => ({
+      search: new SearXNGProvider({
+        instanceUrl: providerConfig?.instanceUrl,
+        apiKey: providerConfig?.apiKey ? resolveApiKey(providerConfig.apiKey) : undefined,
+      }),
+    }),
+    tier: 2, monthlyQuota: null, requiresKey: false,
+  },
+  websearchapi: {
+    create: (key) => ({ search: new WebSearchApiProvider(key!) }),
+    tier: 1, monthlyQuota: null, requiresKey: true,
+  },
 };
 
 function isStoredContent(data: unknown): data is StoredContent {
@@ -107,7 +140,7 @@ export default function createExtension(pi: ExtensionAPI): void {
     const resolvedKey = resolveApiKey(providerConfig?.apiKey);
     if (factory.requiresKey && !resolvedKey) continue;
 
-    const instances = factory.create(resolvedKey);
+    const instances = factory.create(resolvedKey, providerConfig);
     const quota = providerConfig?.monthlyQuota ?? factory.monthlyQuota;
 
     if (instances.search) {
