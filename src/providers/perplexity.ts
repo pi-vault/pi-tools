@@ -1,58 +1,36 @@
-// src/providers/perplexity.ts
-import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
-
-interface PerplexityResponse {
-  choices: Array<{ message: { content: string } }>;
-  citations?: string[];
-}
-
-export class PerplexityProvider implements SearchProvider {
-  readonly name = "perplexity";
-  readonly label = "Perplexity Sonar";
-  private apiKey: string;
-
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-  }
-
-  async search(query: string, maxResults: number, signal?: AbortSignal, _filters?: SearchFilters): Promise<SearchResult[]> {
-    const response = await fetch("https://api.perplexity.ai/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "sonar",
-        messages: [{ role: "user", content: query }],
-      }),
-      signal,
-    });
-    if (!response.ok) throw new Error(`Perplexity API error: ${response.status} ${response.statusText}`);
-    const data = (await response.json()) as PerplexityResponse;
-
-    const answer = data.choices?.[0]?.message?.content ?? "";
-    const citations = data.citations ?? [];
-    const results: SearchResult[] = [];
-
-    // Main answer as first result
-    if (answer) {
-      results.push({ title: "Perplexity Answer", url: "", snippet: answer });
-    }
-
-    // Citations as additional results
-    for (const url of citations.slice(0, maxResults - 1)) {
-      results.push({ title: url, url, snippet: "" });
-    }
-
-    return results.slice(0, maxResults);
-  }
-}
+import { createHttpSearchProvider } from "./http-adapter.ts";
+import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
   name: "perplexity",
   tier: 2,
   monthlyQuota: null,
   requiresKey: true,
-  create: (key) => ({ search: new PerplexityProvider(key!) }),
+  create: (key) => ({
+    search: createHttpSearchProvider(key!, {
+      name: "perplexity",
+      label: "Perplexity Sonar",
+      endpoint: "https://api.perplexity.ai/chat/completions",
+      method: "POST",
+      authHeader: "Authorization",
+      authPrefix: "Bearer ",
+      buildBody: (query) => ({
+        model: "sonar",
+        messages: [{ role: "user", content: query }],
+      }),
+      extractResults: (data) => {
+        const d = data as {
+          choices?: Array<{ message?: { content?: string } }>;
+          citations?: string[];
+        };
+        const answer = d.choices?.[0]?.message?.content ?? "";
+        const citations = d.citations ?? [];
+        if (!answer) return [];
+        return [
+          { title: "Perplexity Answer", url: "", snippet: answer },
+          ...citations.map((url) => ({ title: url, url, snippet: "" })),
+        ];
+      },
+    }),
+  }),
 };

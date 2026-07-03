@@ -1,7 +1,9 @@
 // tests/providers/websearchapi.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { WebSearchApiProvider } from "../../src/providers/websearchapi.ts";
+import { providerMeta } from "../../src/providers/websearchapi.ts";
 import { stubFetch } from "../helpers.ts";
+
+const makeProvider = (key = "test-key") => providerMeta.create(key).search!;
 
 describe("WebSearchApiProvider", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
@@ -15,7 +17,7 @@ describe("WebSearchApiProvider", () => {
   });
 
   it("has correct name and label", () => {
-    const provider = new WebSearchApiProvider("test-key");
+    const provider = makeProvider();
     expect(provider.name).toBe("websearchapi");
     expect(provider.label).toBe("WebSearchAPI");
   });
@@ -43,7 +45,7 @@ describe("WebSearchApiProvider", () => {
       },
     });
 
-    const provider = new WebSearchApiProvider("test-key");
+    const provider = makeProvider();
     const results = await provider.search("test query", 5);
 
     expect(results).toHaveLength(2);
@@ -64,7 +66,7 @@ describe("WebSearchApiProvider", () => {
       body: { organic: [], responseTime: 0.5 },
     });
 
-    const provider = new WebSearchApiProvider("my-ws-key");
+    const provider = makeProvider("my-ws-key");
     await provider.search("my query", 7);
 
     const fetchCall = (globalThis.fetch as any).mock.calls[0];
@@ -92,7 +94,7 @@ describe("WebSearchApiProvider", () => {
       body: { organic: manyResults, responseTime: 1.0 },
     });
 
-    const provider = new WebSearchApiProvider("key");
+    const provider = makeProvider();
     const results = await provider.search("test", 3);
     expect(results).toHaveLength(3);
   });
@@ -102,10 +104,7 @@ describe("WebSearchApiProvider", () => {
       status: 401,
       body: "Unauthorized",
     });
-    const provider = new WebSearchApiProvider("bad-key");
-    await expect(provider.search("test", 5)).rejects.toThrow(
-      "WebSearchAPI error",
-    );
+    await expect(makeProvider("bad-key").search("test", 5)).rejects.toThrow();
   });
 
   it("handles empty organic array", async () => {
@@ -113,8 +112,7 @@ describe("WebSearchApiProvider", () => {
       body: { organic: [], responseTime: 0.3 },
     });
 
-    const provider = new WebSearchApiProvider("key");
-    const results = await provider.search("nothing", 5);
+    const results = await makeProvider().search("nothing", 5);
     expect(results).toEqual([]);
   });
 
@@ -123,8 +121,7 @@ describe("WebSearchApiProvider", () => {
       body: { responseTime: 0.3 },
     });
 
-    const provider = new WebSearchApiProvider("key");
-    const results = await provider.search("nothing", 5);
+    const results = await makeProvider().search("nothing", 5);
     expect(results).toEqual([]);
   });
 });

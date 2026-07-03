@@ -1,8 +1,10 @@
 // tests/providers/perplexity.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { PerplexityProvider } from "../../src/providers/perplexity.ts";
+import { providerMeta } from "../../src/providers/perplexity.ts";
 import { stubFetch } from "../helpers.ts";
 import type { SearchFilters } from "../../src/providers/types.ts";
+
+const makeProvider = (key = "key") => providerMeta.create(key).search!;
 
 describe("PerplexityProvider", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
@@ -11,8 +13,9 @@ describe("PerplexityProvider", () => {
   afterEach(() => { fetchStub.restore(); });
 
   it("has correct name and label", () => {
-    expect(new PerplexityProvider("key").name).toBe("perplexity");
-    expect(new PerplexityProvider("key").label).toBe("Perplexity Sonar");
+    const p = makeProvider();
+    expect(p.name).toBe("perplexity");
+    expect(p.label).toBe("Perplexity Sonar");
   });
 
   it("returns search results from chat completion format", async () => {
@@ -22,7 +25,7 @@ describe("PerplexityProvider", () => {
         citations: ["https://source1.com", "https://source2.com"],
       },
     });
-    const results = await new PerplexityProvider("key").search("test", 5);
+    const results = await makeProvider().search("test", 5);
     expect(results.length).toBeGreaterThan(0);
   });
 
@@ -30,7 +33,7 @@ describe("PerplexityProvider", () => {
     fetchStub.addResponse("api.perplexity.ai", {
       body: { choices: [{ message: { content: "answer" } }], citations: [] },
     });
-    await new PerplexityProvider("my-key").search("test", 5);
+    await makeProvider("my-key").search("test", 5);
     const fetchCall = (globalThis.fetch as any).mock.calls[0];
     expect(fetchCall[1].headers.Authorization).toBe("Bearer my-key");
   });
@@ -44,14 +47,13 @@ describe("PerplexityProvider", () => {
         },
       });
 
-      const provider = new PerplexityProvider("key");
       const filters: SearchFilters = {
         includeDomains: ["example.com"],
         excludeDomains: ["spam.com"],
         startDate: "2025-01-01",
         endDate: "2025-12-31",
       };
-      const results = await provider.search("test", 5, undefined, filters);
+      const results = await makeProvider().search("test", 5, undefined, filters);
       expect(results.length).toBeGreaterThan(0);
     });
 
@@ -63,9 +65,8 @@ describe("PerplexityProvider", () => {
         },
       });
 
-      const provider = new PerplexityProvider("key");
       const filters: SearchFilters = { includeDomains: ["example.com"] };
-      await provider.search("test query", 5, undefined, filters);
+      await makeProvider().search("test query", 5, undefined, filters);
 
       const fetchCall = (globalThis.fetch as any).mock.calls[0];
       const body = JSON.parse(fetchCall[1].body);
