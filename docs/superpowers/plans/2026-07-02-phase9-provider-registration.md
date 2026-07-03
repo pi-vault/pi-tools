@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Move provider metadata (tier, quota, key requirement, factory) from the centralized `providerFactories` map in `index.ts` into each provider file. Create a barrel that collects them. Shrink `index.ts` from ~219 lines to ~100 lines.
+**Goal:** Move provider metadata (tier, quota, key requirement, factory) from the centralized `providerFactories` map in `index.ts` into each provider file. Create a barrel that collects them. Shrink `index.ts` from ~220 lines to ~100 lines.
 
-**Architecture:** Each provider exports a `providerMeta` object with `name`, `tier`, `monthlyQuota`, `requiresKey`, and `create()`. A barrel file `src/providers/all.ts` imports and re-exports all metas as an array. `index.ts` iterates this array instead of maintaining its own factory map.
+**Architecture:** Each provider exports a `providerMeta` object conforming to a `ProviderMeta` interface defined in `types.ts`. A barrel file `src/providers/all.ts` imports and re-exports all metas as an array. `index.ts` iterates this array instead of maintaining its own factory map.
 
 **Tech Stack:** TypeScript 6, Vitest 4, Node 24+
 
@@ -14,30 +14,29 @@
 
 Current state in `src/index.ts`:
 - Lines 7-19: 13 concrete provider imports
-- Lines 28-37: `ProviderFactory` interface
+- Lines 28-37: `ProviderFactory` interface (local, not exported)
 - Lines 39-112: `providerFactories` map (73 lines of metadata + factory logic)
 - Lines 136-156: Registration loop that reads from the map
 
 The `create` function signature is: `(key?: string, providerConfig?: ProviderConfigEntry) => { search?: SearchProvider; fetch?: FetchProvider; codeSearch?: CodeSearchProvider }`
 
+**Key constraint — avoiding circular imports:** The `ProviderMeta` type lives in `types.ts`. Provider files import the type from `types.ts`. The barrel `all.ts` imports values from provider files. This gives a clean dependency graph: `types.ts` ← providers ← `all.ts` ← `index.ts`.
+
 ---
 
-### Task 1: Define ProviderMeta type and add meta to first 3 providers
+### Task 1: Replace dead types in types.ts with ProviderMeta
 
 **Files:**
-- Create: `src/providers/all.ts`
-- Modify: `src/providers/brave.ts`
-- Modify: `src/providers/duckduckgo.ts`
-- Modify: `src/providers/jina.ts`
+- Modify: `src/providers/types.ts`
+- Modify: `tests/providers/types.test.ts`
 
-- [ ] **Step 1: Create the ProviderMeta type in the barrel file**
+The existing `ProviderMeta`, `ProviderCapabilities`, and `ProviderConfig` interfaces in `types.ts` (lines 52-73) are unused in production code. Replace them with the new `ProviderMeta` that carries a factory function.
 
-Create `src/providers/all.ts`:
+- [ ] **Step 1: Replace dead types with the new ProviderMeta and ProviderInstances**
+
+Replace lines 52-73 in `src/providers/types.ts` with:
 
 ```ts
-import type { ProviderConfigEntry } from "../config.ts";
-import type { CodeSearchProvider, FetchProvider, ProviderTier, SearchProvider } from "./types.ts";
-
 export interface ProviderInstances {
   search?: SearchProvider;
   fetch?: FetchProvider;
@@ -51,17 +50,75 @@ export interface ProviderMeta {
   requiresKey: boolean;
   create: (key?: string, providerConfig?: ProviderConfigEntry) => ProviderInstances;
 }
-
-// Will be populated as we add providerMeta to each provider file
-export const allProviders: ProviderMeta[] = [];
 ```
 
-- [ ] **Step 2: Add providerMeta to brave.ts**
-
-Append to `src/providers/brave.ts`:
+Add the required import at the top of `types.ts`:
 
 ```ts
-import type { ProviderMeta } from "./all.ts";
+import type { ProviderConfigEntry } from "../config.ts";
+```
+
+- [ ] **Step 2: Update the types test**
+
+Replace the `ProviderMeta` test in `tests/providers/types.test.ts` to match the new shape:
+
+```ts
+it("ProviderMeta describes provider registration", () => {
+  const meta: ProviderMeta = {
+    name: "brave",
+    tier: 1,
+    monthlyQuota: 2000,
+    requiresKey: true,
+    create: (key) => ({ search: { name: "brave", label: "Brave", search: async () => [] } }),
+  };
+  expect(meta.tier).toBe(1);
+  expect(meta.requiresKey).toBe(true);
+  expect(meta.monthlyQuota).toBe(2000);
+  expect(meta.create("key")).toHaveProperty("search");
+});
+```
+
+Also update the import to remove `ProviderMeta` references to old fields (`ProviderCapabilities` is gone).
+
+- [ ] **Step 3: Run typecheck and tests**
+
+Run: `pnpm run typecheck && pnpm vitest run tests/providers/types.test.ts`
+Expected: PASS
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/providers/types.ts tests/providers/types.test.ts
+git commit -m "refactor: replace dead ProviderMeta/ProviderCapabilities/ProviderConfig with factory-aware ProviderMeta"
+```
+
+---
+
+### Task 2: Add providerMeta to all 13 provider files
+
+**Files:**
+- Modify: `src/providers/brave.ts`
+- Modify: `src/providers/duckduckgo.ts`
+- Modify: `src/providers/jina.ts`
+- Modify: `src/providers/serper.ts`
+- Modify: `src/providers/tavily.ts`
+- Modify: `src/providers/exa.ts`
+- Modify: `src/providers/perplexity.ts`
+- Modify: `src/providers/firecrawl.ts`
+- Modify: `src/providers/exa-mcp.ts`
+- Modify: `src/providers/openai-native.ts`
+- Modify: `src/providers/parallel.ts`
+- Modify: `src/providers/searxng.ts`
+- Modify: `src/providers/websearchapi.ts`
+
+Each provider file gets a `providerMeta` export that imports `ProviderMeta` from `./types.ts` (no circular dependency — types.ts has no runtime imports from provider files).
+
+- [ ] **Step 1: Add providerMeta to brave.ts**
+
+Add import and append to `src/providers/brave.ts`:
+
+```ts
+import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
   name: "brave",
@@ -72,12 +129,10 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 3: Add providerMeta to duckduckgo.ts**
-
-Append to `src/providers/duckduckgo.ts`:
+- [ ] **Step 2: Add providerMeta to duckduckgo.ts**
 
 ```ts
-import type { ProviderMeta } from "./all.ts";
+import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
   name: "duckduckgo",
@@ -88,12 +143,10 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 4: Add providerMeta to jina.ts**
-
-Append to `src/providers/jina.ts`:
+- [ ] **Step 3: Add providerMeta to jina.ts**
 
 ```ts
-import type { ProviderMeta } from "./all.ts";
+import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
   name: "jina",
@@ -107,40 +160,10 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 5: Run typecheck**
-
-Run: `pnpm run typecheck`
-Expected: PASS (no type errors)
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/providers/all.ts src/providers/brave.ts src/providers/duckduckgo.ts src/providers/jina.ts
-git commit -m "feat: add ProviderMeta type and meta exports to brave, duckduckgo, jina"
-```
-
----
-
-### Task 2: Add providerMeta to remaining 10 providers
-
-**Files:**
-- Modify: `src/providers/serper.ts`
-- Modify: `src/providers/tavily.ts`
-- Modify: `src/providers/exa.ts`
-- Modify: `src/providers/perplexity.ts`
-- Modify: `src/providers/firecrawl.ts`
-- Modify: `src/providers/exa-mcp.ts`
-- Modify: `src/providers/openai-native.ts`
-- Modify: `src/providers/parallel.ts`
-- Modify: `src/providers/searxng.ts`
-- Modify: `src/providers/websearchapi.ts`
-
-- [ ] **Step 1: Add providerMeta to serper.ts**
-
-Append to `src/providers/serper.ts`:
+- [ ] **Step 4: Add providerMeta to serper.ts**
 
 ```ts
-import type { ProviderMeta } from "./all.ts";
+import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
   name: "serper",
@@ -151,12 +174,10 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 2: Add providerMeta to tavily.ts**
-
-Append to `src/providers/tavily.ts`:
+- [ ] **Step 5: Add providerMeta to tavily.ts**
 
 ```ts
-import type { ProviderMeta } from "./all.ts";
+import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
   name: "tavily",
@@ -170,12 +191,10 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 3: Add providerMeta to exa.ts**
-
-Append to `src/providers/exa.ts`:
+- [ ] **Step 6: Add providerMeta to exa.ts**
 
 ```ts
-import type { ProviderMeta } from "./all.ts";
+import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
   name: "exa",
@@ -189,12 +208,10 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 4: Add providerMeta to perplexity.ts**
-
-Append to `src/providers/perplexity.ts`:
+- [ ] **Step 7: Add providerMeta to perplexity.ts**
 
 ```ts
-import type { ProviderMeta } from "./all.ts";
+import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
   name: "perplexity",
@@ -205,12 +222,10 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 5: Add providerMeta to firecrawl.ts**
-
-Append to `src/providers/firecrawl.ts`:
+- [ ] **Step 8: Add providerMeta to firecrawl.ts**
 
 ```ts
-import type { ProviderMeta } from "./all.ts";
+import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
   name: "firecrawl",
@@ -224,12 +239,10 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 6: Add providerMeta to exa-mcp.ts**
-
-Append to `src/providers/exa-mcp.ts`:
+- [ ] **Step 9: Add providerMeta to exa-mcp.ts**
 
 ```ts
-import type { ProviderMeta } from "./all.ts";
+import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
   name: "exa-mcp",
@@ -240,12 +253,10 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 7: Add providerMeta to openai-native.ts**
-
-Append to `src/providers/openai-native.ts`:
+- [ ] **Step 10: Add providerMeta to openai-native.ts**
 
 ```ts
-import type { ProviderMeta } from "./all.ts";
+import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
   name: "openai-native",
@@ -256,12 +267,10 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 8: Add providerMeta to parallel.ts**
-
-Append to `src/providers/parallel.ts`:
+- [ ] **Step 11: Add providerMeta to parallel.ts**
 
 ```ts
-import type { ProviderMeta } from "./all.ts";
+import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
   name: "parallel",
@@ -275,12 +284,10 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 9: Add providerMeta to searxng.ts**
-
-Append to `src/providers/searxng.ts`:
+- [ ] **Step 12: Add providerMeta to searxng.ts**
 
 ```ts
-import type { ProviderMeta } from "./all.ts";
+import type { ProviderMeta } from "./types.ts";
 import { resolveApiKey } from "../config.ts";
 
 export const providerMeta: ProviderMeta = {
@@ -297,12 +304,10 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 10: Add providerMeta to websearchapi.ts**
-
-Append to `src/providers/websearchapi.ts`:
+- [ ] **Step 13: Add providerMeta to websearchapi.ts**
 
 ```ts
-import type { ProviderMeta } from "./all.ts";
+import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
   name: "websearchapi",
@@ -313,50 +318,35 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 11: Run typecheck**
+- [ ] **Step 14: Run typecheck**
 
 Run: `pnpm run typecheck`
 Expected: PASS
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 15: Commit**
 
 ```bash
-git add src/providers/serper.ts src/providers/tavily.ts src/providers/exa.ts \
+git add src/providers/brave.ts src/providers/duckduckgo.ts src/providers/jina.ts \
+  src/providers/serper.ts src/providers/tavily.ts src/providers/exa.ts \
   src/providers/perplexity.ts src/providers/firecrawl.ts src/providers/exa-mcp.ts \
   src/providers/openai-native.ts src/providers/parallel.ts src/providers/searxng.ts \
   src/providers/websearchapi.ts
-git commit -m "feat: add providerMeta exports to all remaining providers"
+git commit -m "feat: add providerMeta exports to all 13 provider files"
 ```
 
 ---
 
-### Task 3: Populate the barrel with all provider metas
+### Task 3: Create the barrel and add a smoke test
 
 **Files:**
-- Modify: `src/providers/all.ts`
+- Create: `src/providers/all.ts`
+- Create: `tests/providers/all.test.ts`
 
-- [ ] **Step 1: Import all provider metas into the barrel**
+- [ ] **Step 1: Create the barrel file**
 
-Replace `src/providers/all.ts` content:
+Create `src/providers/all.ts`:
 
 ```ts
-import type { ProviderConfigEntry } from "../config.ts";
-import type { CodeSearchProvider, FetchProvider, ProviderTier, SearchProvider } from "./types.ts";
-
-export interface ProviderInstances {
-  search?: SearchProvider;
-  fetch?: FetchProvider;
-  codeSearch?: CodeSearchProvider;
-}
-
-export interface ProviderMeta {
-  name: string;
-  tier: ProviderTier;
-  monthlyQuota: number | null;
-  requiresKey: boolean;
-  create: (key?: string, providerConfig?: ProviderConfigEntry) => ProviderInstances;
-}
-
 import { providerMeta as brave } from "./brave.ts";
 import { providerMeta as duckduckgo } from "./duckduckgo.ts";
 import { providerMeta as exa } from "./exa.ts";
@@ -370,6 +360,9 @@ import { providerMeta as searxng } from "./searxng.ts";
 import { providerMeta as serper } from "./serper.ts";
 import { providerMeta as tavily } from "./tavily.ts";
 import { providerMeta as websearchapi } from "./websearchapi.ts";
+
+import type { ProviderMeta } from "./types.ts";
+export type { ProviderMeta };
 
 export const allProviders: ProviderMeta[] = [
   brave,
@@ -388,16 +381,65 @@ export const allProviders: ProviderMeta[] = [
 ];
 ```
 
-- [ ] **Step 2: Run typecheck**
+- [ ] **Step 2: Add barrel smoke test**
 
-Run: `pnpm run typecheck`
+Create `tests/providers/all.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { allProviders } from "../../src/providers/all.ts";
+
+describe("allProviders barrel", () => {
+  it("exports exactly 13 providers", () => {
+    expect(allProviders).toHaveLength(13);
+  });
+
+  it("every entry has required ProviderMeta fields", () => {
+    for (const meta of allProviders) {
+      expect(meta.name).toBeTypeOf("string");
+      expect([1, 2, 3]).toContain(meta.tier);
+      expect(meta.monthlyQuota === null || typeof meta.monthlyQuota === "number").toBe(true);
+      expect(meta.requiresKey).toBeTypeOf("boolean");
+      expect(meta.create).toBeTypeOf("function");
+    }
+  });
+
+  it("has no duplicate names", () => {
+    const names = allProviders.map((m) => m.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("contains all expected provider names", () => {
+    const names = allProviders.map((m) => m.name).sort();
+    expect(names).toEqual([
+      "brave",
+      "duckduckgo",
+      "exa",
+      "exa-mcp",
+      "firecrawl",
+      "jina",
+      "openai-native",
+      "parallel",
+      "perplexity",
+      "searxng",
+      "serper",
+      "tavily",
+      "websearchapi",
+    ]);
+  });
+});
+```
+
+- [ ] **Step 3: Run typecheck and test**
+
+Run: `pnpm run typecheck && pnpm vitest run tests/providers/all.test.ts`
 Expected: PASS
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add src/providers/all.ts
-git commit -m "feat: populate provider barrel with all 13 provider metas"
+git add src/providers/all.ts tests/providers/all.test.ts
+git commit -m "feat: create provider barrel with smoke test"
 ```
 
 ---
@@ -406,7 +448,7 @@ git commit -m "feat: populate provider barrel with all 13 provider metas"
 
 **Files:**
 - Modify: `src/index.ts`
-- Test: `tests/index.test.ts`
+- Test: `tests/index.test.ts`, `tests/index-strategy.test.ts`
 
 - [ ] **Step 1: Rewrite index.ts**
 
@@ -561,9 +603,11 @@ git commit -m "refactor: replace providerFactories map with barrel import from p
 - Modify: `src/utils/errors.ts`
 - Test: `tests/utils/errors.test.ts`
 
+The `ProviderError` interface is used only inside `errors.ts` by `AggregateProviderError`. No external code imports it directly. Inline the type.
+
 - [ ] **Step 1: Inline the ProviderError interface**
 
-In `src/utils/errors.ts`, remove the exported `ProviderError` interface and inline the type:
+In `src/utils/errors.ts`, remove the `ProviderError` interface and inline the type into `AggregateProviderError`:
 
 ```ts
 const SECRETS_PATTERN =
@@ -604,18 +648,16 @@ export class AggregateProviderError extends Error {
 }
 ```
 
-- [ ] **Step 2: Check for external usages of ProviderError type**
+- [ ] **Step 2: Verify no external imports of ProviderError**
 
-```bash
-grep -rn "ProviderError" src/ tests/
-```
+Run: `grep -rn "import.*ProviderError" src/ tests/`
 
-If any imports reference `ProviderError`, update them to use `Array<{ provider: string; error: string }>` inline.
+Expected: No results (only `AggregateProviderError` is imported externally). If any references exist, update them.
 
 - [ ] **Step 3: Run tests**
 
 Run: `pnpm vitest run tests/utils/errors.test.ts`
-Expected: PASS
+Expected: PASS (existing tests pass since the shape `{ provider: string; error: string }` is unchanged)
 
 - [ ] **Step 4: Run full verification**
 
@@ -628,3 +670,13 @@ Expected: PASS
 git add src/utils/errors.ts
 git commit -m "refactor: inline ProviderError interface into AggregateProviderError"
 ```
+
+---
+
+## Design decisions
+
+- **`ProviderMeta` in `types.ts`, not `all.ts`:** Avoids circular imports. Provider files import the type from `types.ts`; the barrel imports values from provider files.
+- **Replaced dead types:** The existing `ProviderMeta`, `ProviderCapabilities`, and `ProviderConfig` in `types.ts` were unused in production. Removing them avoids naming confusion and dead code.
+- **Barrel created fully formed (no empty placeholder):** The barrel is created in Task 3 after all providers have their meta exports. No intermediate empty-array step.
+- **Smoke test for barrel:** Verifies count, shape, uniqueness, and expected names — catches future regressions like adding a provider without registering it in the barrel.
+- **`isStoredContent` kept as a named function:** Type guards cannot be inlined without losing TypeScript's `is` narrowing in the calling context. Keeping it as a named function above `createExtension` is the idiomatic approach.
