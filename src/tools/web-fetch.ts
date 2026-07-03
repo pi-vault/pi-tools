@@ -132,7 +132,6 @@ export function createWebFetchTool(
             execute: () => provider.fetch(url, signal),
           })),
           operation: "fetch",
-          initialErrors: [{ provider: "http", error: pipelineError.message }],
         });
 
         const extracted: ExtractedContent = {
@@ -147,8 +146,8 @@ export function createWebFetchTool(
         cache?.set(url, extracted);
         return buildResult(extracted, url, store);
       } catch (fallbackError) {
-        const msg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-        return errorResult(url, `Fetch error: ${msg}`);
+        const providerMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        return errorResult(url, `Fetch error (pipeline: ${pipelineError.message}): ${providerMsg}`);
       }
     }
   }

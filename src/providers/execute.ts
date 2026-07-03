@@ -1,6 +1,6 @@
 import { AggregateProviderError } from "../utils/errors.ts";
 
-export interface FallbackCandidate<T> {
+interface FallbackCandidate<T> {
   name: string;
   execute: () => Promise<T>;
 }
@@ -8,32 +8,22 @@ export interface FallbackCandidate<T> {
 export interface ExecuteOptions<T> {
   candidates: FallbackCandidate<T>[];
   operation: string;
-  /** Errors to seed the aggregate with (e.g. the initial HTTP pipeline error). */
-  initialErrors?: Array<{ provider: string; error: string }>;
   onSuccess?: (providerName: string, latencyMs: number) => void;
   onFailure?: (providerName: string) => void;
 }
 
-export interface ExecuteResult<T> {
-  result: T;
-  providerName: string;
-}
-
 export async function executeWithFallback<T>(
   options: ExecuteOptions<T>,
-): Promise<ExecuteResult<T>> {
-  const { candidates, operation, initialErrors, onSuccess, onFailure } = options;
+): Promise<{ result: T; providerName: string }> {
+  const { candidates, operation, onSuccess, onFailure } = options;
 
   if (candidates.length === 0) {
     throw new AggregateProviderError(operation, [
-      ...(initialErrors ?? []),
       { provider: "none", error: `No ${operation} providers available` },
     ]);
   }
 
-  const errors: Array<{ provider: string; error: string }> = [
-    ...(initialErrors ?? []),
-  ];
+  const errors: Array<{ provider: string; error: string }> = [];
 
   for (const candidate of candidates) {
     const startMs = Date.now();

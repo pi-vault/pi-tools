@@ -70,26 +70,4 @@ describe("executeWithFallback", () => {
       }),
     ).rejects.toThrow("No search providers available");
   });
-
-  it("includes initialErrors in aggregate when all candidates fail", async () => {
-    await expect(
-      executeWithFallback({
-        candidates: [
-          { name: "exa", execute: async () => { throw new Error("Exa unavailable"); } },
-        ],
-        operation: "fetch",
-        initialErrors: [{ provider: "http", error: "500 Server Error" }],
-      }),
-    ).rejects.toThrow("http: 500 Server Error");
-  });
-
-  it("includes initialErrors in aggregate when candidates is empty", async () => {
-    await expect(
-      executeWithFallback({
-        candidates: [],
-        operation: "fetch",
-        initialErrors: [{ provider: "http", error: "500 Server Error" }],
-      }),
-    ).rejects.toThrow("http: 500 Server Error");
-  });
 });
