@@ -1,4 +1,4 @@
-import { loadConfig } from "../config.ts";
+import { DEFAULT_GITHUB_CONFIG, type GitHubConfig } from "../config.ts";
 import { validateUrl } from "../utils/ssrf.ts";
 import { extractGitHub, parseGitHubUrl } from "./github.ts";
 import { extractHtml } from "./html.ts";
@@ -45,6 +45,7 @@ const BROWSER_HEADERS: Record<string, string> = {
 
 export interface ExtractOptions {
   raw?: boolean;
+  github?: GitHubConfig;
 }
 
 export async function extractContent(
@@ -59,9 +60,9 @@ export async function extractContent(
   // Returns null for non-content URLs (issues, PRs, etc.) -> falls through.
   const ghParsed = parseGitHubUrl(url);
   if (ghParsed && ghParsed.type !== "unknown") {
-    const config = loadConfig();
-    if (config.github.enabled) {
-      const ghResult = await extractGitHub(ghParsed, signal, config.github);
+    const githubConfig = options?.github ?? DEFAULT_GITHUB_CONFIG;
+    if (githubConfig.enabled) {
+      const ghResult = await extractGitHub(ghParsed, signal, githubConfig);
       if (ghResult) return ghResult;
     }
   }
