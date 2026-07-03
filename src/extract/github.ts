@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as nodePath from "node:path";
 import { promisify } from "node:util";
-import type { GitHubConfig } from "../config.ts";
+import { DEFAULT_GITHUB_CONFIG, type GitHubConfig } from "../config.ts";
 import type { ExtractedContent } from "./pipeline.ts";
 
 const execFileAsync = promisify(execFile);
@@ -381,12 +381,6 @@ export async function fetchRaw(
 }
 
 // ── Clone cache (Tier 2) ──────────────────────────────────────────────────────
-
-const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
-  enabled: true,
-  maxRepoSizeMB: 350,
-  cloneTimeoutSeconds: 30,
-};
 
 const NOISE_DIRS = new Set([
   "node_modules",

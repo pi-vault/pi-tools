@@ -441,4 +441,18 @@ describe("GitHub URL interception in extractContent", () => {
     expect(result.text).toContain('"raw": true');
     expect(result.extractionChain).toContain("raw");
   });
+
+  it("skips GitHub interception when options.github.enabled is false", async () => {
+    fetchStub.addResponse("github.com", {
+      body: GOOD_HTML,
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
+    const result = await extractContent(
+      "https://github.com/owner/repo/blob/main/file.ts",
+      undefined,
+      { github: { enabled: false, maxRepoSizeMB: 350, cloneTimeoutSeconds: 30 } },
+    );
+    // Should fall through to HTTP extraction, not GitHub interception
+    expect(result.extractionChain).toContain("http:200");
+  });
 });
