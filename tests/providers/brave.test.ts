@@ -1,8 +1,10 @@
 // tests/providers/brave.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { BraveProvider } from "../../src/providers/brave.ts";
+import { providerMeta } from "../../src/providers/brave.ts";
 import type { SearchFilters } from "../../src/providers/types.ts";
 import { stubFetch } from "../helpers.ts";
+
+const makeProvider = (key = "test-key") => providerMeta.create(key).search!;
 
 describe("BraveProvider", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
@@ -16,7 +18,7 @@ describe("BraveProvider", () => {
   });
 
   it("has correct name and label", () => {
-    const provider = new BraveProvider("test-key");
+    const provider = makeProvider();
     expect(provider.name).toBe("brave");
     expect(provider.label).toBe("Brave Search");
   });
@@ -32,8 +34,7 @@ describe("BraveProvider", () => {
       },
     });
 
-    const provider = new BraveProvider("test-key");
-    const results = await provider.search("test", 5);
+    const results = await makeProvider().search("test", 5);
     expect(results).toHaveLength(1);
     expect(results[0].title).toBe("Brave Result");
     expect(results[0].snippet).toBe("A brave snippet");
@@ -44,8 +45,7 @@ describe("BraveProvider", () => {
       body: { web: { results: [] } },
     });
 
-    const provider = new BraveProvider("my-brave-key");
-    await provider.search("test", 5);
+    await makeProvider("my-brave-key").search("test", 5);
 
     const fetchCall = (globalThis.fetch as any).mock.calls[0];
     expect(fetchCall[1].headers["X-Subscription-Token"]).toBe("my-brave-key");
@@ -53,8 +53,7 @@ describe("BraveProvider", () => {
 
   it("throws on non-2xx response", async () => {
     fetchStub.addResponse("api.search.brave.com", { status: 429, body: "Rate limited" });
-    const provider = new BraveProvider("test-key");
-    await expect(provider.search("test", 5)).rejects.toThrow();
+    await expect(makeProvider().search("test", 5)).rejects.toThrow();
   });
 
   describe("search filters", () => {
@@ -63,9 +62,8 @@ describe("BraveProvider", () => {
         body: { web: { results: [] } },
       });
 
-      const provider = new BraveProvider("test-key");
       const filters: SearchFilters = { includeDomains: ["example.com", "docs.rs"] };
-      await provider.search("rust tutorial", 5, undefined, filters);
+      await makeProvider().search("rust tutorial", 5, undefined, filters);
 
       const fetchCall = (globalThis.fetch as any).mock.calls[0];
       const url = fetchCall[0] as string;
@@ -78,9 +76,8 @@ describe("BraveProvider", () => {
         body: { web: { results: [] } },
       });
 
-      const provider = new BraveProvider("test-key");
       const filters: SearchFilters = { excludeDomains: ["spam.com"] };
-      await provider.search("test query", 5, undefined, filters);
+      await makeProvider().search("test query", 5, undefined, filters);
 
       const fetchCall = (globalThis.fetch as any).mock.calls[0];
       const url = fetchCall[0] as string;
@@ -93,12 +90,11 @@ describe("BraveProvider", () => {
         body: { web: { results: [] } },
       });
 
-      const provider = new BraveProvider("test-key");
       const filters: SearchFilters = {
         startDate: "2025-06-01",
         endDate: "2025-06-30",
       };
-      await provider.search("test", 5, undefined, filters);
+      await makeProvider().search("test", 5, undefined, filters);
 
       const fetchCall = (globalThis.fetch as any).mock.calls[0];
       const url = fetchCall[0] as string;
@@ -110,9 +106,8 @@ describe("BraveProvider", () => {
         body: { web: { results: [] } },
       });
 
-      const provider = new BraveProvider("test-key");
       const filters: SearchFilters = { startDate: "2025-01-01" };
-      await provider.search("test", 5, undefined, filters);
+      await makeProvider().search("test", 5, undefined, filters);
 
       const fetchCall = (globalThis.fetch as any).mock.calls[0];
       const url = fetchCall[0] as string;
@@ -124,9 +119,8 @@ describe("BraveProvider", () => {
         body: { web: { results: [] } },
       });
 
-      const provider = new BraveProvider("test-key");
       const filters: SearchFilters = { endDate: "2025-12-31" };
-      await provider.search("test", 5, undefined, filters);
+      await makeProvider().search("test", 5, undefined, filters);
 
       const fetchCall = (globalThis.fetch as any).mock.calls[0];
       const url = fetchCall[0] as string;
@@ -138,13 +132,12 @@ describe("BraveProvider", () => {
         body: { web: { results: [] } },
       });
 
-      const provider = new BraveProvider("test-key");
       const filters: SearchFilters = {
         includeDomains: ["example.com"],
         startDate: "2025-01-01",
         endDate: "2025-06-30",
       };
-      await provider.search("query", 5, undefined, filters);
+      await makeProvider().search("query", 5, undefined, filters);
 
       const fetchCall = (globalThis.fetch as any).mock.calls[0];
       const url = fetchCall[0] as string;
@@ -161,8 +154,7 @@ describe("BraveProvider", () => {
         },
       });
 
-      const provider = new BraveProvider("test-key");
-      const results = await provider.search("test", 5);
+      const results = await makeProvider().search("test", 5);
       expect(results).toHaveLength(1);
       expect(results[0].title).toBe("Result");
     });

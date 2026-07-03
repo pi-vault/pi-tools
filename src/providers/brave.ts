@@ -1,65 +1,6 @@
-// src/providers/brave.ts
-import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import { createHttpSearchProvider } from "./http-adapter.ts";
 import { applyDomainFilters } from "../utils/filters.ts";
-
-interface BraveSearchResponse {
-  web?: {
-    results: Array<{
-      title: string;
-      url: string;
-      description: string;
-    }>;
-  };
-}
-
-export class BraveProvider implements SearchProvider {
-  readonly name = "brave";
-  readonly label = "Brave Search";
-  private apiKey: string;
-
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-  }
-
-  async search(
-    query: string,
-    maxResults: number,
-    signal?: AbortSignal,
-    filters?: SearchFilters,
-  ): Promise<SearchResult[]> {
-    const effectiveQuery = applyDomainFilters(query, filters);
-
-    const params = new URLSearchParams({
-      q: effectiveQuery,
-      count: String(maxResults),
-    });
-
-    const freshness = buildFreshness(filters);
-    if (freshness) {
-      params.set("freshness", freshness);
-    }
-
-    const url = `https://api.search.brave.com/res/v1/web/search?${params.toString()}`;
-    const response = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        "X-Subscription-Token": this.apiKey,
-      },
-      signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Brave API error: ${response.status} ${response.statusText}`);
-    }
-
-    const data = (await response.json()) as BraveSearchResponse;
-    return (data.web?.results ?? []).slice(0, maxResults).map((r) => ({
-      title: r.title,
-      url: r.url,
-      snippet: r.description,
-    }));
-  }
-}
+import type { ProviderMeta, SearchFilters } from "./types.ts";
 
 function buildFreshness(filters?: SearchFilters): string | null {
   if (!filters) return null;
@@ -72,5 +13,34 @@ export const providerMeta: ProviderMeta = {
   tier: 1,
   monthlyQuota: 2000,
   requiresKey: true,
-  create: (key) => ({ search: new BraveProvider(key!) }),
+  create: (key) => ({
+    search: createHttpSearchProvider(key!, {
+      name: "brave",
+      label: "Brave Search",
+      endpoint: (query, maxResults, filters) => {
+        const params = new URLSearchParams({
+          q: applyDomainFilters(query, filters),
+          count: String(maxResults),
+        });
+        const freshness = buildFreshness(filters);
+        if (freshness) params.set("freshness", freshness);
+        return `https://api.search.brave.com/res/v1/web/search?${params.toString()}`;
+      },
+      method: "GET",
+      buildHeaders: (apiKey) => ({
+        Accept: "application/json",
+        "X-Subscription-Token": apiKey,
+      }),
+      extractResults: (data) => {
+        const d = data as {
+          web?: { results: Array<{ title: string; url: string; description: string }> };
+        };
+        return (d.web?.results ?? []).map((r) => ({
+          title: r.title,
+          url: r.url,
+          snippet: r.description,
+        }));
+      },
+    }),
+  }),
 };

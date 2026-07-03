@@ -1,8 +1,5 @@
-// src/providers/openai-native.ts
-import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
-
-const OPENAI_RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses";
-const DEFAULT_MODEL = "gpt-4.1-nano";
+import { createHttpSearchProvider } from "./http-adapter.ts";
+import type { ProviderMeta } from "./types.ts";
 
 interface UrlCitation {
   type: "url_citation";
@@ -29,78 +26,47 @@ interface OpenAIResponsesResult {
   output: OutputItem[];
 }
 
-export class OpenAINativeProvider implements SearchProvider {
-  readonly name = "openai-native";
-  readonly label = "OpenAI Web Search";
-  private apiKey: string;
-
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-  }
-
-  async search(
-    query: string,
-    maxResults: number,
-    signal?: AbortSignal,
-    _filters?: SearchFilters,
-  ): Promise<SearchResult[]> {
-    const response = await fetch(OPENAI_RESPONSES_ENDPOINT, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify({
-        model: DEFAULT_MODEL,
-        tools: [{ type: "web_search" }],
-        tool_choice: "required",
-        input: `Search the web for: ${query}`,
-      }),
-      signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `OpenAI API error: ${response.status} ${response.statusText}`,
-      );
-    }
-
-    const data = (await response.json()) as OpenAIResponsesResult;
-
-    // Find the message output containing url_citation annotations
-    const messageOutput = data.output.find(
-      (item): item is MessageOutput => item.type === "message",
-    );
-    if (!messageOutput) return [];
-
-    const textContent = messageOutput.content?.find(
-      (c): c is OutputText => c.type === "output_text",
-    );
-    if (!textContent?.annotations?.length) return [];
-
-    // Deduplicate by URL, preserving order
-    const seen = new Set<string>();
-    const results: SearchResult[] = [];
-    for (const ann of textContent.annotations) {
-      if (ann.type !== "url_citation") continue;
-      if (seen.has(ann.url)) continue;
-      seen.add(ann.url);
-      results.push({
-        title: ann.title,
-        url: ann.url,
-        snippet: "",
-      });
-      if (results.length >= maxResults) break;
-    }
-
-    return results;
-  }
-}
-
 export const providerMeta: ProviderMeta = {
   name: "openai-native",
   tier: 1,
   monthlyQuota: null,
   requiresKey: true,
-  create: (key) => ({ search: new OpenAINativeProvider(key!) }),
+  create: (key) => ({
+    search: createHttpSearchProvider(key!, {
+      name: "openai-native",
+      label: "OpenAI Web Search",
+      endpoint: "https://api.openai.com/v1/responses",
+      method: "POST",
+      authHeader: "Authorization",
+      authPrefix: "Bearer ",
+      buildBody: (query) => ({
+        model: "gpt-4.1-nano",
+        tools: [{ type: "web_search" }],
+        tool_choice: "required",
+        input: `Search the web for: ${query}`,
+      }),
+      extractResults: (raw) => {
+        const data = raw as OpenAIResponsesResult;
+        const messageOutput = data.output.find(
+          (item): item is MessageOutput => item.type === "message",
+        );
+        if (!messageOutput) return [];
+        const textContent = messageOutput.content?.find(
+          (c): c is OutputText => c.type === "output_text",
+        );
+        if (!textContent?.annotations?.length) return [];
+
+        // Deduplicate by URL, preserving order
+        const seen = new Set<string>();
+        const results: Array<{ title: string; url: string; snippet: string }> = [];
+        for (const ann of textContent.annotations) {
+          if (ann.type !== "url_citation") continue;
+          if (seen.has(ann.url)) continue;
+          seen.add(ann.url);
+          results.push({ title: ann.title, url: ann.url, snippet: "" });
+        }
+        return results;
+      },
+    }),
+  }),
 };
