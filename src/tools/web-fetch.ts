@@ -126,14 +126,13 @@ export function createWebFetchTool(
       }
 
       try {
-        const httpErrorMsg = pipelineError instanceof Error ? pipelineError.message : String(pipelineError);
         const { result: fetchResult, providerName } = await executeWithFallback({
           candidates: candidates.map((provider) => ({
             name: provider.name,
             execute: () => provider.fetch(url, signal),
           })),
           operation: "fetch",
-          initialErrors: [{ provider: "http", error: httpErrorMsg }],
+          initialErrors: [{ provider: "http", error: pipelineError.message }],
         });
 
         const extracted: ExtractedContent = {
