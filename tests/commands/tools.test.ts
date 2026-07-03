@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { createToolsCommand } from "../../src/commands/tools.ts";
+import { getConfigPath } from "../../src/config.ts";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
 import { UsageTracker } from "../../src/providers/usage.ts";
 import type { SearchProvider, ProviderTier } from "../../src/providers/types.ts";
@@ -103,5 +104,128 @@ describe("tools --status command", () => {
     expect(ctx.ui.notify).toHaveBeenCalled();
     const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
     expect(output).toContain("No providers registered");
+  });
+});
+
+describe("tools interactive setup", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.writeFileSync).mockImplementation(() => {});
+    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+  });
+
+  it("prompts to enable each provider via confirm", async () => {
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
+    const tierMap = new Map<string, ProviderTier>();
+    const allProviderNames = ["brave", "duckduckgo"];
+
+    const command = createToolsCommand(registry, tierMap, allProviderNames);
+    const ctx = makeCtx();
+
+    // Enable brave, skip duckduckgo
+    vi.mocked(ctx.ui.confirm)
+      .mockResolvedValueOnce(true)   // brave: yes
+      .mockResolvedValueOnce(false); // duckduckgo: no
+    // API key for brave
+    vi.mocked(ctx.ui.input).mockResolvedValueOnce("test-brave-key");
+    // Default provider
+    vi.mocked(ctx.ui.select).mockResolvedValueOnce("auto");
+
+    await command.handler("", ctx);
+
+    // Should have asked about both providers
+    expect(ctx.ui.confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it("writes config to global config path", async () => {
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
+    const tierMap = new Map<string, ProviderTier>();
+    const allProviderNames = ["brave", "duckduckgo"];
+
+    const command = createToolsCommand(registry, tierMap, allProviderNames);
+    const ctx = makeCtx();
+
+    // Enable brave only
+    vi.mocked(ctx.ui.confirm)
+      .mockResolvedValueOnce(true)   // brave: yes
+      .mockResolvedValueOnce(false); // duckduckgo: no
+    vi.mocked(ctx.ui.input).mockResolvedValueOnce("test-key-123");
+    vi.mocked(ctx.ui.select).mockResolvedValueOnce("auto");
+
+    await command.handler("", ctx);
+
+    // Should write to global config path
+    expect(fs.writeFileSync).toHaveBeenCalled();
+    const writeCalls = vi.mocked(fs.writeFileSync).mock.calls;
+    const [writePath, writeContent] = writeCalls[writeCalls.length - 1];
+    expect(writePath).toBe(getConfigPath());
+
+    const written = JSON.parse(writeContent as string);
+    expect(written.defaultProvider).toBe("auto");
+    expect(written.providers.brave.enabled).toBe(true);
+    expect(written.providers.brave.apiKey).toBe("test-key-123");
+    expect(written.providers.duckduckgo.enabled).toBe(false);
+  });
+
+  it("notifies user on successful save", async () => {
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
+    const tierMap = new Map<string, ProviderTier>();
+    const allProviderNames = ["brave"];
+
+    const command = createToolsCommand(registry, tierMap, allProviderNames);
+    const ctx = makeCtx();
+
+    vi.mocked(ctx.ui.confirm).mockResolvedValueOnce(true);
+    vi.mocked(ctx.ui.input).mockResolvedValueOnce("my-key");
+    vi.mocked(ctx.ui.select).mockResolvedValueOnce("auto");
+
+    await command.handler("", ctx);
+
+    // Should notify success
+    const notifyCalls = vi.mocked(ctx.ui.notify).mock.calls;
+    const lastNotify = notifyCalls[notifyCalls.length - 1][0] as string;
+    expect(lastNotify.toLowerCase()).toContain("saved");
+  });
+
+  it("handles no providers available", async () => {
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
+    const tierMap = new Map<string, ProviderTier>();
+
+    const command = createToolsCommand(registry, tierMap, []);
+    const ctx = makeCtx();
+
+    await command.handler("", ctx);
+
+    const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
+    expect(output).toContain("No providers available");
+  });
+
+  it("skips API key prompt for providers the user disables", async () => {
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
+    const tierMap = new Map<string, ProviderTier>();
+    const allProviderNames = ["brave", "exa"];
+
+    const command = createToolsCommand(registry, tierMap, allProviderNames);
+    const ctx = makeCtx();
+
+    // Disable both providers
+    vi.mocked(ctx.ui.confirm)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+    vi.mocked(ctx.ui.select).mockResolvedValueOnce("auto");
+
+    await command.handler("", ctx);
+
+    // Should NOT have asked for any API keys
+    expect(ctx.ui.input).not.toHaveBeenCalled();
   });
 });
