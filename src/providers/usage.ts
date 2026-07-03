@@ -30,24 +30,14 @@ export class UsageTracker {
   }
 
   private load(): void {
-    try {
-      const raw = fs.readFileSync(getUsagePath(), "utf-8");
-      const data: UsageData = JSON.parse(raw);
-      if (data.resetAt === this.resetAt) {
-        this.counts = data.counts ?? {};
-      }
-      // If month changed, counts stay at 0 (already initialized)
-    } catch {
-      // Try legacy path
+    for (const usagePath of [getUsagePath(), getLegacyUsagePath()]) {
       try {
-        const raw = fs.readFileSync(getLegacyUsagePath(), "utf-8");
-        const data: UsageData = JSON.parse(raw);
+        const data: UsageData = JSON.parse(fs.readFileSync(usagePath, "utf-8"));
         if (data.resetAt === this.resetAt) {
           this.counts = data.counts ?? {};
         }
-      } catch {
-        // No file or parse error — start fresh
-      }
+        return;
+      } catch { continue; }
     }
   }
 

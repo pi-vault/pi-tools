@@ -93,20 +93,13 @@ function parseConfigFile(raw: string): PiToolsConfig {
 }
 
 export function loadConfig(configPath?: string): PiToolsConfig {
-  const filePath = configPath ?? getConfigPath();
-  try {
-    return parseConfigFile(fs.readFileSync(filePath, "utf-8"));
-  } catch {
-    // Fallback: try legacy filename (only when using default path)
-    if (!configPath) {
-      try {
-        return parseConfigFile(fs.readFileSync(getLegacyConfigPath(), "utf-8"));
-      } catch {
-        // Neither file exists
-      }
-    }
-    return { ...DEFAULT_CONFIG };
+  const paths = configPath ? [configPath] : [getConfigPath(), getLegacyConfigPath()];
+  for (const p of paths) {
+    try {
+      return parseConfigFile(fs.readFileSync(p, "utf-8"));
+    } catch { continue; }
   }
+  return { ...DEFAULT_CONFIG };
 }
 
 export function resolveApiKey(apiKey: string | undefined): string | undefined {
@@ -174,19 +167,12 @@ export function findProjectConfigPath(startDir: string): string | undefined {
 export function loadMergedConfig(cwd?: string): PiToolsConfig {
   let merged = deepMerge(DEFAULT_CONFIG as unknown as Record<string, unknown>, {});
 
-  // Layer 2: global config
-  const globalPath = getConfigPath();
-  try {
-    const raw = fs.readFileSync(globalPath, "utf-8");
-    merged = deepMerge(merged, JSON.parse(raw) as Record<string, unknown>);
-  } catch {
-    // Fallback: try legacy global path
+  // Layer 2: global config (try new path, fall back to legacy)
+  for (const globalPath of [getConfigPath(), getLegacyConfigPath()]) {
     try {
-      const raw = fs.readFileSync(getLegacyConfigPath(), "utf-8");
-      merged = deepMerge(merged, JSON.parse(raw) as Record<string, unknown>);
-    } catch {
-      // No global config — defaults stand
-    }
+      merged = deepMerge(merged, JSON.parse(fs.readFileSync(globalPath, "utf-8")) as Record<string, unknown>);
+      break;
+    } catch { continue; }
   }
 
   // Layer 1: project config (highest priority)
