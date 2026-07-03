@@ -46,6 +46,38 @@ describe("loadConfig", () => {
     const config = loadConfig();
     expect(config.defaultProvider).toBe("auto");
   });
+
+  it("reads from tools.json path", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      const p = typeof filePath === "string" ? filePath : filePath.toString();
+      // Match only tools.json (not pi-tools.json)
+      if (p.endsWith("tools.json") && !p.endsWith("pi-tools.json")) {
+        return JSON.stringify({ defaultProvider: "brave" });
+      }
+      throw new Error("ENOENT");
+    });
+    const config = loadConfig();
+    expect(config.defaultProvider).toBe("brave");
+  });
+
+  it("falls back to pi-tools.json if tools.json is missing", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      if (typeof filePath === "string" && filePath.endsWith("pi-tools.json")) {
+        return JSON.stringify({ defaultProvider: "exa" });
+      }
+      throw new Error("ENOENT");
+    });
+    const config = loadConfig();
+    expect(config.defaultProvider).toBe("exa");
+  });
+
+  it("does not fall back to legacy when custom path is provided", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      throw new Error("ENOENT");
+    });
+    const config = loadConfig("/custom/path.json");
+    expect(config.defaultProvider).toBe("auto");
+  });
 });
 
 describe("resolveApiKey", () => {
@@ -176,8 +208,8 @@ describe("findProjectConfigPath", () => {
       return false;
     });
     findProjectConfigPath("/a/b/c/d/e/f/g/h/i/j/k/l/m/n");
-    // Should check at most 10 directories
-    expect(calls.length).toBeLessThanOrEqual(10);
+    // 2 checks per level (new name + legacy), 10 levels max
+    expect(calls.length).toBeLessThanOrEqual(20);
   });
 
   it("stops at filesystem root", () => {
@@ -187,8 +219,30 @@ describe("findProjectConfigPath", () => {
       return false;
     });
     findProjectConfigPath("/a/b");
-    // /a/b, /a, / — should stop at root, not go further
-    expect(calls.length).toBe(3);
+    // /a/b, /a, / — 2 checks each = 6
+    expect(calls.length).toBe(6);
+  });
+
+  it("finds .pi/tools.json in directory", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      return typeof p === "string" && p === path.join("/projects/my-app", ".pi", "tools.json");
+    });
+    const result = findProjectConfigPath("/projects/my-app");
+    expect(result).toBe(path.join("/projects/my-app", ".pi", "tools.json"));
+  });
+
+  it("prefers tools.json over pi-tools.json when both exist", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const result = findProjectConfigPath("/projects/my-app");
+    expect(result).toBe(path.join("/projects/my-app", ".pi", "tools.json"));
+  });
+
+  it("falls back to .pi/pi-tools.json if tools.json missing", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      return typeof p === "string" && p.includes(path.join(".pi", "pi-tools.json"));
+    });
+    const result = findProjectConfigPath("/projects/my-app");
+    expect(result).toContain(path.join(".pi", "pi-tools.json"));
   });
 });
 
@@ -331,6 +385,20 @@ describe("loadMergedConfig", () => {
     expect(config.defaultProvider).toBe("brave");
     // github defaults preserved
     expect(config.github.enabled).toBe(true);
+  });
+
+  it("falls back to legacy global config path when tools.json is missing", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const filePath = typeof p === "string" ? p : p.toString();
+      if (filePath.endsWith("pi-tools.json") && filePath.includes(path.join(".pi", "agent"))) {
+        return JSON.stringify({ defaultProvider: "tavily" });
+      }
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const config = loadMergedConfig("/projects/my-app");
+    expect(config.defaultProvider).toBe("tavily");
   });
 });
 

@@ -30,7 +30,7 @@ Then reload Pi:
 
 ## Configure
 
-Create `~/.pi/agent/extensions/pi-tools.json`:
+Create `~/.pi/agent/extensions/tools.json`:
 
 ```json
 {
@@ -51,6 +51,8 @@ Create `~/.pi/agent/extensions/pi-tools.json`:
   }
 }
 ```
+
+The legacy filename `pi-tools.json` is still supported as a fallback.
 
 `apiKey` supports three forms:
 

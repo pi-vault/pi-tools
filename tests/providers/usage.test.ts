@@ -83,4 +83,28 @@ describe("UsageTracker", () => {
     const tracker = new UsageTracker();
     expect(tracker.getRemaining("perplexity", null)).toBe(Infinity);
   });
+
+  it("loads from tools-usage.json path", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      const p = typeof filePath === "string" ? filePath : filePath.toString();
+      if (p.endsWith("tools-usage.json") && !p.endsWith("pi-tools-usage.json")) {
+        return JSON.stringify({ resetAt: "2026-07", counts: { brave: 100 } });
+      }
+      throw new Error("ENOENT");
+    });
+    const tracker = new UsageTracker();
+    expect(tracker.getCount("brave")).toBe(100);
+  });
+
+  it("falls back to pi-tools-usage.json if tools-usage.json is missing", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      const p = typeof filePath === "string" ? filePath : filePath.toString();
+      if (p.endsWith("pi-tools-usage.json")) {
+        return JSON.stringify({ resetAt: "2026-07", counts: { exa: 75 } });
+      }
+      throw new Error("ENOENT");
+    });
+    const tracker = new UsageTracker();
+    expect(tracker.getCount("exa")).toBe(75);
+  });
 });
