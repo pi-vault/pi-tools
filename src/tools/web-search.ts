@@ -2,7 +2,7 @@ import { Type } from "typebox";
 import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { SearchFilters, SearchProvider, SearchResult } from "../providers/types.ts";
-import { AggregateProviderError } from "../utils/errors.ts";
+import { executeWithFallback } from "../providers/execute.ts";
 import type { GuidanceOverride } from "../config.ts";
 
 const WebSearchParams = Type.Object({
@@ -116,40 +116,33 @@ export function createWebSearchTool(
 
       const maxResults = params.numResults ?? 5;
       const filters = buildFilters(params);
-      const errors: Array<{ provider: string; error: string }> = [];
 
-      for (const provider of candidates) {
-        const startMs = Date.now();
-        try {
-          const results = await provider.search(
-            params.query,
-            maxResults,
-            signal ?? undefined,
-            filters,
-          );
-          const text = params.compact
-            ? formatResultsCompact(results)
-            : formatResults(results);
-          onSuccess?.(provider.name, Date.now() - startMs);
+      try {
+        const { result: results, providerName } = await executeWithFallback({
+          candidates: candidates.map((provider) => ({
+            name: provider.name,
+            execute: () => provider.search(params.query, maxResults, signal ?? undefined, filters),
+          })),
+          operation: "search",
+          onSuccess,
+          onFailure,
+        });
 
-          return {
-            content: [{ type: "text" as const, text }],
-            details: { provider: provider.name, resultCount: results.length },
-          };
-        } catch (error) {
-          onFailure?.(provider.name);
-          errors.push({
-            provider: provider.name,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
+        const text = params.compact
+          ? formatResultsCompact(results)
+          : formatResults(results);
+
+        return {
+          content: [{ type: "text" as const, text }],
+          details: { provider: providerName, resultCount: results.length },
+        };
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text" as const, text: `Search error: ${msg}` }],
+          details: { provider: "none", resultCount: 0 },
+        };
       }
-
-      const aggregate = new AggregateProviderError("search", errors);
-      return {
-        content: [{ type: "text" as const, text: `Search error: ${aggregate.message}` }],
-        details: { provider: "none", resultCount: 0 },
-      };
     },
     renderCall(args, theme: Theme, context) {
       const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
