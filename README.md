@@ -30,7 +30,7 @@ Then reload Pi:
 
 ## Configure
 
-Create `~/.pi/agent/extensions/pi-tools.json`:
+Create `~/.pi/agent/extensions/tools.json`:
 
 ```json
 {
