@@ -325,18 +325,52 @@ Expected: FAIL — existing tests still create `UsageTracker` and pass it to con
 
 In `tests/providers/registry.test.ts`, update the test setup:
 
-Replace the `UsageTracker` usage pattern:
+**a) Replace the common `UsageTracker` pattern** (most tests):
 ```ts
 // Before:
 const tracker = new UsageTracker();
 const registry = new ProviderRegistry(tracker);
 
 // After:
-const inMemoryAdapter = { load: () => ({}), save: () => {} };
-const registry = new ProviderRegistry(inMemoryAdapter);
+const registry = new ProviderRegistry({ load: () => ({}), save: () => {} });
 ```
 
-Remove the `import { UsageTracker }` line. Remove the `vi.mock("node:fs")` if no longer needed. Update ALL test instances that create a ProviderRegistry.
+**b) Rewrite "persists usage across registry instances" test** (line ~176):
+```ts
+it("persists usage across registry instances sharing the same adapter state", () => {
+  const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+  const adapter = {
+    load: () => ({ brave: { count: 1998, month } }),
+    save: vi.fn(),
+  };
+  const registry = new ProviderRegistry(adapter);
+  const brave = mockProvider("brave", "Brave");
+  const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+  registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+  registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+  expect(registry.getRemaining("brave")).toBe(2);
+  const selected = registry.selectSearch();
+  expect(selected?.name).toBe("brave");
+
+  registry.recordUsage("brave"); // 1999 used
+  registry.recordUsage("brave"); // 2000 used
+  const afterExhaust = registry.selectSearch();
+  expect(afterExhaust?.name).toBe("duckduckgo");
+});
+```
+
+**c) Fix `tracker.getCount` assertion** in "records usage via tracker" test (line ~87):
+```ts
+// Before:
+expect(tracker.getCount("brave")).toBe(1);
+
+// After:
+expect(registry.getCount("brave")).toBe(1);
+```
+
+**d) Cleanup:** Remove `import { UsageTracker }`, remove `vi.mock("node:fs")`, remove the `beforeEach` fs mock setup (no longer needed since persistence is injected).
 
 - [ ] **Step 6: Run registry tests**
 
@@ -369,24 +403,27 @@ import * as os from "node:os";
 
 export function createFilePersistence(filePath?: string): PersistenceAdapter {
   const usagePath = filePath ?? path.join(os.homedir(), ".pi", "agent", "tools-usage.json");
+  const legacyPath = path.join(os.homedir(), ".pi", "agent", "pi-tools-usage.json");
 
   return {
     load(): Record<string, UsageRecord> {
-      try {
-        const raw = fs.readFileSync(usagePath, "utf-8");
-        const data = JSON.parse(raw);
-        // Migrate from old format { resetAt, counts } to new { [name]: { count, month } }
-        if (data.resetAt && data.counts) {
-          const result: Record<string, UsageRecord> = {};
-          for (const [name, count] of Object.entries(data.counts)) {
-            result[name] = { count: count as number, month: data.resetAt };
+      // Try primary path first, then legacy fallback (matches old UsageTracker behavior)
+      for (const candidate of [usagePath, legacyPath]) {
+        try {
+          const raw = fs.readFileSync(candidate, "utf-8");
+          const data = JSON.parse(raw);
+          // Migrate from old format { resetAt, counts } to new { [name]: { count, month } }
+          if (data.resetAt && data.counts) {
+            const result: Record<string, UsageRecord> = {};
+            for (const [name, count] of Object.entries(data.counts)) {
+              result[name] = { count: count as number, month: data.resetAt };
+            }
+            return result;
           }
-          return result;
-        }
-        return data as Record<string, UsageRecord>;
-      } catch {
-        return {};
+          return data as Record<string, UsageRecord>;
+        } catch { continue; }
       }
+      return {};
     },
     save(data: Record<string, UsageRecord>): void {
       try {
@@ -502,6 +539,9 @@ Update the code-search tool registration:
 (providerName) => registry.recordUsage(providerName),
 
 // After:
+// Note: success: true is used as a usage tick — code-search doesn't report
+// individual failures, and its providers use a separate selection path
+// (selectCodeSearch), so inflating successes here is harmless.
 (providerName) => registry.recordOutcome(providerName, { success: true }),
 ```
 
