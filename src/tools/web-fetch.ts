@@ -245,7 +245,7 @@ export function createWebFetchTool(
         });
 
         const preview = extracted.chars > cap
-          ? truncateContent(extracted.text, cap).text
+          ? truncateContent(extracted.text, cap)
           : extracted.text;
 
         urlResults.push({
@@ -341,8 +341,7 @@ function buildResult(
       text: extracted.text,
       source: "web_fetch",
     });
-    const trunc = truncateContent(extracted.text, INLINE_LIMIT);
-    outputText = trunc.text;
+    outputText = truncateContent(extracted.text, INLINE_LIMIT);
     truncated = true;
   } else {
     outputText = extracted.text;
