@@ -1,3 +1,6 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 import type { SearchProvider, FetchProvider, CodeSearchProvider, ProviderTier } from "./types.ts";
 
 interface RegisteredSearch {
@@ -239,4 +242,39 @@ export class ProviderRegistry {
   getMetrics(providerName: string): ProviderMetrics | undefined {
     return this.metrics.get(providerName);
   }
+}
+
+export function createFilePersistence(filePath?: string): PersistenceAdapter {
+  const usagePath = filePath ?? path.join(os.homedir(), ".pi", "agent", "tools-usage.json");
+  const legacyPath = path.join(os.homedir(), ".pi", "agent", "pi-tools-usage.json");
+
+  return {
+    load(): Record<string, UsageRecord> {
+      // Try primary path first, then legacy fallback (matches old UsageTracker behavior)
+      for (const candidate of [usagePath, legacyPath]) {
+        try {
+          const raw = fs.readFileSync(candidate, "utf-8");
+          const data = JSON.parse(raw);
+          // Migrate from old format { resetAt, counts } to new { [name]: { count, month } }
+          if (data.resetAt && data.counts) {
+            const result: Record<string, UsageRecord> = {};
+            for (const [name, count] of Object.entries(data.counts)) {
+              result[name] = { count: count as number, month: data.resetAt };
+            }
+            return result;
+          }
+          return data as Record<string, UsageRecord>;
+        } catch { continue; }
+      }
+      return {};
+    },
+    save(data: Record<string, UsageRecord>): void {
+      try {
+        fs.mkdirSync(path.dirname(usagePath), { recursive: true });
+        fs.writeFileSync(usagePath, JSON.stringify(data, null, 2));
+      } catch {
+        // Non-fatal: usage tracking is best-effort
+      }
+    },
+  };
 }

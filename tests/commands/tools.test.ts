@@ -3,12 +3,13 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { createToolsCommand } from "../../src/commands/tools.ts";
 import { getConfigPath } from "../../src/config.ts";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
-import { UsageTracker } from "../../src/providers/usage.ts";
 import type { SearchProvider, ProviderTier } from "../../src/providers/types.ts";
 import { makeCtx } from "../helpers.ts";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 vi.mock("node:fs");
+
+const mem = () => new ProviderRegistry({ load: () => ({}), save: () => {} });
 
 function mockProvider(name: string, label: string): SearchProvider {
   return {
@@ -29,8 +30,7 @@ describe("tools --status command", () => {
   });
 
   it("displays provider status table with metrics", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const brave = mockProvider("brave", "Brave");
     const exa = mockProvider("exa", "Exa");
     const ddg = mockProvider("duckduckgo", "DuckDuckGo");
@@ -77,8 +77,7 @@ describe("tools --status command", () => {
   });
 
   it("shows -- for avg latency when no successful calls", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const ddg = mockProvider("duckduckgo", "DuckDuckGo");
     registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
@@ -93,8 +92,7 @@ describe("tools --status command", () => {
   });
 
   it("handles empty registry gracefully", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const tierMap = new Map<string, ProviderTier>();
 
     const command = createToolsCommand(registry, tierMap);
@@ -120,8 +118,7 @@ describe("tools interactive setup", () => {
   });
 
   it("prompts to enable each provider via confirm", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const tierMap = new Map<string, ProviderTier>();
     const allProviderNames = ["brave", "duckduckgo"];
 
@@ -144,8 +141,7 @@ describe("tools interactive setup", () => {
   });
 
   it("writes config to global config path", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const tierMap = new Map<string, ProviderTier>();
     const allProviderNames = ["brave", "duckduckgo"];
 
@@ -175,8 +171,7 @@ describe("tools interactive setup", () => {
   });
 
   it("notifies user on successful save", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const tierMap = new Map<string, ProviderTier>();
     const allProviderNames = ["brave"];
 
@@ -196,8 +191,7 @@ describe("tools interactive setup", () => {
   });
 
   it("handles no providers available", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const tierMap = new Map<string, ProviderTier>();
 
     const command = createToolsCommand(registry, tierMap, []);
@@ -210,8 +204,7 @@ describe("tools interactive setup", () => {
   });
 
   it("skips API key prompt for providers the user disables", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const tierMap = new Map<string, ProviderTier>();
     const allProviderNames = ["brave", "exa"];
 

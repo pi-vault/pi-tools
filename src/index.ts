@@ -2,8 +2,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadMergedConfig, resolveApiKey } from "./config.ts";
 import { ContentStore, type StoredContent } from "./storage.ts";
-import { UsageTracker } from "./providers/usage.ts";
-import { ProviderRegistry } from "./providers/registry.ts";
+import { ProviderRegistry, createFilePersistence } from "./providers/registry.ts";
 import { allProviders } from "./providers/all.ts";
 import type { ProviderTier } from "./providers/types.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
@@ -31,8 +30,7 @@ export default function createExtension(pi: ExtensionAPI): void {
   const store = new ContentStore((customType, data) =>
     pi.appendEntry(customType, data),
   );
-  const tracker = new UsageTracker();
-  const registry = new ProviderRegistry(tracker);
+  const registry = new ProviderRegistry(createFilePersistence());
 
   // Register providers from the barrel
   for (const meta of allProviders) {
