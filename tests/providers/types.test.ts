@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import type {
   CodeSearchResult,
   FetchResult,
-  ProviderInstances,
   ProviderMeta,
   SearchFilters,
   SearchProvider,
@@ -67,7 +66,7 @@ describe("provider types", () => {
     expect(meta.tier).toBe(1);
     expect(meta.requiresKey).toBe(true);
     expect(meta.monthlyQuota).toBe(2000);
-    const instances: ProviderInstances = meta.create("key");
+    const instances = meta.create("key");
     expect(instances.search).toBe(mockSearch);
     expect(instances.fetch).toBeUndefined();
     expect(instances.codeSearch).toBeUndefined();

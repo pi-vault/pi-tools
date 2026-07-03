@@ -53,16 +53,14 @@ export interface CodeSearchProvider {
 
 export type ProviderTier = 1 | 2 | 3;
 
-export interface ProviderInstances {
-  search?: SearchProvider;
-  fetch?: FetchProvider;
-  codeSearch?: CodeSearchProvider;
-}
-
 export interface ProviderMeta {
   name: string;
   tier: ProviderTier;
   monthlyQuota: number | null;
   requiresKey: boolean;
-  create: (key?: string, providerConfig?: ProviderConfigEntry) => ProviderInstances;
+  create: (key?: string, providerConfig?: ProviderConfigEntry) => {
+    search?: SearchProvider;
+    fetch?: FetchProvider;
+    codeSearch?: CodeSearchProvider;
+  };
 }

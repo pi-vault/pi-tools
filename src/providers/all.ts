@@ -13,8 +13,6 @@ import { providerMeta as serper } from "./serper.ts";
 import { providerMeta as tavily } from "./tavily.ts";
 import { providerMeta as websearchapi } from "./websearchapi.ts";
 
-export type { ProviderMeta };
-
 export const allProviders: ProviderMeta[] = [
   brave,
   duckduckgo,
