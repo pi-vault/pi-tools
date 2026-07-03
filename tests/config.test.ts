@@ -378,6 +378,20 @@ describe("loadMergedConfig", () => {
     // github defaults preserved
     expect(config.github.enabled).toBe(true);
   });
+
+  it("falls back to legacy global config path when tools.json is missing", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const filePath = typeof p === "string" ? p : p.toString();
+      if (filePath.endsWith("pi-tools.json") && filePath.includes(path.join(".pi", "agent"))) {
+        return JSON.stringify({ defaultProvider: "tavily" });
+      }
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const config = loadMergedConfig("/projects/my-app");
+    expect(config.defaultProvider).toBe("tavily");
+  });
 });
 
 describe("config types — selectionStrategy and guidance", () => {

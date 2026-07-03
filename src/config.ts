@@ -180,7 +180,13 @@ export function loadMergedConfig(cwd?: string): PiToolsConfig {
     const raw = fs.readFileSync(globalPath, "utf-8");
     merged = deepMerge(merged, JSON.parse(raw) as Record<string, unknown>);
   } catch {
-    // No global config or parse error — defaults stand
+    // Fallback: try legacy global path
+    try {
+      const raw = fs.readFileSync(getLegacyConfigPath(), "utf-8");
+      merged = deepMerge(merged, JSON.parse(raw) as Record<string, unknown>);
+    } catch {
+      // No global config — defaults stand
+    }
   }
 
   // Layer 1: project config (highest priority)
