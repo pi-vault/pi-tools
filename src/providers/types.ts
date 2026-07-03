@@ -1,3 +1,5 @@
+import type { ProviderConfigEntry } from "../config.ts";
+
 export interface SearchResult {
   title: string;
   url: string;
@@ -49,25 +51,18 @@ export interface CodeSearchProvider {
   ): Promise<CodeSearchResult[]>;
 }
 
-export interface ProviderCapabilities {
-  search?: boolean;
-  fetch?: boolean;
-  codeSearch?: boolean;
-}
-
-export interface ProviderConfig {
-  enabled: boolean;
-  monthlyQuota?: number;
-  apiKey?: string;
-}
-
 export type ProviderTier = 1 | 2 | 3;
+
+export interface ProviderInstances {
+  search?: SearchProvider;
+  fetch?: FetchProvider;
+  codeSearch?: CodeSearchProvider;
+}
 
 export interface ProviderMeta {
   name: string;
-  label: string;
   tier: ProviderTier;
+  monthlyQuota: number | null;
   requiresKey: boolean;
-  defaultMonthlyQuota: number | null; // null = unlimited
-  capabilities: ProviderCapabilities;
+  create: (key?: string, providerConfig?: ProviderConfigEntry) => ProviderInstances;
 }
