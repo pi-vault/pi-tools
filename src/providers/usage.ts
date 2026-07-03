@@ -8,6 +8,10 @@ interface UsageData {
 }
 
 function getUsagePath(): string {
+  return path.join(os.homedir(), ".pi", "agent", "tools-usage.json");
+}
+
+function getLegacyUsagePath(): string {
   return path.join(os.homedir(), ".pi", "agent", "pi-tools-usage.json");
 }
 
@@ -34,7 +38,16 @@ export class UsageTracker {
       }
       // If month changed, counts stay at 0 (already initialized)
     } catch {
-      // No file or parse error — start fresh
+      // Try legacy path
+      try {
+        const raw = fs.readFileSync(getLegacyUsagePath(), "utf-8");
+        const data: UsageData = JSON.parse(raw);
+        if (data.resetAt === this.resetAt) {
+          this.counts = data.counts ?? {};
+        }
+      } catch {
+        // No file or parse error — start fresh
+      }
     }
   }
 
