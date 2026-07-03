@@ -135,7 +135,8 @@ export function resolveApiKey(apiKey: string | undefined): string | undefined {
 }
 
 const MAX_WALK_DEPTH = 10;
-const PROJECT_CONFIG_RELATIVE = path.join(".pi", "pi-tools.json");
+const PROJECT_CONFIG_RELATIVE = path.join(".pi", "tools.json");
+const LEGACY_PROJECT_CONFIG_RELATIVE = path.join(".pi", "pi-tools.json");
 
 /**
  * Walk up from `startDir` looking for `.pi/tools.json` (or legacy `.pi/pi-tools.json`).
@@ -148,6 +149,11 @@ export function findProjectConfigPath(startDir: string): string | undefined {
     const candidate = path.join(dir, PROJECT_CONFIG_RELATIVE);
     if (fs.existsSync(candidate)) {
       return candidate;
+    }
+    // Fallback: check legacy name at same level
+    const legacy = path.join(dir, LEGACY_PROJECT_CONFIG_RELATIVE);
+    if (fs.existsSync(legacy)) {
+      return legacy;
     }
     const parent = path.dirname(dir);
     if (parent === dir) break; // filesystem root

@@ -200,8 +200,8 @@ describe("findProjectConfigPath", () => {
       return false;
     });
     findProjectConfigPath("/a/b/c/d/e/f/g/h/i/j/k/l/m/n");
-    // Should check at most 10 directories
-    expect(calls.length).toBeLessThanOrEqual(10);
+    // 2 checks per level (new name + legacy), 10 levels max
+    expect(calls.length).toBeLessThanOrEqual(20);
   });
 
   it("stops at filesystem root", () => {
@@ -211,8 +211,30 @@ describe("findProjectConfigPath", () => {
       return false;
     });
     findProjectConfigPath("/a/b");
-    // /a/b, /a, / — should stop at root, not go further
-    expect(calls.length).toBe(3);
+    // /a/b, /a, / — 2 checks each = 6
+    expect(calls.length).toBe(6);
+  });
+
+  it("finds .pi/tools.json in directory", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      return typeof p === "string" && p === path.join("/projects/my-app", ".pi", "tools.json");
+    });
+    const result = findProjectConfigPath("/projects/my-app");
+    expect(result).toBe(path.join("/projects/my-app", ".pi", "tools.json"));
+  });
+
+  it("prefers tools.json over pi-tools.json when both exist", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const result = findProjectConfigPath("/projects/my-app");
+    expect(result).toBe(path.join("/projects/my-app", ".pi", "tools.json"));
+  });
+
+  it("falls back to .pi/pi-tools.json if tools.json missing", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      return typeof p === "string" && p.includes(path.join(".pi", "pi-tools.json"));
+    });
+    const result = findProjectConfigPath("/projects/my-app");
+    expect(result).toContain(path.join(".pi", "pi-tools.json"));
   });
 });
 
