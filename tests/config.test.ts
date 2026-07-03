@@ -269,4 +269,67 @@ describe("loadMergedConfig", () => {
     // Other defaults preserved
     expect(config.providers.brave.enabled).toBe(true);
   });
+
+  it("preserves github defaults when neither global nor project config includes them", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const filePath = typeof p === "string" ? p : p.toString();
+      if (filePath.includes(path.join(".pi", "agent"))) {
+        return JSON.stringify({
+          defaultProvider: "brave",
+          providers: { brave: { enabled: true } },
+        });
+      }
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const config = loadMergedConfig("/projects/my-app");
+    expect(config.github).toBeDefined();
+    expect(config.github.enabled).toBe(true);
+    expect(config.github.maxRepoSizeMB).toBe(350);
+    expect(config.github.cloneTimeoutSeconds).toBe(30);
+  });
+
+  it("deep-merges github config from project over global", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const filePath = typeof p === "string" ? p : p.toString();
+      if (filePath.includes(path.join(".pi", "agent"))) {
+        return JSON.stringify({
+          github: { maxRepoSizeMB: 500 },
+        });
+      }
+      if (filePath.includes(path.join(".pi", "pi-tools.json"))) {
+        return JSON.stringify({
+          github: { enabled: false },
+        });
+      }
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      return (p as string).includes(path.join(".pi", "pi-tools.json"));
+    });
+
+    const config = loadMergedConfig("/projects/my-app");
+    expect(config.github.enabled).toBe(false); // from project
+    expect(config.github.maxRepoSizeMB).toBe(500); // from global
+    expect(config.github.cloneTimeoutSeconds).toBe(30); // from defaults
+  });
+
+  it("loads only defaults and global config when cwd is undefined", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const filePath = typeof p === "string" ? p : p.toString();
+      if (filePath.includes(path.join(".pi", "agent"))) {
+        return JSON.stringify({
+          defaultProvider: "brave",
+        });
+      }
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const config = loadMergedConfig();
+    expect(config.defaultProvider).toBe("brave");
+    // github defaults preserved
+    expect(config.github.enabled).toBe(true);
+  });
 });
