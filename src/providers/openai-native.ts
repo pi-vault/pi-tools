@@ -22,7 +22,6 @@ interface MessageOutput {
 type OutputItem = MessageOutput | { type: string };
 
 interface OpenAIResponsesResult {
-  id: string;
   output: OutputItem[];
 }
 
@@ -37,7 +36,6 @@ export const providerMeta: ProviderMeta = {
       label: "OpenAI Web Search",
       endpoint: "https://api.openai.com/v1/responses",
       method: "POST",
-      authHeader: "Authorization",
       authPrefix: "Bearer ",
       buildBody: (query) => ({
         model: "gpt-4.1-nano",

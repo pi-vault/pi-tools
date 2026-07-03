@@ -6,7 +6,7 @@ export interface HttpSearchConfig {
   endpoint: string | ((query: string, maxResults: number, filters?: SearchFilters) => string);
   method: "GET" | "POST";
 
-  // Auth: use EITHER authHeader/authPrefix OR buildHeaders (not both)
+  // Auth: provide buildHeaders for full control, or authHeader/authPrefix (defaults to "Authorization")
   authHeader?: string;
   authPrefix?: string;
   buildHeaders?: (apiKey: string) => Record<string, string>;
@@ -35,7 +35,7 @@ export function createHttpSearchProvider(
 
       const headers: Record<string, string> = config.buildHeaders
         ? config.buildHeaders(apiKey)
-        : { [config.authHeader!]: (config.authPrefix ?? "") + apiKey };
+        : { [config.authHeader ?? "Authorization"]: (config.authPrefix ?? "") + apiKey };
 
       const init: RequestInit = { signal, headers };
 
@@ -50,7 +50,7 @@ export function createHttpSearchProvider(
       const response = await fetch(url, init);
 
       if (!response.ok) {
-        throw new Error(`${config.name} API error: ${response.status} ${response.statusText}`);
+        throw new Error(`${config.label} API error: ${response.status} ${response.statusText}`);
       }
 
       const data: unknown = await response.json();

@@ -12,7 +12,6 @@ export const providerMeta: ProviderMeta = {
       label: "WebSearchAPI",
       endpoint: "https://api.websearchapi.ai/ai-search",
       method: "POST",
-      authHeader: "Authorization",
       authPrefix: "Bearer ",
       buildBody: (query, maxResults) => ({ query, maxResults }),
       extractResults: (data) => {

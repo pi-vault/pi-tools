@@ -12,7 +12,6 @@ export const providerMeta: ProviderMeta = {
       label: "Perplexity Sonar",
       endpoint: "https://api.perplexity.ai/chat/completions",
       method: "POST",
-      authHeader: "Authorization",
       authPrefix: "Bearer ",
       buildBody: (query) => ({
         model: "sonar",

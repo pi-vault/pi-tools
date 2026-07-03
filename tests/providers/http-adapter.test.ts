@@ -81,7 +81,12 @@ describe("createHttpSearchProvider", () => {
     });
 
     await provider.search("q", 5);
-    // Verifying no error thrown — header construction worked
+
+    const fetchCall = (globalThis.fetch as any).mock.calls[0];
+    expect(fetchCall[1].headers).toEqual({
+      Accept: "application/json",
+      "X-Subscription-Token": "key",
+    });
   });
 
   it("throws on non-ok response", async () => {
@@ -100,7 +105,7 @@ describe("createHttpSearchProvider", () => {
       extractResults: () => [],
     });
 
-    await expect(provider.search("q", 5)).rejects.toThrow("failing API error: 429");
+    await expect(provider.search("q", 5)).rejects.toThrow("Failing API error: 429");
   });
 
   it("slices results to maxResults", async () => {
