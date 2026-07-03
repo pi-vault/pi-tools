@@ -14,7 +14,7 @@
 
 Current duplication:
 - `src/tools/web-search.ts` lines 119-152: for-loop over candidates, try/catch, AggregateProviderError
-- `src/tools/web-fetch.ts` lines 112-157: same pattern with slightly different error collection
+- `src/tools/web-fetch.ts` lines 113-157: same pattern with slightly different error collection (seeds errors with initial HTTP pipeline error)
 
 Both share: iterate candidates, time each attempt, call onSuccess/onFailure, collect errors, throw aggregate.
 
@@ -103,6 +103,28 @@ describe("executeWithFallback", () => {
       }),
     ).rejects.toThrow("No search providers available");
   });
+
+  it("includes initialErrors in aggregate when all candidates fail", async () => {
+    await expect(
+      executeWithFallback({
+        candidates: [
+          { name: "exa", execute: async () => { throw new Error("Exa unavailable"); } },
+        ],
+        operation: "fetch",
+        initialErrors: [{ provider: "http", error: "500 Server Error" }],
+      }),
+    ).rejects.toThrow("http: 500 Server Error");
+  });
+
+  it("includes initialErrors in aggregate when candidates is empty", async () => {
+    await expect(
+      executeWithFallback({
+        candidates: [],
+        operation: "fetch",
+        initialErrors: [{ provider: "http", error: "500 Server Error" }],
+      }),
+    ).rejects.toThrow("http: 500 Server Error");
+  });
 });
 ```
 
@@ -126,6 +148,8 @@ export interface FallbackCandidate<T> {
 export interface ExecuteOptions<T> {
   candidates: FallbackCandidate<T>[];
   operation: string;
+  /** Errors to seed the aggregate with (e.g. the initial HTTP pipeline error). */
+  initialErrors?: Array<{ provider: string; error: string }>;
   onSuccess?: (providerName: string, latencyMs: number) => void;
   onFailure?: (providerName: string) => void;
 }
@@ -138,15 +162,18 @@ export interface ExecuteResult<T> {
 export async function executeWithFallback<T>(
   options: ExecuteOptions<T>,
 ): Promise<ExecuteResult<T>> {
-  const { candidates, operation, onSuccess, onFailure } = options;
+  const { candidates, operation, initialErrors, onSuccess, onFailure } = options;
 
   if (candidates.length === 0) {
     throw new AggregateProviderError(operation, [
+      ...(initialErrors ?? []),
       { provider: "none", error: `No ${operation} providers available` },
     ]);
   }
 
-  const errors: Array<{ provider: string; error: string }> = [];
+  const errors: Array<{ provider: string; error: string }> = [
+    ...(initialErrors ?? []),
+  ];
 
   for (const candidate of candidates) {
     const startMs = Date.now();
@@ -189,7 +216,7 @@ git commit -m "feat: add executeWithFallback module for provider fallback"
 
 - [ ] **Step 1: Replace the fallback loop in web-search.ts**
 
-In `src/tools/web-search.ts`, update the `execute` function inside `createWebSearchTool`. Replace lines 108-152 (the candidate loop + error handling):
+In `src/tools/web-search.ts`, update the `execute` function inside `createWebSearchTool`. Replace lines 119-152 (the error array init, candidate for-loop, and AggregateProviderError throw):
 
 ```ts
 import { executeWithFallback } from "../providers/execute.ts";
@@ -265,12 +292,12 @@ git commit -m "refactor: web-search delegates fallback to executeWithFallback"
 
 - [ ] **Step 1: Replace the provider fallback loop in web-fetch.ts**
 
-In `src/tools/web-fetch.ts`, update the `executeSingleUrl` function. Replace the provider fallback section (lines 112-157) inside the `catch (pipelineError)` block:
+In `src/tools/web-fetch.ts`, add the import and replace the `catch (pipelineError)` block (lines 113-157) inside `executeSingleUrl`:
 
 ```ts
 import { executeWithFallback } from "../providers/execute.ts";
 
-// Inside executeSingleUrl, in the catch block:
+// Inside executeSingleUrl, replace the catch block:
 } catch (pipelineError) {
   // Only fall back to providers for retryable errors
   if (!(pipelineError instanceof RetryableExtractionError)) {
@@ -286,19 +313,20 @@ import { executeWithFallback } from "../providers/execute.ts";
   }
 
   try {
-    const { result: fetchResult } = await executeWithFallback({
+    const { result: fetchResult, providerName } = await executeWithFallback({
       candidates: candidates.map((provider) => ({
         name: provider.name,
         execute: () => provider.fetch(url, signal),
       })),
       operation: "fetch",
+      initialErrors: [{ provider: "http", error: pipelineError.message }],
     });
 
     const extracted: ExtractedContent = {
       text: fetchResult.text,
       title: fetchResult.title,
       url,
-      extractionChain: [`fetch-provider:${fetchResult.title ?? "unknown"}`],
+      extractionChain: [`fetch-provider:${providerName}`],
       chars: fetchResult.text.length,
       truncated: false,
     };
@@ -312,36 +340,13 @@ import { executeWithFallback } from "../providers/execute.ts";
 }
 ```
 
-Note: The `extractionChain` needs the provider name. Update to capture it:
+Update the `AggregateProviderError` import — it's no longer used directly, but `sanitizeError` is still needed:
 
 ```ts
-try {
-  const { result: fetchResult, providerName } = await executeWithFallback({
-    candidates: candidates.map((provider) => ({
-      name: provider.name,
-      execute: () => provider.fetch(url, signal),
-    })),
-    operation: "fetch",
-  });
-
-  const extracted: ExtractedContent = {
-    text: fetchResult.text,
-    title: fetchResult.title,
-    url,
-    extractionChain: [`fetch-provider:${providerName}`],
-    chars: fetchResult.text.length,
-    truncated: false,
-  };
-
-  cache?.set(url, extracted);
-  return buildResult(extracted, url, store);
-} catch (fallbackError) {
-  const msg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-  return errorResult(url, `Fetch error: ${msg}`);
-}
+// Before: import { AggregateProviderError, sanitizeError } from "../utils/errors.ts";
+// After:
+import { sanitizeError } from "../utils/errors.ts";
 ```
-
-Remove the now-unused `AggregateProviderError` import if it's no longer used directly.
 
 - [ ] **Step 2: Run web-fetch tests**
 
