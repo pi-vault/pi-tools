@@ -5,7 +5,8 @@ import type { ContentStore } from "../storage.ts";
 import type { FetchProvider } from "../providers/types.ts";
 import { extractContent, RetryableExtractionError, type ExtractedContent } from "../extract/pipeline.ts";
 import { truncateContent } from "../utils/truncate.ts";
-import { AggregateProviderError, sanitizeError } from "../utils/errors.ts";
+import { sanitizeError } from "../utils/errors.ts";
+import { executeWithFallback } from "../providers/execute.ts";
 import type { ContentCache } from "../cache.ts";
 import type { GitHubConfig, GuidanceOverride } from "../config.ts";
 
@@ -124,36 +125,32 @@ export function createWebFetchTool(
         return errorResult(url, `Fetch error: ${msg}`);
       }
 
-      const errors: Array<{ provider: string; error: string }> = [
-        { provider: "http", error: pipelineError.message },
-      ];
+      try {
+        const httpErrorMsg = pipelineError instanceof Error ? pipelineError.message : String(pipelineError);
+        const { result: fetchResult, providerName } = await executeWithFallback({
+          candidates: candidates.map((provider) => ({
+            name: provider.name,
+            execute: () => provider.fetch(url, signal),
+          })),
+          operation: "fetch",
+          initialErrors: [{ provider: "http", error: httpErrorMsg }],
+        });
 
-      for (const provider of candidates) {
-        try {
-          const fetchResult = await provider.fetch(url, signal);
-          const extracted: ExtractedContent = {
-            text: fetchResult.text,
-            title: fetchResult.title,
-            url,
-            extractionChain: [`fetch-provider:${provider.name}`],
-            chars: fetchResult.text.length,
-            truncated: false,
-          };
+        const extracted: ExtractedContent = {
+          text: fetchResult.text,
+          title: fetchResult.title,
+          url,
+          extractionChain: [`fetch-provider:${providerName}`],
+          chars: fetchResult.text.length,
+          truncated: false,
+        };
 
-          // Write provider result to cache
-          cache?.set(url, extracted);
-
-          return buildResult(extracted, url, store);
-        } catch (providerError) {
-          errors.push({
-            provider: provider.name,
-            error: providerError instanceof Error ? providerError.message : String(providerError),
-          });
-        }
+        cache?.set(url, extracted);
+        return buildResult(extracted, url, store);
+      } catch (fallbackError) {
+        const msg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        return errorResult(url, `Fetch error: ${msg}`);
       }
-
-      const aggregate = new AggregateProviderError("fetch", errors);
-      return errorResult(url, `Fetch error: ${aggregate.message}`);
     }
   }
 
