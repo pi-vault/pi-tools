@@ -62,33 +62,49 @@ const DEFAULT_CONFIG: PiToolsConfig = {
 };
 
 export function getConfigPath(): string {
+  return path.join(os.homedir(), ".pi", "agent", "extensions", "tools.json");
+}
+
+function getLegacyConfigPath(): string {
   return path.join(os.homedir(), ".pi", "agent", "extensions", "pi-tools.json");
+}
+
+function parseConfigFile(raw: string): PiToolsConfig {
+  const parsed = JSON.parse(raw);
+
+  const strategy =
+    parsed.selectionStrategy === "auto" || parsed.selectionStrategy === "best-performing"
+      ? (parsed.selectionStrategy as SelectionStrategy)
+      : DEFAULT_CONFIG.selectionStrategy;
+
+  return {
+    defaultProvider: parsed.defaultProvider ?? DEFAULT_CONFIG.defaultProvider,
+    selectionStrategy: strategy,
+    providers: {
+      ...DEFAULT_CONFIG.providers,
+      ...parsed.providers,
+    },
+    github: {
+      ...DEFAULT_CONFIG.github,
+      ...parsed.github,
+    },
+    guidance: parsed.guidance,
+  };
 }
 
 export function loadConfig(configPath?: string): PiToolsConfig {
   const filePath = configPath ?? getConfigPath();
   try {
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const parsed = JSON.parse(raw);
-
-    const strategy = (parsed.selectionStrategy === "auto" || parsed.selectionStrategy === "best-performing")
-      ? (parsed.selectionStrategy as SelectionStrategy)
-      : DEFAULT_CONFIG.selectionStrategy;
-
-    return {
-      defaultProvider: parsed.defaultProvider ?? DEFAULT_CONFIG.defaultProvider,
-      selectionStrategy: strategy,
-      providers: {
-        ...DEFAULT_CONFIG.providers,
-        ...parsed.providers,
-      },
-      github: {
-        ...DEFAULT_CONFIG.github,
-        ...parsed.github,
-      },
-      guidance: parsed.guidance,
-    };
+    return parseConfigFile(fs.readFileSync(filePath, "utf-8"));
   } catch {
+    // Fallback: try legacy filename (only when using default path)
+    if (!configPath) {
+      try {
+        return parseConfigFile(fs.readFileSync(getLegacyConfigPath(), "utf-8"));
+      } catch {
+        // Neither file exists
+      }
+    }
     return { ...DEFAULT_CONFIG };
   }
 }
@@ -122,7 +138,7 @@ const MAX_WALK_DEPTH = 10;
 const PROJECT_CONFIG_RELATIVE = path.join(".pi", "pi-tools.json");
 
 /**
- * Walk up from `startDir` looking for `.pi/pi-tools.json`.
+ * Walk up from `startDir` looking for `.pi/tools.json` (or legacy `.pi/pi-tools.json`).
  * Returns the absolute path if found, or undefined.
  * Stops at the filesystem root or after MAX_WALK_DEPTH levels.
  */
@@ -142,8 +158,8 @@ export function findProjectConfigPath(startDir: string): string | undefined {
 
 /**
  * Load config with three-layer resolution:
- *   1. Project `.pi/pi-tools.json` (highest priority)
- *   2. Global `~/.pi/agent/extensions/pi-tools.json`
+ *   1. Project `.pi/tools.json` (highest priority; falls back to `.pi/pi-tools.json`)
+ *   2. Global `~/.pi/agent/extensions/tools.json` (falls back to `pi-tools.json`)
  *   3. Built-in defaults (lowest priority)
  *
  * Layers are deep-merged: nested objects merge recursively,

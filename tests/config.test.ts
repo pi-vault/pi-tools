@@ -46,6 +46,30 @@ describe("loadConfig", () => {
     const config = loadConfig();
     expect(config.defaultProvider).toBe("auto");
   });
+
+  it("reads from tools.json path", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      const p = typeof filePath === "string" ? filePath : filePath.toString();
+      // Match only tools.json (not pi-tools.json)
+      if (p.endsWith("tools.json") && !p.endsWith("pi-tools.json")) {
+        return JSON.stringify({ defaultProvider: "brave" });
+      }
+      throw new Error("ENOENT");
+    });
+    const config = loadConfig();
+    expect(config.defaultProvider).toBe("brave");
+  });
+
+  it("falls back to pi-tools.json if tools.json is missing", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      if (typeof filePath === "string" && filePath.endsWith("pi-tools.json")) {
+        return JSON.stringify({ defaultProvider: "exa" });
+      }
+      throw new Error("ENOENT");
+    });
+    const config = loadConfig();
+    expect(config.defaultProvider).toBe("exa");
+  });
 });
 
 describe("resolveApiKey", () => {
