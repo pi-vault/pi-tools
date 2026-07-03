@@ -1,6 +1,6 @@
 // src/index.ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadConfig, resolveApiKey, type ProviderConfigEntry } from "./config.ts";
+import { loadMergedConfig, resolveApiKey, type ProviderConfigEntry } from "./config.ts";
 import { ContentStore, type StoredContent } from "./storage.ts";
 import { UsageTracker } from "./providers/usage.ts";
 import { ProviderRegistry } from "./providers/registry.ts";
@@ -125,7 +125,7 @@ function isStoredContent(data: unknown): data is StoredContent {
 }
 
 export default function createExtension(pi: ExtensionAPI): void {
-  const config = loadConfig();
+  const config = loadMergedConfig(process.cwd());
   const store = new ContentStore((customType, data) =>
     pi.appendEntry(customType, data),
   );
@@ -167,11 +167,22 @@ export default function createExtension(pi: ExtensionAPI): void {
     }
   });
 
+  const resolveCandidates = config.selectionStrategy === "best-performing"
+    ? (name?: string) => {
+        const provider = registry.selectSearchByPerformance(name);
+        return provider ? [provider] : [];
+      }
+    : (name?: string) => registry.selectSearchCandidates(name);
+
   pi.registerTool(
     createWebSearchTool(
-      (name) => registry.selectSearchCandidates(name),
-      (providerName) => registry.recordUsage(providerName),
+      resolveCandidates,
+      (providerName, latencyMs) => {
+        registry.recordUsage(providerName);
+        registry.recordSuccess(providerName, latencyMs);
+      },
       config.guidance?.web_search,
+      (providerName) => registry.recordFailure(providerName),
     ),
   );
   const fetchCache = new ContentCache(200, 5 * 60_000);

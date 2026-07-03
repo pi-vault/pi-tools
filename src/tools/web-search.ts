@@ -89,8 +89,9 @@ function buildFilters(params: {
 
 export function createWebSearchTool(
   resolveCandidates: (name?: string) => SearchProvider[],
-  onSuccess?: (providerName: string) => void,
+  onSuccess?: (providerName: string, latencyMs: number) => void,
   guidance?: GuidanceOverride,
+  onFailure?: (providerName: string) => void,
 ): ToolDefinition<typeof WebSearchParams, WebSearchDetails> {
   return {
     name: "web_search",
@@ -118,6 +119,7 @@ export function createWebSearchTool(
       const errors: Array<{ provider: string; error: string }> = [];
 
       for (const provider of candidates) {
+        const startMs = Date.now();
         try {
           const results = await provider.search(
             params.query,
@@ -128,13 +130,14 @@ export function createWebSearchTool(
           const text = params.compact
             ? formatResultsCompact(results)
             : formatResults(results);
-          onSuccess?.(provider.name);
+          onSuccess?.(provider.name, Date.now() - startMs);
 
           return {
             content: [{ type: "text" as const, text }],
             details: { provider: provider.name, resultCount: results.length },
           };
         } catch (error) {
+          onFailure?.(provider.name);
           errors.push({
             provider: provider.name,
             error: error instanceof Error ? error.message : String(error),
