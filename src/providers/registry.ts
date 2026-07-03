@@ -1,5 +1,4 @@
 import type { SearchProvider, FetchProvider, CodeSearchProvider, ProviderTier } from "./types.ts";
-import type { UsageTracker } from "./usage.ts";
 
 interface RegisteredSearch {
   provider: SearchProvider;
@@ -21,15 +20,52 @@ export interface ProviderMetrics {
   totalLatencyMs: number;
 }
 
+export interface UsageRecord {
+  count: number;
+  month: string;
+}
+
+export interface PersistenceAdapter {
+  load(): Record<string, UsageRecord>;
+  save(data: Record<string, UsageRecord>): void;
+}
+
+function getCurrentMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
 export class ProviderRegistry {
   private searchProviders = new Map<string, RegisteredSearch>();
   private fetchProviders = new Map<string, RegisteredFetch>();
   private codeSearchProviders = new Map<string, RegisteredCodeSearch>();
-  private tracker: UsageTracker;
   private metrics = new Map<string, ProviderMetrics>();
+  private counts: Record<string, number> = {};
+  private currentMonth: string;
+  private persistence: PersistenceAdapter;
 
-  constructor(tracker: UsageTracker) {
-    this.tracker = tracker;
+  constructor(persistence: PersistenceAdapter) {
+    this.persistence = persistence;
+    this.currentMonth = getCurrentMonth();
+    this.loadUsage();
+  }
+
+  private loadUsage(): void {
+    const data = this.persistence.load();
+    for (const [name, record] of Object.entries(data)) {
+      if (record.month === this.currentMonth) {
+        this.counts[name] = record.count;
+      }
+      // Different month — counts reset to 0 (already initialized)
+    }
+  }
+
+  private saveUsage(): void {
+    const data: Record<string, UsageRecord> = {};
+    for (const [name, count] of Object.entries(this.counts)) {
+      data[name] = { count, month: this.currentMonth };
+    }
+    this.persistence.save(data);
   }
 
   registerSearch(
@@ -51,14 +87,50 @@ export class ProviderRegistry {
     this.codeSearchProviders.set(provider.name, { provider });
   }
 
+  recordOutcome(providerName: string, result: { success: boolean; latencyMs?: number }): void {
+    // Increment usage count (both success and failure count as a "use")
+    this.counts[providerName] = (this.counts[providerName] ?? 0) + 1;
+    this.saveUsage();
+
+    // Update performance metrics
+    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
+    if (result.success) {
+      m.successes += 1;
+      m.totalLatencyMs += result.latencyMs ?? 0;
+    } else {
+      m.failures += 1;
+    }
+    this.metrics.set(providerName, m);
+  }
+
+  // Legacy methods — kept for backward compatibility during transition
   recordUsage(providerName: string): void {
-    this.tracker.increment(providerName);
+    this.counts[providerName] = (this.counts[providerName] ?? 0) + 1;
+    this.saveUsage();
+  }
+
+  recordSuccess(providerName: string, latencyMs: number): void {
+    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
+    m.successes += 1;
+    m.totalLatencyMs += latencyMs;
+    this.metrics.set(providerName, m);
+  }
+
+  recordFailure(providerName: string): void {
+    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
+    m.failures += 1;
+    this.metrics.set(providerName, m);
   }
 
   getRemaining(providerName: string): number {
     const reg = this.searchProviders.get(providerName);
     if (!reg) return 0;
-    return this.tracker.getRemaining(providerName, reg.monthlyQuota);
+    if (reg.monthlyQuota === null) return Infinity;
+    return Math.max(0, reg.monthlyQuota - (this.counts[providerName] ?? 0));
+  }
+
+  getCount(providerName: string): number {
+    return this.counts[providerName] ?? 0;
   }
 
   selectSearch(name?: string): SearchProvider | undefined {
@@ -77,11 +149,11 @@ export class ProviderRegistry {
         .filter((r) => r.tier === tier)
         .filter((r) => {
           if (r.monthlyQuota === null) return true;
-          return this.tracker.getCount(r.provider.name) < r.monthlyQuota;
+          return (this.counts[r.provider.name] ?? 0) < r.monthlyQuota;
         })
         .sort((a, b) => {
-          const remA = this.tracker.getRemaining(a.provider.name, a.monthlyQuota);
-          const remB = this.tracker.getRemaining(b.provider.name, b.monthlyQuota);
+          const remA = a.monthlyQuota === null ? Infinity : Math.max(0, a.monthlyQuota - (this.counts[a.provider.name] ?? 0));
+          const remB = b.monthlyQuota === null ? Infinity : Math.max(0, b.monthlyQuota - (this.counts[b.provider.name] ?? 0));
           return remB - remA;
         });
       candidates.push(...tierCandidates.map((c) => c.provider));
@@ -109,7 +181,7 @@ export class ProviderRegistry {
     // Build list of eligible (non-exhausted) providers
     const eligible = [...this.searchProviders.values()].filter((r) => {
       if (r.monthlyQuota === null) return true;
-      return this.tracker.getCount(r.provider.name) < r.monthlyQuota;
+      return (this.counts[r.provider.name] ?? 0) < r.monthlyQuota;
     });
 
     if (eligible.length === 0) return undefined;
@@ -162,19 +234,6 @@ export class ProviderRegistry {
 
   getSearchProviderNames(): string[] {
     return [...this.searchProviders.keys()];
-  }
-
-  recordSuccess(providerName: string, latencyMs: number): void {
-    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
-    m.successes += 1;
-    m.totalLatencyMs += latencyMs;
-    this.metrics.set(providerName, m);
-  }
-
-  recordFailure(providerName: string): void {
-    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
-    m.failures += 1;
-    this.metrics.set(providerName, m);
   }
 
   getMetrics(providerName: string): ProviderMetrics | undefined {

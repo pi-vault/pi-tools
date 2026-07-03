@@ -1,10 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
-import { UsageTracker } from "../../src/providers/usage.ts";
 import type { FetchProvider, SearchProvider } from "../../src/providers/types.ts";
-import * as fs from "node:fs";
-
-vi.mock("node:fs");
 
 function mockProvider(name: string, label: string): SearchProvider {
   return {
@@ -16,20 +12,11 @@ function mockProvider(name: string, label: string): SearchProvider {
   };
 }
 
-describe("ProviderRegistry", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    // UsageTracker reads from disk on construction; stub to start fresh
-    vi.mocked(fs.readFileSync).mockImplementation(() => {
-      throw new Error("ENOENT");
-    });
-    vi.mocked(fs.writeFileSync).mockImplementation(() => {});
-    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
-  });
+const mem = () => new ProviderRegistry({ load: () => ({}), save: () => {} });
 
+describe("ProviderRegistry", () => {
   it("selects tier 1 provider with highest remaining quota", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const brave = mockProvider("brave", "Brave");
     const serper = mockProvider("serper", "Serper");
 
@@ -43,8 +30,7 @@ describe("ProviderRegistry", () => {
   });
 
   it("falls back to tier 2 when tier 1 exhausted", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const perplexity = mockProvider("perplexity", "Perplexity");
 
     registry.registerSearch(perplexity, { tier: 2, monthlyQuota: null });
@@ -55,8 +41,7 @@ describe("ProviderRegistry", () => {
   });
 
   it("falls back to tier 3 when all others unavailable", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
     registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
@@ -66,8 +51,7 @@ describe("ProviderRegistry", () => {
   });
 
   it("selects by name when explicitly requested", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const brave = mockProvider("brave", "Brave");
     const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
@@ -79,26 +63,23 @@ describe("ProviderRegistry", () => {
   });
 
   it("returns undefined when no providers registered", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     expect(registry.selectSearch()).toBeUndefined();
   });
 
   it("records usage via tracker and reflects in remaining quota", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const brave = mockProvider("brave", "Brave");
     registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
 
     registry.recordUsage("brave");
     expect(registry.getRemaining("brave")).toBe(1999);
-    // Verify tracker received the increment
-    expect(tracker.getCount("brave")).toBe(1);
+    // Verify count incremented
+    expect(registry.getCount("brave")).toBe(1);
   });
 
   it("skips providers at 100% usage", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const brave = mockProvider("brave", "Brave");
     const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
@@ -112,8 +93,7 @@ describe("ProviderRegistry", () => {
 
   describe("selectSearchCandidates", () => {
     it("returns all providers ordered by tier then remaining quota", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       const brave = mockProvider("brave", "Brave");
       const serper = mockProvider("serper", "Serper");
       const perplexity = mockProvider("perplexity", "Perplexity");
@@ -134,8 +114,7 @@ describe("ProviderRegistry", () => {
     });
 
     it("excludes exhausted providers", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       const brave = mockProvider("brave", "Brave");
       const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
@@ -148,8 +127,7 @@ describe("ProviderRegistry", () => {
     });
 
     it("returns single-element array for explicit provider name", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       const brave = mockProvider("brave", "Brave");
       const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
@@ -161,25 +139,23 @@ describe("ProviderRegistry", () => {
     });
 
     it("returns empty array for unknown explicit provider", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       expect(registry.selectSearchCandidates("nonexistent")).toEqual([]);
     });
 
     it("returns empty array when no providers registered", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       expect(registry.selectSearchCandidates()).toEqual([]);
     });
   });
 
-  it("persists usage across registry instances sharing the same tracker state", () => {
-    // Simulate: tracker loaded from disk with existing counts
-    vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ resetAt: new Date().toISOString().slice(0, 7), counts: { brave: 1998 } }),
-    );
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+  it("persists usage across registry instances sharing the same adapter state", () => {
+    const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    const adapter = {
+      load: () => ({ brave: { count: 1998, month } }),
+      save: vi.fn(),
+    };
+    const registry = new ProviderRegistry(adapter);
     const brave = mockProvider("brave", "Brave");
     const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
@@ -199,8 +175,7 @@ describe("ProviderRegistry", () => {
 
   describe("selectFetchCandidates", () => {
     it("returns all registered fetch providers", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       const jina: FetchProvider = {
         name: "jina",
         fetch: vi.fn().mockResolvedValue({ text: "content", title: "Title" }),
@@ -218,16 +193,14 @@ describe("ProviderRegistry", () => {
     });
 
     it("returns empty array when no fetch providers registered", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       expect(registry.selectFetchCandidates()).toEqual([]);
     });
   });
 
   describe("best-performing selection strategy", () => {
     it("selectSearch uses tier-based selection when strategy is auto", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       const brave = mockProvider("brave", "Brave");
       const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
@@ -243,8 +216,7 @@ describe("ProviderRegistry", () => {
     });
 
     it("selectSearchByPerformance scores providers by success rate, speed, and tier", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       const brave = mockProvider("brave", "Brave");
       const exa = mockProvider("exa", "Exa");
       const ddg = mockProvider("duckduckgo", "DuckDuckGo");
@@ -270,8 +242,7 @@ describe("ProviderRegistry", () => {
     });
 
     it("selectSearchByPerformance falls back to tier-based when no metrics exist", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       const brave = mockProvider("brave", "Brave");
       const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
@@ -284,8 +255,7 @@ describe("ProviderRegistry", () => {
     });
 
     it("selectSearchByPerformance excludes exhausted providers", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       const brave = mockProvider("brave", "Brave");
       const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
@@ -300,8 +270,7 @@ describe("ProviderRegistry", () => {
     });
 
     it("selectSearchByPerformance prefers fast provider with good success rate over slow tier-1", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       const brave = mockProvider("brave", "Brave");
       const perplexity = mockProvider("perplexity", "Perplexity");
 
@@ -323,14 +292,12 @@ describe("ProviderRegistry", () => {
     });
 
     it("selectSearchByPerformance returns undefined when no providers registered", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       expect(registry.selectSearchByPerformance()).toBeUndefined();
     });
 
     it("selectSearchByPerformance selects explicit provider by name", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       const brave = mockProvider("brave", "Brave");
       const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
@@ -342,10 +309,55 @@ describe("ProviderRegistry", () => {
     });
   });
 
+  describe("recordOutcome", () => {
+    it("increments usage count on success", () => {
+      const registry = new ProviderRegistry({ load: () => ({}), save: () => {} });
+      const provider = mockProvider("brave", "Brave");
+      registry.registerSearch(provider, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 });
+
+      // Should track 1 usage
+      expect(registry.getRemaining("brave")).toBe(1999);
+    });
+
+    it("increments usage count on failure", () => {
+      const registry = new ProviderRegistry({ load: () => ({}), save: () => {} });
+      const provider = mockProvider("brave", "Brave");
+      registry.registerSearch(provider, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: false });
+
+      expect(registry.getRemaining("brave")).toBe(1999);
+    });
+
+    it("records latency for performance scoring on success", () => {
+      const registry = new ProviderRegistry({ load: () => ({}), save: () => {} });
+      const provider = mockProvider("brave", "Brave");
+      registry.registerSearch(provider, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: true, latencyMs: 300 });
+
+      const metrics = registry.getMetrics("brave");
+      expect(metrics?.successes).toBe(1);
+      expect(metrics?.totalLatencyMs).toBe(300);
+    });
+
+    it("records failure for performance scoring", () => {
+      const registry = new ProviderRegistry({ load: () => ({}), save: () => {} });
+      const provider = mockProvider("brave", "Brave");
+      registry.registerSearch(provider, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: false });
+
+      const metrics = registry.getMetrics("brave");
+      expect(metrics?.failures).toBe(1);
+    });
+  });
+
   describe("session metrics", () => {
     it("records success with latency", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       const brave = mockProvider("brave", "Brave");
       registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
 
@@ -360,8 +372,7 @@ describe("ProviderRegistry", () => {
     });
 
     it("records failure", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       const brave = mockProvider("brave", "Brave");
       registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
 
@@ -376,14 +387,12 @@ describe("ProviderRegistry", () => {
     });
 
     it("returns undefined metrics for unknown provider", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       expect(registry.getMetrics("unknown")).toBeUndefined();
     });
 
     it("tracks metrics independently per provider", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
+      const registry = mem();
       const brave = mockProvider("brave", "Brave");
       const exa = mockProvider("exa", "Exa");
       registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
@@ -402,6 +411,5 @@ describe("ProviderRegistry", () => {
       expect(exaMetrics.failures).toBe(1);
       expect(exaMetrics.totalLatencyMs).toBe(600);
     });
-
   });
 });
