@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { deepMerge } from "./utils/deep-merge.ts";
 
 export interface ProviderConfigEntry {
   enabled: boolean;
@@ -98,4 +99,66 @@ export function resolveApiKey(apiKey: string | undefined): string | undefined {
 
   // Literal key value
   return apiKey;
+}
+
+const MAX_WALK_DEPTH = 10;
+const PROJECT_CONFIG_RELATIVE = path.join(".pi", "pi-tools.json");
+
+/**
+ * Walk up from `startDir` looking for `.pi/pi-tools.json`.
+ * Returns the absolute path if found, or undefined.
+ * Stops at the filesystem root or after MAX_WALK_DEPTH levels.
+ */
+export function findProjectConfigPath(startDir: string): string | undefined {
+  let dir = path.resolve(startDir);
+  for (let i = 0; i < MAX_WALK_DEPTH; i++) {
+    const candidate = path.join(dir, PROJECT_CONFIG_RELATIVE);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // filesystem root
+    dir = parent;
+  }
+  return undefined;
+}
+
+/**
+ * Load config with three-layer resolution:
+ *   1. Project `.pi/pi-tools.json` (highest priority)
+ *   2. Global `~/.pi/agent/extensions/pi-tools.json`
+ *   3. Built-in defaults (lowest priority)
+ *
+ * Layers are deep-merged: nested objects merge recursively,
+ * scalars and arrays from higher-priority sources replace lower-priority values.
+ */
+export function loadMergedConfig(cwd?: string): PiToolsConfig {
+  // Start from built-in defaults
+  let merged = deepMerge(DEFAULT_CONFIG as Record<string, unknown>, {});
+
+  // Layer 2: global config
+  const globalPath = getConfigPath();
+  try {
+    const raw = fs.readFileSync(globalPath, "utf-8");
+    const globalOverrides = JSON.parse(raw);
+    merged = deepMerge(merged, globalOverrides);
+  } catch {
+    // No global config or parse error — defaults stand
+  }
+
+  // Layer 1: project config (highest priority)
+  if (cwd) {
+    const projectPath = findProjectConfigPath(cwd);
+    if (projectPath) {
+      try {
+        const raw = fs.readFileSync(projectPath, "utf-8");
+        const projectOverrides = JSON.parse(raw);
+        merged = deepMerge(merged, projectOverrides);
+      } catch {
+        // Malformed project config — skip
+      }
+    }
+  }
+
+  return merged as PiToolsConfig;
 }

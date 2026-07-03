@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadConfig, resolveApiKey } from "../src/config.ts";
+import { loadConfig, resolveApiKey, findProjectConfigPath, loadMergedConfig } from "../src/config.ts";
+import * as path from "node:path";
 
 vi.mock("node:fs");
 
@@ -136,5 +137,136 @@ describe("GitHub config", () => {
     // GitHub merged
     expect(config.github.maxRepoSizeMB).toBe(200);
     expect(config.github.enabled).toBe(true);
+  });
+});
+
+describe("findProjectConfigPath", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns path when .pi/pi-tools.json exists in cwd", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      return p === path.join("/projects/my-app", ".pi", "pi-tools.json");
+    });
+    const result = findProjectConfigPath("/projects/my-app");
+    expect(result).toBe(
+      path.join("/projects/my-app", ".pi", "pi-tools.json"),
+    );
+  });
+
+  it("walks up to find .pi/pi-tools.json in ancestor", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      return p === path.join("/projects", ".pi", "pi-tools.json");
+    });
+    const result = findProjectConfigPath("/projects/my-app/src/deep");
+    expect(result).toBe(path.join("/projects", ".pi", "pi-tools.json"));
+  });
+
+  it("returns undefined when no .pi/pi-tools.json found", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const result = findProjectConfigPath("/projects/my-app");
+    expect(result).toBeUndefined();
+  });
+
+  it("stops after 10 levels", () => {
+    const calls: string[] = [];
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      calls.push(p as string);
+      return false;
+    });
+    findProjectConfigPath("/a/b/c/d/e/f/g/h/i/j/k/l/m/n");
+    // Should check at most 10 directories
+    expect(calls.length).toBeLessThanOrEqual(10);
+  });
+
+  it("stops at filesystem root", () => {
+    const calls: string[] = [];
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      calls.push(p as string);
+      return false;
+    });
+    findProjectConfigPath("/a/b");
+    // /a/b, /a, / — should stop at root, not go further
+    expect(calls.length).toBe(3);
+  });
+});
+
+describe("loadMergedConfig", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("returns global config when no project config exists", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const filePath = typeof p === "string" ? p : p.toString();
+      if (filePath.includes(path.join(".pi", "agent"))) {
+        return JSON.stringify({
+          defaultProvider: "brave",
+          providers: { brave: { enabled: true, monthlyQuota: 2000 } },
+        });
+      }
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const config = loadMergedConfig("/projects/my-app");
+    expect(config.defaultProvider).toBe("brave");
+  });
+
+  it("deep-merges project config over global config", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const filePath = typeof p === "string" ? p : p.toString();
+      if (filePath.includes(path.join(".pi", "agent"))) {
+        return JSON.stringify({
+          defaultProvider: "auto",
+          providers: {
+            brave: { enabled: true, monthlyQuota: 2000 },
+            exa: { enabled: true, monthlyQuota: 1000 },
+          },
+        });
+      }
+      if (filePath.includes(path.join(".pi", "pi-tools.json"))) {
+        return JSON.stringify({
+          defaultProvider: "brave",
+          providers: {
+            exa: { enabled: false },
+          },
+        });
+      }
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      return (p as string).includes(path.join(".pi", "pi-tools.json"));
+    });
+
+    const config = loadMergedConfig("/projects/my-app");
+    expect(config.defaultProvider).toBe("brave");
+    // exa disabled by project config
+    expect(config.providers.exa.enabled).toBe(false);
+    // brave untouched — kept from global config
+    expect(config.providers.brave.enabled).toBe(true);
+    expect(config.providers.brave.monthlyQuota).toBe(2000);
+  });
+
+  it("project config overrides built-in defaults when no global config", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const filePath = typeof p === "string" ? p : p.toString();
+      if (filePath.includes(path.join(".pi", "pi-tools.json"))) {
+        return JSON.stringify({
+          providers: { duckduckgo: { enabled: false } },
+        });
+      }
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      return (p as string).includes(path.join(".pi", "pi-tools.json"));
+    });
+
+    const config = loadMergedConfig("/projects/my-app");
+    // duckduckgo overridden by project config
+    expect(config.providers.duckduckgo.enabled).toBe(false);
+    // Other defaults preserved
+    expect(config.providers.brave.enabled).toBe(true);
   });
 });
