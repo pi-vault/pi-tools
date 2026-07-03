@@ -7,7 +7,7 @@ import { extractContent, RetryableExtractionError, type ExtractedContent } from 
 import { truncateContent } from "../utils/truncate.ts";
 import { AggregateProviderError, sanitizeError } from "../utils/errors.ts";
 import type { ContentCache } from "../cache.ts";
-import type { GuidanceOverride } from "../config.ts";
+import type { GitHubConfig, GuidanceOverride } from "../config.ts";
 
 const INLINE_LIMIT = 15_000;
 const MANIFEST_PREVIEW_CHARS = 512;
@@ -83,6 +83,7 @@ export function createWebFetchTool(
   resolveFetchCandidates?: () => FetchProvider[],
   cache?: ContentCache,
   guidance?: GuidanceOverride,
+  githubConfig?: GitHubConfig,
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
 
   async function executeSingleUrl(
@@ -102,7 +103,7 @@ export function createWebFetchTool(
       const extracted = await extractContent(
         url,
         signal,
-        params.raw ? { raw: true } : undefined,
+        params.raw ? { raw: true, github: githubConfig } : { github: githubConfig },
       );
 
       // Write to cache
@@ -208,7 +209,7 @@ export function createWebFetchTool(
         const extracted = await extractContent(
           u,
           signal ?? undefined,
-          params.raw ? { raw: true } : undefined,
+          params.raw ? { raw: true, github: githubConfig } : { github: githubConfig },
         );
 
         cache?.set(u, extracted);

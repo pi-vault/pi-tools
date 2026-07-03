@@ -192,6 +192,7 @@ export default function createExtension(pi: ExtensionAPI): void {
       () => registry.selectFetchCandidates(),
       fetchCache,
       config.guidance?.web_fetch,
+      config.github,
     ),
   );
   pi.registerTool(createWebReadTool(store, config.guidance?.web_read));
