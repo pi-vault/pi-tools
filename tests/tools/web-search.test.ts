@@ -117,7 +117,9 @@ describe("web_search fallback chain", () => {
     const ctx = makeCtx();
     await tool.execute("call-3", { query: "test" }, undefined, undefined, ctx);
     expect(onSuccess).toHaveBeenCalledTimes(1);
-    expect(onSuccess).toHaveBeenCalledWith("exa");
+    const [name, latency] = onSuccess.mock.calls[0] as [string, number];
+    expect(name).toBe("exa");
+    expect(typeof latency).toBe("number");
   });
 
   it("returns error when candidates list is empty", async () => {
@@ -374,5 +376,62 @@ describe("web_search compact output", () => {
     );
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toBe("No results found.");
+  });
+});
+
+describe("web_search metrics callbacks", () => {
+  const sampleResults: SearchResult[] = [
+    { title: "Result", url: "https://example.com", snippet: "Test" },
+  ];
+
+  it("calls onSuccess with provider name and latencyMs on success", async () => {
+    const onSuccess = vi.fn();
+    const tool = createWebSearchTool(
+      () => [makeProvider("brave", sampleResults)],
+      onSuccess,
+    );
+    const ctx = makeCtx();
+    await tool.execute("id", { query: "test" }, undefined, undefined, ctx);
+
+    expect(onSuccess).toHaveBeenCalledOnce();
+    const [name, latency] = onSuccess.mock.calls[0] as [string, number];
+    expect(name).toBe("brave");
+    expect(typeof latency).toBe("number");
+    expect(latency).toBeGreaterThanOrEqual(0);
+  });
+
+  it("calls onFailure when a provider fails", async () => {
+    const onFailure = vi.fn();
+    const provider: SearchProvider = {
+      name: "brave",
+      label: "Brave",
+      search: vi.fn().mockRejectedValue(new Error("API error")),
+    };
+    const tool = createWebSearchTool(
+      () => [provider],
+      undefined,
+      undefined,
+      onFailure,
+    );
+    const ctx = makeCtx();
+    await tool.execute("id", { query: "test" }, undefined, undefined, ctx);
+
+    expect(onFailure).toHaveBeenCalledWith("brave");
+  });
+
+  it("does not call onFailure for a successful provider", async () => {
+    const onSuccess = vi.fn();
+    const onFailure = vi.fn();
+    const tool = createWebSearchTool(
+      () => [makeProvider("brave", sampleResults)],
+      onSuccess,
+      undefined,
+      onFailure,
+    );
+    const ctx = makeCtx();
+    await tool.execute("id", { query: "test" }, undefined, undefined, ctx);
+
+    expect(onSuccess).toHaveBeenCalledOnce();
+    expect(onFailure).not.toHaveBeenCalled();
   });
 });

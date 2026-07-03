@@ -12,24 +12,31 @@ type EventHandler = (...args: unknown[]) => unknown;
 
 export interface MockPi {
   tools: ToolDefinition[];
+  commands: Array<{ name: string; options: { description?: string; handler: (...args: unknown[]) => unknown } }>;
   events: Map<string, EventHandler[]>;
   entries: Array<{ customType: string; data: unknown }>;
   registerTool(tool: ToolDefinition): void;
+  registerCommand(name: string, options: { description?: string; handler: (...args: unknown[]) => unknown }): void;
   on(event: string, handler: EventHandler): void;
   appendEntry(customType: string, data?: unknown): void;
 }
 
 export function createMockPi(): MockPi {
   const tools: ToolDefinition[] = [];
+  const commands: Array<{ name: string; options: { description?: string; handler: (...args: unknown[]) => unknown } }> = [];
   const events = new Map<string, EventHandler[]>();
   const entries: Array<{ customType: string; data: unknown }> = [];
 
   return {
     tools,
+    commands,
     events,
     entries,
     registerTool(tool: ToolDefinition) {
       tools.push(tool);
+    },
+    registerCommand(name: string, options: { description?: string; handler: (...args: unknown[]) => unknown }) {
+      commands.push({ name, options });
     },
     on(event: string, handler: EventHandler) {
       if (!events.has(event)) events.set(event, []);

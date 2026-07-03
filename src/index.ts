@@ -1,6 +1,6 @@
 // src/index.ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { loadConfig, resolveApiKey, type ProviderConfigEntry } from "./config.ts";
+import { loadMergedConfig, resolveApiKey, type ProviderConfigEntry } from "./config.ts";
 import { ContentStore, type StoredContent } from "./storage.ts";
 import { UsageTracker } from "./providers/usage.ts";
 import { ProviderRegistry } from "./providers/registry.ts";
@@ -17,11 +17,12 @@ import { OpenAINativeProvider } from "./providers/openai-native.ts";
 import { ParallelProvider } from "./providers/parallel.ts";
 import { SearXNGProvider } from "./providers/searxng.ts";
 import { WebSearchApiProvider } from "./providers/websearchapi.ts";
-import type { FetchProvider, SearchProvider, CodeSearchProvider } from "./providers/types.ts";
+import type { FetchProvider, SearchProvider, CodeSearchProvider, ProviderTier } from "./providers/types.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
 import { createCodeSearchTool } from "./tools/code-search.ts";
+import { createToolsCommand } from "./commands/tools.ts";
 import { ContentCache } from "./cache.ts";
 
 interface ProviderFactory {
@@ -124,7 +125,7 @@ function isStoredContent(data: unknown): data is StoredContent {
 }
 
 export default function createExtension(pi: ExtensionAPI): void {
-  const config = loadConfig();
+  const config = loadMergedConfig(process.cwd());
   const store = new ContentStore((customType, data) =>
     pi.appendEntry(customType, data),
   );
@@ -166,19 +167,53 @@ export default function createExtension(pi: ExtensionAPI): void {
     }
   });
 
+  const resolveCandidates = config.selectionStrategy === "best-performing"
+    ? (name?: string) => {
+        const provider = registry.selectSearchByPerformance(name);
+        return provider ? [provider] : [];
+      }
+    : (name?: string) => registry.selectSearchCandidates(name);
+
   pi.registerTool(
     createWebSearchTool(
-      (name) => registry.selectSearchCandidates(name),
-      (providerName) => registry.recordUsage(providerName),
+      resolveCandidates,
+      (providerName, latencyMs) => {
+        registry.recordUsage(providerName);
+        registry.recordSuccess(providerName, latencyMs);
+      },
+      config.guidance?.web_search,
+      (providerName) => registry.recordFailure(providerName),
     ),
   );
   const fetchCache = new ContentCache(200, 5 * 60_000);
-  pi.registerTool(createWebFetchTool(store, () => registry.selectFetchCandidates(), fetchCache));
-  pi.registerTool(createWebReadTool(store));
+  pi.registerTool(
+    createWebFetchTool(
+      store,
+      () => registry.selectFetchCandidates(),
+      fetchCache,
+      config.guidance?.web_fetch,
+    ),
+  );
+  pi.registerTool(createWebReadTool(store, config.guidance?.web_read));
   pi.registerTool(
     createCodeSearchTool(
       () => registry.selectCodeSearch(),
       (providerName) => registry.recordUsage(providerName),
+      config.guidance?.code_search,
     ),
   );
+
+  // Build tier map for status display
+  const tierMap = new Map<string, ProviderTier>();
+  for (const [name, factory] of Object.entries(providerFactories)) {
+    tierMap.set(name, factory.tier);
+  }
+
+  // Register /tools command
+  const allProviderNames = Object.keys(providerFactories);
+  const toolsCommand = createToolsCommand(registry, tierMap, allProviderNames);
+  pi.registerCommand(toolsCommand.name, {
+    description: toolsCommand.description,
+    handler: toolsCommand.handler,
+  });
 }

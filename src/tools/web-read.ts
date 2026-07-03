@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { ContentStore } from "../storage.ts";
+import type { GuidanceOverride } from "../config.ts";
 
 const WebReadParams = Type.Object({
   contentId: Type.String({ description: "Content ID from a previous web_fetch or web_search result" }),
@@ -9,13 +10,14 @@ const WebReadParams = Type.Object({
 
 export function createWebReadTool(
   store: ContentStore,
+  guidance?: GuidanceOverride,
 ): ToolDefinition<typeof WebReadParams> {
   return {
     name: "web_read",
     label: "Web Read",
     description:
       "Retrieve previously fetched web content by its content ID without re-fetching.",
-    promptSnippet:
+    promptSnippet: guidance?.promptSnippet ??
       "Retrieve previously fetched web content by its content ID without re-fetching.",
     parameters: WebReadParams,
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {

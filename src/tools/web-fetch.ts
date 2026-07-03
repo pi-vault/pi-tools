@@ -7,6 +7,7 @@ import { extractContent, RetryableExtractionError, type ExtractedContent } from 
 import { truncateContent } from "../utils/truncate.ts";
 import { AggregateProviderError, sanitizeError } from "../utils/errors.ts";
 import type { ContentCache } from "../cache.ts";
+import type { GuidanceOverride } from "../config.ts";
 
 const INLINE_LIMIT = 15_000;
 const MANIFEST_PREVIEW_CHARS = 512;
@@ -81,6 +82,7 @@ export function createWebFetchTool(
   store: ContentStore,
   resolveFetchCandidates?: () => FetchProvider[],
   cache?: ContentCache,
+  guidance?: GuidanceOverride,
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
 
   async function executeSingleUrl(
@@ -159,9 +161,9 @@ export function createWebFetchTool(
     label: "Web Fetch",
     description:
       "Fetch a URL and extract readable content as markdown. Supports HTML pages.",
-    promptSnippet:
+    promptSnippet: guidance?.promptSnippet ??
       "Fetch a URL and extract readable content as markdown. Supports HTML pages.",
-    promptGuidelines: [
+    promptGuidelines: guidance?.promptGuidelines ?? [
       "Use web_fetch when you have a specific URL to read.",
       "For large pages, use web_read with the returned contentId to retrieve the full text.",
     ],

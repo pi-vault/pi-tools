@@ -2,11 +2,19 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add project-level config, `/tools` slash command with interactive setup and status display, session-level backend scoring, and prompt guidance overrides.
+**Goal:** Add project-level config, `/tools` slash command with status display and interactive setup, session-level backend scoring, and prompt guidance overrides.
 
 **Architecture:** Extend `loadConfig` with project-level config discovery and deep merge. New `src/commands/tools.ts` for the slash command. Add `ProviderMetrics` tracking to `ProviderRegistry` with optional `best-performing` selection strategy. Guidance overrides read from config at tool creation time.
 
 **Tech Stack:** TypeScript, Vitest, existing pi-tools config system.
+
+**Key API constraints (verified against `@earendil-works/pi-coding-agent` type definitions):**
+- `pi.registerCommand(name: string, options: { description?, handler })` — name is first arg, options second
+- Command handler signature: `(args: string, ctx: ExtensionCommandContext) => Promise<void>` — `args` is a single string, not `string[]`
+- `ctx.ui.select(title, options: string[])` — options are plain strings, returns `Promise<string | undefined>` (single-select only)
+- `ctx.ui.confirm(title, message)` — returns `Promise<boolean>`
+- `ctx.ui.input(title, placeholder?)` — returns `Promise<string | undefined>`
+- `createWebFetchTool` currently has 3 params: `(store, resolveFetchCandidates?, cache?)` — any new param goes after `cache`
 
 ---
 
@@ -196,12 +204,22 @@ git commit -m "feat: add deepMerge utility for config layering"
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `tests/config.test.ts`, after the existing `describe("loadConfig", ...)` block:
+Add to `tests/config.test.ts`. First update the import on line 3:
+
+Replace:
+```ts
+import { loadConfig, resolveApiKey } from "../src/config.ts";
+```
+
+With:
+```ts
+import { loadConfig, resolveApiKey, findProjectConfigPath, loadMergedConfig } from "../src/config.ts";
+import * as path from "node:path";
+```
+
+Then add these test blocks after the closing `});` of the `"GitHub config"` describe block (after line 139):
 
 ```ts
-import { findProjectConfigPath, loadMergedConfig } from "../src/config.ts";
-import * as path from "node:path";
-
 describe("findProjectConfigPath", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -262,7 +280,7 @@ describe("loadMergedConfig", () => {
   it("returns global config when no project config exists", () => {
     vi.mocked(fs.readFileSync).mockImplementation((p) => {
       const filePath = typeof p === "string" ? p : p.toString();
-      if (filePath.includes("pi-tools.json") && filePath.includes(".pi/agent")) {
+      if (filePath.includes(path.join(".pi", "agent"))) {
         return JSON.stringify({
           defaultProvider: "brave",
           providers: { brave: { enabled: true, monthlyQuota: 2000 } },
@@ -279,7 +297,7 @@ describe("loadMergedConfig", () => {
   it("deep-merges project config over global config", () => {
     vi.mocked(fs.readFileSync).mockImplementation((p) => {
       const filePath = typeof p === "string" ? p : p.toString();
-      if (filePath.includes(".pi/agent")) {
+      if (filePath.includes(path.join(".pi", "agent"))) {
         return JSON.stringify({
           defaultProvider: "auto",
           providers: {
@@ -341,15 +359,13 @@ Expected: FAIL — `findProjectConfigPath` and `loadMergedConfig` are not export
 
 - [ ] **Step 3: Implement project config discovery and merged loading**
 
-Add the following to `src/config.ts` after the existing imports:
+In `src/config.ts`, add the import after the existing `import * as path` line (line 4):
 
 ```ts
 import { deepMerge } from "./utils/deep-merge.ts";
 ```
 
-Add `fs.existsSync` usage (already imported via `import * as fs from "node:fs"`).
-
-Add these functions at the bottom of `src/config.ts`, after `resolveApiKey`:
+Add these functions at the bottom of `src/config.ts`, after the `resolveApiKey` function:
 
 ```ts
 const MAX_WALK_DEPTH = 10;
@@ -384,9 +400,8 @@ export function findProjectConfigPath(startDir: string): string | undefined {
  * scalars and arrays from higher-priority sources replace lower-priority values.
  */
 export function loadMergedConfig(cwd?: string): PiToolsConfig {
-  // Layer 3: built-in defaults
-  let merged: Record<string, unknown> = { ...DEFAULT_CONFIG };
-  merged = deepMerge(merged, { providers: { ...DEFAULT_CONFIG.providers } });
+  // Start from built-in defaults
+  let merged = deepMerge(DEFAULT_CONFIG as Record<string, unknown>, {});
 
   // Layer 2: global config
   const globalPath = getConfigPath();
@@ -398,7 +413,7 @@ export function loadMergedConfig(cwd?: string): PiToolsConfig {
     // No global config or parse error — defaults stand
   }
 
-  // Layer 1: project config
+  // Layer 1: project config (highest priority)
   if (cwd) {
     const projectPath = findProjectConfigPath(cwd);
     if (projectPath) {
@@ -438,7 +453,7 @@ git commit -m "feat: add project-level config discovery and three-layer merging"
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `tests/config.test.ts`, inside the existing `describe("loadConfig", ...)` block or as a new describe:
+Add to `tests/config.test.ts`, after the `"loadMergedConfig"` describe block:
 
 ```ts
 describe("config types — selectionStrategy and guidance", () => {
@@ -517,10 +532,9 @@ Expected: FAIL — `selectionStrategy` and `guidance` do not exist on `PiToolsCo
 
 - [ ] **Step 3: Update `PiToolsConfig` interface and `loadConfig`**
 
-In `src/config.ts`, update the `PiToolsConfig` interface:
+In `src/config.ts`, replace the `PiToolsConfig` interface (lines 19-23):
 
 Replace:
-
 ```ts
 export interface PiToolsConfig {
   defaultProvider: string;
@@ -530,7 +544,6 @@ export interface PiToolsConfig {
 ```
 
 With:
-
 ```ts
 export type SelectionStrategy = "auto" | "best-performing";
 
@@ -548,10 +561,9 @@ export interface PiToolsConfig {
 }
 ```
 
-Update the `DEFAULT_CONFIG`:
+Replace the `DEFAULT_CONFIG` declaration (line 29, just the opening):
 
 Replace:
-
 ```ts
 const DEFAULT_CONFIG: PiToolsConfig = {
   defaultProvider: "auto",
@@ -559,7 +571,6 @@ const DEFAULT_CONFIG: PiToolsConfig = {
 ```
 
 With:
-
 ```ts
 const VALID_STRATEGIES: readonly string[] = ["auto", "best-performing"];
 
@@ -569,10 +580,9 @@ const DEFAULT_CONFIG: PiToolsConfig = {
   providers: {
 ```
 
-Update the `loadConfig` function to handle the new fields:
+Replace the `loadConfig` function (lines 57-76):
 
 Replace:
-
 ```ts
 export function loadConfig(configPath?: string): PiToolsConfig {
   const filePath = configPath ?? getConfigPath();
@@ -597,7 +607,6 @@ export function loadConfig(configPath?: string): PiToolsConfig {
 ```
 
 With:
-
 ```ts
 export function loadConfig(configPath?: string): PiToolsConfig {
   const filePath = configPath ?? getConfigPath();
@@ -650,87 +659,87 @@ git commit -m "feat: add selectionStrategy and guidance fields to PiToolsConfig"
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `tests/providers/registry.test.ts`, inside the existing `describe("ProviderRegistry", ...)` block:
+Add to `tests/providers/registry.test.ts`, inside the existing `describe("ProviderRegistry", ...)` block, after the `"selectFetchCandidates"` describe block (before the final closing `});`):
 
 ```ts
-describe("session metrics", () => {
-  it("records success with latency", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
-    const brave = mockProvider("brave", "Brave");
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+  describe("session metrics", () => {
+    it("records success with latency", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
 
-    registry.recordSuccess("brave", 340);
-    registry.recordSuccess("brave", 500);
+      registry.recordSuccess("brave", 340);
+      registry.recordSuccess("brave", 500);
 
-    const metrics = registry.getMetrics("brave");
-    expect(metrics).toBeDefined();
-    expect(metrics!.successes).toBe(2);
-    expect(metrics!.failures).toBe(0);
-    expect(metrics!.totalLatencyMs).toBe(840);
+      const metrics = registry.getMetrics("brave");
+      expect(metrics).toBeDefined();
+      expect(metrics!.successes).toBe(2);
+      expect(metrics!.failures).toBe(0);
+      expect(metrics!.totalLatencyMs).toBe(840);
+    });
+
+    it("records failure", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordFailure("brave");
+      registry.recordFailure("brave");
+
+      const metrics = registry.getMetrics("brave");
+      expect(metrics).toBeDefined();
+      expect(metrics!.successes).toBe(0);
+      expect(metrics!.failures).toBe(2);
+      expect(metrics!.totalLatencyMs).toBe(0);
+    });
+
+    it("returns undefined metrics for unknown provider", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      expect(registry.getMetrics("unknown")).toBeUndefined();
+    });
+
+    it("tracks metrics independently per provider", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      const exa = mockProvider("exa", "Exa");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
+
+      registry.recordSuccess("brave", 300);
+      registry.recordFailure("exa");
+      registry.recordSuccess("exa", 600);
+
+      const braveMetrics = registry.getMetrics("brave")!;
+      expect(braveMetrics.successes).toBe(1);
+      expect(braveMetrics.failures).toBe(0);
+
+      const exaMetrics = registry.getMetrics("exa")!;
+      expect(exaMetrics.successes).toBe(1);
+      expect(exaMetrics.failures).toBe(1);
+      expect(exaMetrics.totalLatencyMs).toBe(600);
+    });
+
+    it("getAllMetrics returns all tracked providers", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      const exa = mockProvider("exa", "Exa");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
+
+      registry.recordSuccess("brave", 300);
+      registry.recordSuccess("exa", 600);
+
+      const all = registry.getAllMetrics();
+      expect(all.size).toBe(2);
+      expect(all.get("brave")?.successes).toBe(1);
+      expect(all.get("exa")?.successes).toBe(1);
+    });
   });
-
-  it("records failure", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
-    const brave = mockProvider("brave", "Brave");
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
-
-    registry.recordFailure("brave");
-    registry.recordFailure("brave");
-
-    const metrics = registry.getMetrics("brave");
-    expect(metrics).toBeDefined();
-    expect(metrics!.successes).toBe(0);
-    expect(metrics!.failures).toBe(2);
-    expect(metrics!.totalLatencyMs).toBe(0);
-  });
-
-  it("returns undefined metrics for unknown provider", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
-    expect(registry.getMetrics("unknown")).toBeUndefined();
-  });
-
-  it("tracks metrics independently per provider", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
-    const brave = mockProvider("brave", "Brave");
-    const exa = mockProvider("exa", "Exa");
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
-    registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
-
-    registry.recordSuccess("brave", 300);
-    registry.recordFailure("exa");
-    registry.recordSuccess("exa", 600);
-
-    const braveMetrics = registry.getMetrics("brave")!;
-    expect(braveMetrics.successes).toBe(1);
-    expect(braveMetrics.failures).toBe(0);
-
-    const exaMetrics = registry.getMetrics("exa")!;
-    expect(exaMetrics.successes).toBe(1);
-    expect(exaMetrics.failures).toBe(1);
-    expect(exaMetrics.totalLatencyMs).toBe(600);
-  });
-
-  it("getAllMetrics returns all tracked providers", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
-    const brave = mockProvider("brave", "Brave");
-    const exa = mockProvider("exa", "Exa");
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
-    registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
-
-    registry.recordSuccess("brave", 300);
-    registry.recordSuccess("exa", 600);
-
-    const all = registry.getAllMetrics();
-    expect(all.size).toBe(2);
-    expect(all.get("brave")?.successes).toBe(1);
-    expect(all.get("exa")?.successes).toBe(1);
-  });
-});
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -740,9 +749,7 @@ Expected: FAIL — `recordSuccess`, `recordFailure`, `getMetrics`, `getAllMetric
 
 - [ ] **Step 3: Implement session metrics tracking**
 
-Add the `ProviderMetrics` interface and metrics tracking to `src/providers/registry.ts`.
-
-Add this interface before the `ProviderRegistry` class:
+In `src/providers/registry.ts`, add the `ProviderMetrics` interface before the `ProviderRegistry` class (before line 18):
 
 ```ts
 export interface ProviderMetrics {
@@ -752,37 +759,47 @@ export interface ProviderMetrics {
 }
 ```
 
-Add the metrics map as a private field in `ProviderRegistry`:
+Add the metrics map as a private field in the `ProviderRegistry` class. Replace:
 
 ```ts
-private metrics = new Map<string, ProviderMetrics>();
+  private searchProviders = new Map<string, RegisteredSearch>();
+  private fetchProviders = new Map<string, RegisteredFetch>();
+  private codeSearchProviders = new Map<string, RegisteredCodeSearch>();
+  private tracker: UsageTracker;
 ```
 
-Add in the field after the existing `private tracker: UsageTracker;` line.
+With:
+```ts
+  private searchProviders = new Map<string, RegisteredSearch>();
+  private fetchProviders = new Map<string, RegisteredFetch>();
+  private codeSearchProviders = new Map<string, RegisteredCodeSearch>();
+  private tracker: UsageTracker;
+  private metrics = new Map<string, ProviderMetrics>();
+```
 
-Add these methods to the `ProviderRegistry` class, after the existing `getSearchProviderNames()` method:
+Add these methods to the `ProviderRegistry` class, after the `getSearchProviderNames()` method (before the final closing `}`):
 
 ```ts
-recordSuccess(providerName: string, latencyMs: number): void {
-  const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
-  m.successes += 1;
-  m.totalLatencyMs += latencyMs;
-  this.metrics.set(providerName, m);
-}
+  recordSuccess(providerName: string, latencyMs: number): void {
+    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
+    m.successes += 1;
+    m.totalLatencyMs += latencyMs;
+    this.metrics.set(providerName, m);
+  }
 
-recordFailure(providerName: string): void {
-  const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
-  m.failures += 1;
-  this.metrics.set(providerName, m);
-}
+  recordFailure(providerName: string): void {
+    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
+    m.failures += 1;
+    this.metrics.set(providerName, m);
+  }
 
-getMetrics(providerName: string): ProviderMetrics | undefined {
-  return this.metrics.get(providerName);
-}
+  getMetrics(providerName: string): ProviderMetrics | undefined {
+    return this.metrics.get(providerName);
+  }
 
-getAllMetrics(): ReadonlyMap<string, ProviderMetrics> {
-  return this.metrics;
-}
+  getAllMetrics(): ReadonlyMap<string, ProviderMetrics> {
+    return this.metrics;
+  }
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -807,126 +824,126 @@ git commit -m "feat: add session-level provider metrics tracking to ProviderRegi
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `tests/providers/registry.test.ts`, inside the existing `describe("ProviderRegistry", ...)` block:
+Add to `tests/providers/registry.test.ts`, inside the existing `describe("ProviderRegistry", ...)` block, after the `"session metrics"` describe block:
 
 ```ts
-describe("best-performing selection strategy", () => {
-  it("selectSearch uses tier-based selection when strategy is auto", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
-    const brave = mockProvider("brave", "Brave");
-    const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+  describe("best-performing selection strategy", () => {
+    it("selectSearch uses tier-based selection when strategy is auto", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      const ddg = mockProvider("duckduckgo", "DuckDuckGo");
 
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
-    registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
-    // brave is tier 1, should be preferred even if ddg has better metrics
-    registry.recordSuccess("duckduckgo", 100);
-    registry.recordFailure("brave");
+      // brave is tier 1, should be preferred even if ddg has better metrics
+      registry.recordSuccess("duckduckgo", 100);
+      registry.recordFailure("brave");
 
-    const selected = registry.selectSearch();
-    expect(selected?.name).toBe("brave");
+      const selected = registry.selectSearch();
+      expect(selected?.name).toBe("brave");
+    });
+
+    it("selectSearchByPerformance scores providers by success rate, speed, and tier", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      const exa = mockProvider("exa", "Exa");
+      const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
+      registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+      // brave: 100% success, fast
+      registry.recordSuccess("brave", 200);
+      registry.recordSuccess("brave", 200);
+
+      // exa: 50% success, slower
+      registry.recordSuccess("exa", 600);
+      registry.recordFailure("exa");
+
+      // ddg: 100% success, very slow, low tier
+      registry.recordSuccess("duckduckgo", 1000);
+
+      const selected = registry.selectSearchByPerformance();
+      // brave should win: perfect success rate, fast, tier 1
+      expect(selected?.name).toBe("brave");
+    });
+
+    it("selectSearchByPerformance falls back to tier-based when no metrics exist", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+      // No metrics recorded — should fall back to tier-based (like selectSearch)
+      const selected = registry.selectSearchByPerformance();
+      expect(selected?.name).toBe("brave");
+    });
+
+    it("selectSearchByPerformance excludes exhausted providers", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 1 });
+      registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+      registry.recordUsage("brave"); // exhausted
+      registry.recordSuccess("brave", 200);
+
+      const selected = registry.selectSearchByPerformance();
+      expect(selected?.name).toBe("duckduckgo");
+    });
+
+    it("selectSearchByPerformance prefers fast provider with good success rate over slow tier-1", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      const perplexity = mockProvider("perplexity", "Perplexity");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(perplexity, { tier: 2, monthlyQuota: null });
+
+      // brave: 50% success, slow
+      registry.recordSuccess("brave", 2000);
+      registry.recordFailure("brave");
+
+      // perplexity: 100% success, fast (tier 2 but much better performance)
+      registry.recordSuccess("perplexity", 100);
+      registry.recordSuccess("perplexity", 100);
+      registry.recordSuccess("perplexity", 100);
+
+      const selected = registry.selectSearchByPerformance();
+      // perplexity should win due to much better success rate and speed
+      expect(selected?.name).toBe("perplexity");
+    });
+
+    it("selectSearchByPerformance returns undefined when no providers registered", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      expect(registry.selectSearchByPerformance()).toBeUndefined();
+    });
+
+    it("selectSearchByPerformance selects explicit provider by name", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+      const selected = registry.selectSearchByPerformance("duckduckgo");
+      expect(selected?.name).toBe("duckduckgo");
+    });
   });
-
-  it("selectSearchByPerformance scores providers by success rate, speed, and tier", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
-    const brave = mockProvider("brave", "Brave");
-    const exa = mockProvider("exa", "Exa");
-    const ddg = mockProvider("duckduckgo", "DuckDuckGo");
-
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
-    registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
-    registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
-
-    // brave: 100% success, fast
-    registry.recordSuccess("brave", 200);
-    registry.recordSuccess("brave", 200);
-
-    // exa: 50% success, slower
-    registry.recordSuccess("exa", 600);
-    registry.recordFailure("exa");
-
-    // ddg: 100% success, very slow, low tier
-    registry.recordSuccess("duckduckgo", 1000);
-
-    const selected = registry.selectSearchByPerformance();
-    // brave should win: perfect success rate, fast, tier 1
-    expect(selected?.name).toBe("brave");
-  });
-
-  it("selectSearchByPerformance falls back to tier-based when no metrics exist", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
-    const brave = mockProvider("brave", "Brave");
-    const ddg = mockProvider("duckduckgo", "DuckDuckGo");
-
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
-    registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
-
-    // No metrics recorded — should fall back to tier-based (like selectSearch)
-    const selected = registry.selectSearchByPerformance();
-    expect(selected?.name).toBe("brave");
-  });
-
-  it("selectSearchByPerformance excludes exhausted providers", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
-    const brave = mockProvider("brave", "Brave");
-    const ddg = mockProvider("duckduckgo", "DuckDuckGo");
-
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 1 });
-    registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
-
-    registry.recordUsage("brave"); // exhausted
-    registry.recordSuccess("brave", 200);
-
-    const selected = registry.selectSearchByPerformance();
-    expect(selected?.name).toBe("duckduckgo");
-  });
-
-  it("selectSearchByPerformance prefers fast provider with good success rate over slow tier-1", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
-    const brave = mockProvider("brave", "Brave");
-    const perplexity = mockProvider("perplexity", "Perplexity");
-
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
-    registry.registerSearch(perplexity, { tier: 2, monthlyQuota: null });
-
-    // brave: 50% success, slow
-    registry.recordSuccess("brave", 2000);
-    registry.recordFailure("brave");
-
-    // perplexity: 100% success, fast (tier 2 but much better performance)
-    registry.recordSuccess("perplexity", 100);
-    registry.recordSuccess("perplexity", 100);
-    registry.recordSuccess("perplexity", 100);
-
-    const selected = registry.selectSearchByPerformance();
-    // perplexity should win due to much better success rate and speed
-    expect(selected?.name).toBe("perplexity");
-  });
-
-  it("selectSearchByPerformance returns undefined when no providers registered", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
-    expect(registry.selectSearchByPerformance()).toBeUndefined();
-  });
-
-  it("selectSearchByPerformance selects explicit provider by name", () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
-    const brave = mockProvider("brave", "Brave");
-    const ddg = mockProvider("duckduckgo", "DuckDuckGo");
-
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
-    registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
-
-    const selected = registry.selectSearchByPerformance("duckduckgo");
-    expect(selected?.name).toBe("duckduckgo");
-  });
-});
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -936,74 +953,72 @@ Expected: FAIL — `selectSearchByPerformance` does not exist on `ProviderRegist
 
 - [ ] **Step 3: Implement `selectSearchByPerformance`**
 
-Add the following method to the `ProviderRegistry` class in `src/providers/registry.ts`, after `selectSearch()`:
+Add the following method to the `ProviderRegistry` class in `src/providers/registry.ts`, after the `selectSearchCandidates` method (after line 83):
 
 ```ts
-/**
- * Select the best search provider based on session performance metrics.
- *
- * Score formula:
- *   score = (success_rate * 0.5) + (speed_score * 0.3) + (tier_score * 0.2)
- *
- * Where:
- *   success_rate = successes / (successes + failures)
- *   speed_score  = 1 - (avg_latency / max_avg_latency)
- *   tier_score   = { 1: 1.0, 2: 0.6, 3: 0.3 }
- *
- * Providers with no metrics are scored using tier_score only (conservative default).
- */
-selectSearchByPerformance(name?: string): SearchProvider | undefined {
-  if (name && name !== "auto") {
-    return this.searchProviders.get(name)?.provider;
-  }
-
-  // Build list of eligible (non-exhausted) providers
-  const eligible = [...this.searchProviders.values()].filter((r) => {
-    if (r.monthlyQuota === null) return true;
-    return this.tracker.getCount(r.provider.name) < r.monthlyQuota;
-  });
-
-  if (eligible.length === 0) return undefined;
-
-  // Compute avg latencies to find the max for normalization
-  const TIER_SCORES: Record<number, number> = { 1: 1.0, 2: 0.6, 3: 0.3 };
-
-  const scored = eligible.map((r) => {
-    const m = this.metrics.get(r.provider.name);
-    const tierScore = TIER_SCORES[r.tier] ?? 0.3;
-
-    if (!m || (m.successes + m.failures) === 0) {
-      // No data — score is tier_score * 0.2 only (weighted as the tier component)
-      return { provider: r.provider, score: tierScore * 0.2, avgLatency: Infinity };
+  /**
+   * Select the best search provider based on session performance metrics.
+   *
+   * Score formula:
+   *   score = (success_rate * 0.5) + (speed_score * 0.3) + (tier_score * 0.2)
+   *
+   * Where:
+   *   success_rate = successes / (successes + failures)
+   *   speed_score  = 1 - (avg_latency / max_avg_latency)
+   *   tier_score   = { 1: 1.0, 2: 0.6, 3: 0.3 }
+   *
+   * Providers with no metrics are scored using tier_score only (conservative default).
+   */
+  selectSearchByPerformance(name?: string): SearchProvider | undefined {
+    if (name && name !== "auto") {
+      return this.searchProviders.get(name)?.provider;
     }
 
-    const total = m.successes + m.failures;
-    const successRate = m.successes / total;
-    const avgLatency = m.successes > 0 ? m.totalLatencyMs / m.successes : Infinity;
+    // Build list of eligible (non-exhausted) providers
+    const eligible = [...this.searchProviders.values()].filter((r) => {
+      if (r.monthlyQuota === null) return true;
+      return this.tracker.getCount(r.provider.name) < r.monthlyQuota;
+    });
 
-    return { provider: r.provider, score: 0, avgLatency, successRate, tierScore };
-  });
+    if (eligible.length === 0) return undefined;
 
-  // Find max average latency among providers that have data
-  const latencies = scored
-    .filter((s) => s.avgLatency !== Infinity)
-    .map((s) => s.avgLatency);
-  const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 1;
+    const TIER_SCORES: Record<number, number> = { 1: 1.0, 2: 0.6, 3: 0.3 };
 
-  // Compute final scores
-  for (const s of scored) {
-    if ("successRate" in s && s.successRate !== undefined) {
-      const speedScore = s.avgLatency === Infinity ? 0 : 1 - (s.avgLatency / (maxLatency || 1));
-      s.score = (s.successRate * 0.5) + (speedScore * 0.3) + (s.tierScore! * 0.2);
+    const scored = eligible.map((r) => {
+      const m = this.metrics.get(r.provider.name);
+      const tierScore = TIER_SCORES[r.tier] ?? 0.3;
+
+      if (!m || (m.successes + m.failures) === 0) {
+        // No data — score is tier_score * 0.2 only (weighted as the tier component)
+        return { provider: r.provider, score: tierScore * 0.2 };
+      }
+
+      const total = m.successes + m.failures;
+      const successRate = m.successes / total;
+      const avgLatency = m.successes > 0 ? m.totalLatencyMs / m.successes : Infinity;
+
+      return { provider: r.provider, score: 0, avgLatency, successRate, tierScore };
+    });
+
+    // Find max average latency among providers that have data
+    const latencies = scored
+      .filter((s) => "avgLatency" in s && s.avgLatency !== Infinity)
+      .map((s) => (s as { avgLatency: number }).avgLatency);
+    const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 1;
+
+    // Compute final scores
+    for (const s of scored) {
+      if ("successRate" in s && s.successRate !== undefined) {
+        const speedScore = s.avgLatency === Infinity ? 0 : 1 - (s.avgLatency / (maxLatency || 1));
+        s.score = (s.successRate * 0.5) + (speedScore * 0.3) + (s.tierScore! * 0.2);
+      }
     }
-    // Items without data keep their tier-only score from above
+
+    // Sort by score descending
+    scored.sort((a, b) => b.score - a.score);
+
+    return scored[0]?.provider;
   }
-
-  // Sort by score descending, break ties by tier then remaining quota
-  scored.sort((a, b) => b.score - a.score);
-
-  return scored[0]?.provider;
-}
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -1022,13 +1037,14 @@ git commit -m "feat: add best-performing selection strategy to ProviderRegistry"
 
 ### Task 6: Prompt guidance overrides in tool creation
 
+**Context:** Each tool creation function (`createWebSearchTool`, `createWebFetchTool`, `createWebReadTool`, `createCodeSearchTool`) needs a `guidance?: GuidanceOverride` parameter that overrides hardcoded `promptSnippet` and `promptGuidelines`. The `guidance` parameter is always added as the **last** parameter to avoid breaking existing call sites. The existing `createWebFetchTool` signature is `(store, resolveFetchCandidates?, cache?)`, so `guidance` becomes the 4th parameter.
+
 **Files:**
 - Modify: `src/tools/web-search.ts`
 - Modify: `src/tools/web-fetch.ts`
 - Modify: `src/tools/web-read.ts`
 - Modify: `src/tools/code-search.ts`
 - Modify: `src/index.ts`
-- Modify: `tests/tools/web-search.test.ts`
 - Create: `tests/tools/guidance.test.ts`
 
 - [ ] **Step 1: Write the failing tests**
@@ -1103,7 +1119,8 @@ describe("prompt guidance overrides", () => {
     const guidance: GuidanceOverride = {
       promptSnippet: "Custom fetch snippet",
     };
-    const tool = createWebFetchTool(mockStore(), guidance);
+    // guidance is the 4th parameter: (store, resolveFetchCandidates, cache, guidance)
+    const tool = createWebFetchTool(mockStore(), undefined, undefined, guidance);
     expect(tool.promptSnippet).toBe("Custom fetch snippet");
   });
 
@@ -1122,6 +1139,13 @@ describe("prompt guidance overrides", () => {
     expect(tool.promptSnippet).toBe("Custom read snippet");
   });
 
+  it("web_read uses defaults when no guidance provided", () => {
+    const tool = createWebReadTool(mockStore());
+    expect(tool.promptSnippet).toBe(
+      "Retrieve previously fetched web content by its content ID without re-fetching.",
+    );
+  });
+
   it("code_search uses custom promptGuidelines when provided", () => {
     const guidance: GuidanceOverride = {
       promptGuidelines: ["Custom code guideline"],
@@ -1133,6 +1157,13 @@ describe("prompt guidance overrides", () => {
     );
     expect(tool.promptGuidelines).toEqual(["Custom code guideline"]);
   });
+
+  it("code_search uses defaults when no guidance provided", () => {
+    const tool = createCodeSearchTool(() => undefined);
+    expect(tool.promptSnippet).toBe(
+      "Search code, library APIs, and technical documentation across the web.",
+    );
+  });
 });
 ```
 
@@ -1141,12 +1172,17 @@ describe("prompt guidance overrides", () => {
 Run: `npx vitest run tests/tools/guidance.test.ts`
 Expected: FAIL — tool creation functions do not accept a `guidance` parameter
 
-- [ ] **Step 3: Add `guidance` parameter to all tool creation functions**
+- [ ] **Step 3: Add `guidance` parameter to `createWebSearchTool`**
 
-In `src/tools/web-search.ts`, update the import and function signature:
+In `src/tools/web-search.ts`, add the import after the existing imports (after line 5):
+
+```ts
+import type { GuidanceOverride } from "../config.ts";
+```
+
+Replace the function signature (lines 89-92):
 
 Replace:
-
 ```ts
 export function createWebSearchTool(
   resolveCandidates: (name?: string) => SearchProvider[],
@@ -1155,10 +1191,7 @@ export function createWebSearchTool(
 ```
 
 With:
-
 ```ts
-import type { GuidanceOverride } from "../config.ts";
-
 export function createWebSearchTool(
   resolveCandidates: (name?: string) => SearchProvider[],
   onSuccess?: (providerName: string) => void,
@@ -1166,10 +1199,9 @@ export function createWebSearchTool(
 ): ToolDefinition<typeof WebSearchParams, WebSearchDetails> {
 ```
 
-Then replace the hardcoded `promptSnippet` and `promptGuidelines` in the returned object:
+Replace the hardcoded promptSnippet and promptGuidelines (lines 97-102):
 
 Replace:
-
 ```ts
     promptSnippet: "Search the web for up-to-date information.",
     promptGuidelines: [
@@ -1180,7 +1212,6 @@ Replace:
 ```
 
 With:
-
 ```ts
     promptSnippet: guidance?.promptSnippet ?? "Search the web for up-to-date information.",
     promptGuidelines: guidance?.promptGuidelines ?? [
@@ -1190,33 +1221,38 @@ With:
     ],
 ```
 
-In `src/tools/web-fetch.ts`, update the function signature:
+- [ ] **Step 4: Add `guidance` parameter to `createWebFetchTool`**
+
+In `src/tools/web-fetch.ts`, add the import after line 9 (`import type { ContentCache } from "../cache.ts";`):
+
+```ts
+import type { GuidanceOverride } from "../config.ts";
+```
+
+Replace the function signature (lines 80-84):
 
 Replace:
-
 ```ts
 export function createWebFetchTool(
   store: ContentStore,
   resolveFetchCandidates?: () => FetchProvider[],
+  cache?: ContentCache,
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
 ```
 
 With:
-
 ```ts
-import type { GuidanceOverride } from "../config.ts";
-
 export function createWebFetchTool(
   store: ContentStore,
   resolveFetchCandidates?: () => FetchProvider[],
+  cache?: ContentCache,
   guidance?: GuidanceOverride,
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
 ```
 
-Replace the hardcoded values:
+Replace the hardcoded promptSnippet and promptGuidelines (lines 162-167):
 
 Replace:
-
 ```ts
     promptSnippet:
       "Fetch a URL and extract readable content as markdown. Supports HTML pages.",
@@ -1227,7 +1263,6 @@ Replace:
 ```
 
 With:
-
 ```ts
     promptSnippet: guidance?.promptSnippet ??
       "Fetch a URL and extract readable content as markdown. Supports HTML pages.",
@@ -1237,10 +1272,17 @@ With:
     ],
 ```
 
-In `src/tools/web-read.ts`, update the function signature:
+- [ ] **Step 5: Add `guidance` parameter to `createWebReadTool`**
+
+In `src/tools/web-read.ts`, add the import after line 4 (`import type { ContentStore } from "../storage.ts";`):
+
+```ts
+import type { GuidanceOverride } from "../config.ts";
+```
+
+Replace the function signature (lines 10-12):
 
 Replace:
-
 ```ts
 export function createWebReadTool(
   store: ContentStore,
@@ -1248,36 +1290,38 @@ export function createWebReadTool(
 ```
 
 With:
-
 ```ts
-import type { GuidanceOverride } from "../config.ts";
-
 export function createWebReadTool(
   store: ContentStore,
   guidance?: GuidanceOverride,
 ): ToolDefinition<typeof WebReadParams> {
 ```
 
-Replace the hardcoded `promptSnippet`:
+Replace the hardcoded promptSnippet (lines 18-19):
 
 Replace:
-
 ```ts
     promptSnippet:
       "Retrieve previously fetched web content by its content ID without re-fetching.",
 ```
 
 With:
-
 ```ts
     promptSnippet: guidance?.promptSnippet ??
       "Retrieve previously fetched web content by its content ID without re-fetching.",
 ```
 
-In `src/tools/code-search.ts`, update the import and function signature:
+- [ ] **Step 6: Add `guidance` parameter to `createCodeSearchTool`**
+
+In `src/tools/code-search.ts`, add the import after line 5 (`import { sanitizeError } from "../utils/errors.ts";`):
+
+```ts
+import type { GuidanceOverride } from "../config.ts";
+```
+
+Replace the function signature (lines 29-32):
 
 Replace:
-
 ```ts
 export function createCodeSearchTool(
   resolveProvider: () => CodeSearchProvider | undefined,
@@ -1286,10 +1330,7 @@ export function createCodeSearchTool(
 ```
 
 With:
-
 ```ts
-import type { GuidanceOverride } from "../config.ts";
-
 export function createCodeSearchTool(
   resolveProvider: () => CodeSearchProvider | undefined,
   onSuccess?: (providerName: string) => void,
@@ -1297,10 +1338,9 @@ export function createCodeSearchTool(
 ): ToolDefinition<typeof CodeSearchParams, CodeSearchDetails> {
 ```
 
-Replace the hardcoded values:
+Replace the hardcoded promptSnippet and promptGuidelines (lines 38-42):
 
 Replace:
-
 ```ts
     promptSnippet:
       "Search code, library APIs, and technical documentation across the web.",
@@ -1311,7 +1351,6 @@ Replace:
 ```
 
 With:
-
 ```ts
     promptSnippet: guidance?.promptSnippet ??
       "Search code, library APIs, and technical documentation across the web.",
@@ -1321,22 +1360,20 @@ With:
     ],
 ```
 
-- [ ] **Step 4: Update `src/index.ts` to pass guidance overrides**
+- [ ] **Step 7: Update `src/index.ts` to pass guidance overrides**
 
-Replace the tool registration block in `src/index.ts`:
+Replace the tool registration block (lines 169-183):
 
 Replace:
-
 ```ts
   pi.registerTool(
     createWebSearchTool(
-      (name) => resolveSearchCandidates(name),
+      (name) => registry.selectSearchCandidates(name),
       (providerName) => registry.recordUsage(providerName),
     ),
   );
-  pi.registerTool(
-    createWebFetchTool(store, () => registry.selectFetchCandidates()),
-  );
+  const fetchCache = new ContentCache(200, 5 * 60_000);
+  pi.registerTool(createWebFetchTool(store, () => registry.selectFetchCandidates(), fetchCache));
   pi.registerTool(createWebReadTool(store));
   pi.registerTool(
     createCodeSearchTool(
@@ -1347,19 +1384,20 @@ Replace:
 ```
 
 With:
-
 ```ts
   pi.registerTool(
     createWebSearchTool(
-      (name) => resolveSearchCandidates(name),
+      (name) => registry.selectSearchCandidates(name),
       (providerName) => registry.recordUsage(providerName),
       config.guidance?.web_search,
     ),
   );
+  const fetchCache = new ContentCache(200, 5 * 60_000);
   pi.registerTool(
     createWebFetchTool(
       store,
       () => registry.selectFetchCandidates(),
+      fetchCache,
       config.guidance?.web_fetch,
     ),
   );
@@ -1373,17 +1411,17 @@ With:
   );
 ```
 
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 8: Run tests to verify they pass**
 
 Run: `npx vitest run tests/tools/guidance.test.ts`
 Expected: All tests PASS
 
-- [ ] **Step 6: Run existing tool tests to verify no regressions**
+- [ ] **Step 9: Run existing tool tests to verify no regressions**
 
 Run: `npx vitest run tests/tools/`
 Expected: All tests PASS
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add src/tools/web-search.ts src/tools/web-fetch.ts src/tools/web-read.ts src/tools/code-search.ts src/index.ts tests/tools/guidance.test.ts
@@ -1393,6 +1431,8 @@ git commit -m "feat: add prompt guidance overrides to all tool creation function
 ---
 
 ### Task 7: `/tools --status` command (display only)
+
+**Context:** The slash command API uses `pi.registerCommand(name, options)` where the handler receives `(args: string, ctx: ExtensionCommandContext)`. Note `args` is a **single string** (the text after the command name), not an array. The handler must parse the string itself.
 
 **Files:**
 - Create: `src/commands/tools.ts`
@@ -1459,7 +1499,8 @@ describe("tools --status command", () => {
     const command = createToolsCommand(registry, tierMap);
     const ctx = makeCtx();
 
-    await command.handler(["--status"], ctx);
+    // handler receives args as a single string
+    await command.handler("--status", ctx);
 
     expect(ctx.ui.notify).toHaveBeenCalled();
     const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
@@ -1489,7 +1530,7 @@ describe("tools --status command", () => {
     const command = createToolsCommand(registry, tierMap);
     const ctx = makeCtx();
 
-    await command.handler(["--status"], ctx);
+    await command.handler("--status", ctx);
 
     const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
     expect(output).toContain("--");
@@ -1503,7 +1544,7 @@ describe("tools --status command", () => {
     const command = createToolsCommand(registry, tierMap);
     const ctx = makeCtx();
 
-    await command.handler(["--status"], ctx);
+    await command.handler("--status", ctx);
 
     expect(ctx.ui.notify).toHaveBeenCalled();
     const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
@@ -1519,17 +1560,16 @@ Expected: FAIL — `src/commands/tools.ts` does not exist
 
 - [ ] **Step 3: Implement the `/tools --status` command**
 
-Create `src/commands/tools.ts`:
+Create directory and file. Create `src/commands/tools.ts`:
 
 ```ts
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ProviderRegistry } from "../providers/registry.ts";
 import type { ProviderTier } from "../providers/types.ts";
 
 export interface ToolsCommand {
   name: string;
   description: string;
-  handler: (args: string[], ctx: ExtensionContext) => Promise<void>;
+  handler: (args: string, ctx: { ui: { notify: (msg: string) => void; confirm: (title: string, message: string) => Promise<boolean>; input: (title: string, placeholder?: string) => Promise<string | undefined>; select: (title: string, options: string[]) => Promise<string | undefined> } }) => Promise<void>;
 }
 
 function formatNumber(n: number): string {
@@ -1555,7 +1595,6 @@ function buildStatusTable(
   const rows: Array<{
     name: string;
     tier: string;
-    enabled: string;
     remaining: string;
     session: string;
     latency: string;
@@ -1579,18 +1618,15 @@ function buildStatusTable(
     rows.push({
       name,
       tier: String(tier),
-      enabled: "yes",
       remaining: formatNumber(remaining),
       session: sessionStr,
       latency: latencyStr,
     });
   }
 
-  // Column widths
   const headers = {
     name: "Provider",
     tier: "Tier",
-    enabled: "Enabled",
     remaining: "Remaining",
     session: "Session (ok/fail)",
     latency: "Avg Latency",
@@ -1599,7 +1635,6 @@ function buildStatusTable(
   const colWidths = {
     name: Math.max(headers.name.length, ...rows.map((r) => r.name.length)),
     tier: Math.max(headers.tier.length, ...rows.map((r) => r.tier.length)),
-    enabled: Math.max(headers.enabled.length, ...rows.map((r) => r.enabled.length)),
     remaining: Math.max(headers.remaining.length, ...rows.map((r) => r.remaining.length)),
     session: Math.max(headers.session.length, ...rows.map((r) => r.session.length)),
     latency: Math.max(headers.latency.length, ...rows.map((r) => r.latency.length)),
@@ -1609,7 +1644,6 @@ function buildStatusTable(
   const headerLine = [
     padRight(headers.name, colWidths.name),
     padRight(headers.tier, colWidths.tier),
-    padRight(headers.enabled, colWidths.enabled),
     padLeft(headers.remaining, colWidths.remaining),
     padLeft(headers.session, colWidths.session),
     padLeft(headers.latency, colWidths.latency),
@@ -1621,7 +1655,6 @@ function buildStatusTable(
     [
       padRight(r.name, colWidths.name),
       padRight(r.tier, colWidths.tier),
-      padRight(r.enabled, colWidths.enabled),
       padLeft(r.remaining, colWidths.remaining),
       padLeft(r.session, colWidths.session),
       padLeft(r.latency, colWidths.latency),
@@ -1634,11 +1667,12 @@ function buildStatusTable(
 export function createToolsCommand(
   registry: ProviderRegistry,
   tierMap: ReadonlyMap<string, ProviderTier>,
+  allProviderNames?: string[],
 ): ToolsCommand {
   return {
     name: "tools",
     description: "Manage search/fetch providers. Use --status to see provider status.",
-    async handler(args: string[], ctx: ExtensionContext) {
+    async handler(args, ctx) {
       if (args.includes("--status")) {
         const table = buildStatusTable(registry, tierMap);
         ctx.ui.notify(table);
@@ -1646,25 +1680,33 @@ export function createToolsCommand(
       }
 
       // Default: interactive setup (implemented in Task 8)
-      await handleInteractiveSetup(ctx);
+      ctx.ui.notify("Interactive provider setup is not yet implemented. Use /tools --status to view provider status.");
     },
   };
-}
-
-async function handleInteractiveSetup(ctx: ExtensionContext): Promise<void> {
-  ctx.ui.notify("Interactive provider setup is not yet implemented. Use /tools --status to view provider status.");
 }
 ```
 
 - [ ] **Step 4: Register the command in `src/index.ts`**
 
-Add the import at the top of `src/index.ts`:
+Add the import at the top of `src/index.ts`, after line 24 (`import { createCodeSearchTool } from "./tools/code-search.ts";`):
 
 ```ts
 import { createToolsCommand } from "./commands/tools.ts";
 ```
 
-Add the command registration after the tool registrations, before the closing `}` of `createExtension`:
+Update the types import on line 20:
+
+Replace:
+```ts
+import type { FetchProvider, SearchProvider, CodeSearchProvider } from "./providers/types.ts";
+```
+
+With:
+```ts
+import type { FetchProvider, SearchProvider, CodeSearchProvider, ProviderTier } from "./providers/types.ts";
+```
+
+Add the command registration after the tool registrations (before the closing `}` of `createExtension`, which is at line 184):
 
 ```ts
   // Build tier map for status display
@@ -1674,26 +1716,12 @@ Add the command registration after the tool registrations, before the closing `}
   }
 
   // Register /tools command
-  const toolsCommand = createToolsCommand(registry, tierMap);
-  pi.registerCommand({
-    name: toolsCommand.name,
+  const allProviderNames = Object.keys(providerFactories);
+  const toolsCommand = createToolsCommand(registry, tierMap, allProviderNames);
+  pi.registerCommand(toolsCommand.name, {
     description: toolsCommand.description,
     handler: toolsCommand.handler,
   });
-```
-
-Add `ProviderTier` to the type import from `./providers/types.ts`:
-
-Replace:
-
-```ts
-import type { SearchProvider, FetchProvider, CodeSearchProvider } from "./providers/types.ts";
-```
-
-With:
-
-```ts
-import type { SearchProvider, FetchProvider, CodeSearchProvider, ProviderTier } from "./providers/types.ts";
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
@@ -1701,7 +1729,12 @@ import type { SearchProvider, FetchProvider, CodeSearchProvider, ProviderTier } 
 Run: `npx vitest run tests/commands/tools.test.ts`
 Expected: All tests PASS
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Run full test suite to verify no regressions**
+
+Run: `npx vitest run`
+Expected: All tests PASS
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/commands/tools.ts tests/commands/tools.test.ts src/index.ts
@@ -1712,13 +1745,15 @@ git commit -m "feat: add /tools --status command with provider status table"
 
 ### Task 8: `/tools` interactive setup command
 
+**Context:** The `ui.select` API only supports single-select with plain `string[]` options — no multi-select, no `{ label, value }` objects. The interactive setup uses `ui.confirm` (yes/no) per provider instead, then `ui.input` for API keys, then `ui.select` for the default provider.
+
 **Files:**
 - Modify: `src/commands/tools.ts`
 - Modify: `tests/commands/tools.test.ts`
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `tests/commands/tools.test.ts`:
+Add to `tests/commands/tools.test.ts`, after the `"tools --status command"` describe block:
 
 ```ts
 import { getConfigPath } from "../../src/config.ts";
@@ -1731,56 +1766,50 @@ describe("tools interactive setup", () => {
     });
     vi.mocked(fs.writeFileSync).mockImplementation(() => {});
     vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
+    vi.mocked(fs.existsSync).mockReturnValue(false);
   });
 
-  it("prompts for which providers to enable", async () => {
+  it("prompts to enable each provider via confirm", async () => {
     const tracker = new UsageTracker();
     const registry = new ProviderRegistry(tracker);
-    const brave = mockProvider("brave", "Brave");
-    const ddg = mockProvider("duckduckgo", "DuckDuckGo");
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
-    registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
-
-    const tierMap = new Map<string, ProviderTier>([
-      ["brave", 1],
-      ["duckduckgo", 3],
-    ]);
-
-    const allProviderNames = ["brave", "exa", "duckduckgo", "perplexity"];
-
-    const command = createToolsCommand(registry, tierMap, allProviderNames);
-    const ctx = makeCtx();
-
-    // Mock interactive responses
-    vi.mocked(ctx.ui.select).mockResolvedValueOnce(["brave", "duckduckgo"]); // provider selection
-    vi.mocked(ctx.ui.input).mockResolvedValue(""); // no API key changes
-    vi.mocked(ctx.ui.select).mockResolvedValueOnce("auto"); // default provider
-
-    await command.handler([], ctx);
-
-    // Should have prompted for provider selection
-    expect(ctx.ui.select).toHaveBeenCalled();
-  });
-
-  it("writes config to global config path", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
-    const brave = mockProvider("brave", "Brave");
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
-
-    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
+    const tierMap = new Map<string, ProviderTier>();
     const allProviderNames = ["brave", "duckduckgo"];
 
     const command = createToolsCommand(registry, tierMap, allProviderNames);
     const ctx = makeCtx();
 
-    // Mock: enable brave, set API key, auto default
-    vi.mocked(ctx.ui.select)
-      .mockResolvedValueOnce(["brave"]) // providers to enable
-      .mockResolvedValueOnce("auto"); // default provider
-    vi.mocked(ctx.ui.input).mockResolvedValueOnce("test-key-123"); // brave API key
+    // Enable brave, skip duckduckgo
+    vi.mocked(ctx.ui.confirm)
+      .mockResolvedValueOnce(true)   // brave: yes
+      .mockResolvedValueOnce(false); // duckduckgo: no
+    // API key for brave
+    vi.mocked(ctx.ui.input).mockResolvedValueOnce("test-brave-key");
+    // Default provider
+    vi.mocked(ctx.ui.select).mockResolvedValueOnce("auto");
 
-    await command.handler([], ctx);
+    await command.handler("", ctx);
+
+    // Should have asked about both providers
+    expect(ctx.ui.confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it("writes config to global config path", async () => {
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
+    const tierMap = new Map<string, ProviderTier>();
+    const allProviderNames = ["brave", "duckduckgo"];
+
+    const command = createToolsCommand(registry, tierMap, allProviderNames);
+    const ctx = makeCtx();
+
+    // Enable brave only
+    vi.mocked(ctx.ui.confirm)
+      .mockResolvedValueOnce(true)   // brave: yes
+      .mockResolvedValueOnce(false); // duckduckgo: no
+    vi.mocked(ctx.ui.input).mockResolvedValueOnce("test-key-123");
+    vi.mocked(ctx.ui.select).mockResolvedValueOnce("auto");
+
+    await command.handler("", ctx);
 
     // Should write to global config path
     expect(fs.writeFileSync).toHaveBeenCalled();
@@ -1804,17 +1833,51 @@ describe("tools interactive setup", () => {
     const command = createToolsCommand(registry, tierMap, allProviderNames);
     const ctx = makeCtx();
 
-    vi.mocked(ctx.ui.select)
-      .mockResolvedValueOnce(["brave"])
-      .mockResolvedValueOnce("auto");
+    vi.mocked(ctx.ui.confirm).mockResolvedValueOnce(true);
     vi.mocked(ctx.ui.input).mockResolvedValueOnce("my-key");
+    vi.mocked(ctx.ui.select).mockResolvedValueOnce("auto");
 
-    await command.handler([], ctx);
+    await command.handler("", ctx);
 
     // Should notify success
     const notifyCalls = vi.mocked(ctx.ui.notify).mock.calls;
     const lastNotify = notifyCalls[notifyCalls.length - 1][0] as string;
     expect(lastNotify.toLowerCase()).toContain("saved");
+  });
+
+  it("handles no providers available", async () => {
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
+    const tierMap = new Map<string, ProviderTier>();
+
+    const command = createToolsCommand(registry, tierMap, []);
+    const ctx = makeCtx();
+
+    await command.handler("", ctx);
+
+    const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
+    expect(output).toContain("No providers available");
+  });
+
+  it("skips API key prompt for providers the user disables", async () => {
+    const tracker = new UsageTracker();
+    const registry = new ProviderRegistry(tracker);
+    const tierMap = new Map<string, ProviderTier>();
+    const allProviderNames = ["brave", "exa"];
+
+    const command = createToolsCommand(registry, tierMap, allProviderNames);
+    const ctx = makeCtx();
+
+    // Disable both providers
+    vi.mocked(ctx.ui.confirm)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+    vi.mocked(ctx.ui.select).mockResolvedValueOnce("auto");
+
+    await command.handler("", ctx);
+
+    // Should NOT have asked for any API keys
+    expect(ctx.ui.input).not.toHaveBeenCalled();
   });
 });
 ```
@@ -1822,16 +1885,15 @@ describe("tools interactive setup", () => {
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `npx vitest run tests/commands/tools.test.ts`
-Expected: FAIL — `createToolsCommand` does not accept `allProviderNames`, and `handleInteractiveSetup` is a placeholder
+Expected: FAIL — interactive setup is not implemented (placeholder returns early)
 
 - [ ] **Step 3: Implement interactive setup**
 
-Update `src/commands/tools.ts`. Replace the entire file:
+Replace the entire content of `src/commands/tools.ts`:
 
 ```ts
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ProviderRegistry } from "../providers/registry.ts";
 import type { ProviderTier } from "../providers/types.ts";
 import { getConfigPath } from "../config.ts";
@@ -1839,7 +1901,7 @@ import { getConfigPath } from "../config.ts";
 export interface ToolsCommand {
   name: string;
   description: string;
-  handler: (args: string[], ctx: ExtensionContext) => Promise<void>;
+  handler: (args: string, ctx: { ui: { notify: (msg: string) => void; confirm: (title: string, message: string) => Promise<boolean>; input: (title: string, placeholder?: string) => Promise<string | undefined>; select: (title: string, options: string[]) => Promise<string | undefined> } }) => Promise<void>;
 }
 
 function formatNumber(n: number): string {
@@ -1865,7 +1927,6 @@ function buildStatusTable(
   const rows: Array<{
     name: string;
     tier: string;
-    enabled: string;
     remaining: string;
     session: string;
     latency: string;
@@ -1889,18 +1950,15 @@ function buildStatusTable(
     rows.push({
       name,
       tier: String(tier),
-      enabled: "yes",
       remaining: formatNumber(remaining),
       session: sessionStr,
       latency: latencyStr,
     });
   }
 
-  // Column widths
   const headers = {
     name: "Provider",
     tier: "Tier",
-    enabled: "Enabled",
     remaining: "Remaining",
     session: "Session (ok/fail)",
     latency: "Avg Latency",
@@ -1909,7 +1967,6 @@ function buildStatusTable(
   const colWidths = {
     name: Math.max(headers.name.length, ...rows.map((r) => r.name.length)),
     tier: Math.max(headers.tier.length, ...rows.map((r) => r.tier.length)),
-    enabled: Math.max(headers.enabled.length, ...rows.map((r) => r.enabled.length)),
     remaining: Math.max(headers.remaining.length, ...rows.map((r) => r.remaining.length)),
     session: Math.max(headers.session.length, ...rows.map((r) => r.session.length)),
     latency: Math.max(headers.latency.length, ...rows.map((r) => r.latency.length)),
@@ -1919,7 +1976,6 @@ function buildStatusTable(
   const headerLine = [
     padRight(headers.name, colWidths.name),
     padRight(headers.tier, colWidths.tier),
-    padRight(headers.enabled, colWidths.enabled),
     padLeft(headers.remaining, colWidths.remaining),
     padLeft(headers.session, colWidths.session),
     padLeft(headers.latency, colWidths.latency),
@@ -1931,7 +1987,6 @@ function buildStatusTable(
     [
       padRight(r.name, colWidths.name),
       padRight(r.tier, colWidths.tier),
-      padRight(r.enabled, colWidths.enabled),
       padLeft(r.remaining, colWidths.remaining),
       padLeft(r.session, colWidths.session),
       padLeft(r.latency, colWidths.latency),
@@ -1941,28 +1996,8 @@ function buildStatusTable(
   return [headerLine, divider, ...dataLines].join("\n");
 }
 
-export function createToolsCommand(
-  registry: ProviderRegistry,
-  tierMap: ReadonlyMap<string, ProviderTier>,
-  allProviderNames?: string[],
-): ToolsCommand {
-  return {
-    name: "tools",
-    description: "Manage search/fetch providers. Use --status to see provider status.",
-    async handler(args: string[], ctx: ExtensionContext) {
-      if (args.includes("--status")) {
-        const table = buildStatusTable(registry, tierMap);
-        ctx.ui.notify(table);
-        return;
-      }
-
-      await handleInteractiveSetup(ctx, allProviderNames ?? []);
-    },
-  };
-}
-
 async function handleInteractiveSetup(
-  ctx: ExtensionContext,
+  ctx: ToolsCommand["handler"] extends (args: string, ctx: infer C) => unknown ? C : never,
   allProviderNames: string[],
 ): Promise<void> {
   if (allProviderNames.length === 0) {
@@ -1970,48 +2005,30 @@ async function handleInteractiveSetup(
     return;
   }
 
-  // Step 1: Select which providers to enable
-  const enabledProviders = await ctx.ui.select(
-    "Select providers to enable:",
-    allProviderNames.map((name) => ({ label: name, value: name })),
-  ) as string[];
-
-  if (!enabledProviders) {
-    ctx.ui.notify("Setup cancelled.");
-    return;
-  }
-
-  // Step 2: Prompt for API keys for enabled providers
+  // Step 1: Ask about each provider
   const providers: Record<string, { enabled: boolean; apiKey?: string }> = {};
+  const enabledNames: string[] = [];
 
   for (const name of allProviderNames) {
-    const isEnabled = enabledProviders.includes(name);
-    providers[name] = { enabled: isEnabled };
+    const enabled = await ctx.ui.confirm("Provider setup", `Enable ${name}?`);
+    providers[name] = { enabled };
 
-    if (isEnabled) {
-      const apiKey = await ctx.ui.input(
-        `API key for ${name} (leave empty to skip):`,
-      );
+    if (enabled) {
+      enabledNames.push(name);
+      const apiKey = await ctx.ui.input(`API key for ${name}`, "Leave empty to skip");
       if (apiKey && apiKey.trim().length > 0) {
         providers[name].apiKey = apiKey.trim();
       }
     }
   }
 
-  // Step 3: Select default provider
-  const defaultOptions = [
-    { label: "auto", value: "auto" },
-    ...enabledProviders.map((name) => ({ label: name, value: name })),
-  ];
+  // Step 2: Select default provider
+  const defaultOptions = ["auto", ...enabledNames];
+  const defaultProvider = (await ctx.ui.select("Default provider:", defaultOptions)) ?? "auto";
 
-  const defaultProvider = await ctx.ui.select(
-    "Default provider:",
-    defaultOptions,
-  ) as string;
-
-  // Step 4: Build and write config
+  // Step 3: Build and write config
   const config = {
-    defaultProvider: defaultProvider ?? "auto",
+    defaultProvider,
     providers,
   };
 
@@ -2025,36 +2042,37 @@ async function handleInteractiveSetup(
     ctx.ui.notify(`Failed to save configuration: ${msg}`);
   }
 }
+
+export function createToolsCommand(
+  registry: ProviderRegistry,
+  tierMap: ReadonlyMap<string, ProviderTier>,
+  allProviderNames?: string[],
+): ToolsCommand {
+  return {
+    name: "tools",
+    description: "Manage search/fetch providers. Use --status to see provider status.",
+    async handler(args, ctx) {
+      if (args.includes("--status")) {
+        const table = buildStatusTable(registry, tierMap);
+        ctx.ui.notify(table);
+        return;
+      }
+
+      await handleInteractiveSetup(ctx, allProviderNames ?? []);
+    },
+  };
+}
 ```
 
-- [ ] **Step 4: Update `src/index.ts` to pass `allProviderNames`**
-
-Replace the command registration block added in Task 7:
-
-Replace:
-
-```ts
-  // Register /tools command
-  const toolsCommand = createToolsCommand(registry, tierMap);
-```
-
-With:
-
-```ts
-  // Register /tools command
-  const allProviderNames = Object.keys(providerFactories);
-  const toolsCommand = createToolsCommand(registry, tierMap, allProviderNames);
-```
-
-- [ ] **Step 5: Run tests to verify they pass**
+- [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npx vitest run tests/commands/tools.test.ts`
 Expected: All tests PASS
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/commands/tools.ts tests/commands/tools.test.ts src/index.ts
+git add src/commands/tools.ts tests/commands/tools.test.ts
 git commit -m "feat: add /tools interactive setup command"
 ```
 
@@ -2081,23 +2099,14 @@ Check that:
 - `findProjectConfigPath` and `loadMergedConfig` are exported from `src/config.ts`
 - `ProviderMetrics` is exported from `src/providers/registry.ts`
 - `selectSearchByPerformance` is available on `ProviderRegistry`
-- `GuidanceOverride` is exported from `src/config.ts`
+- `GuidanceOverride` and `SelectionStrategy` are exported from `src/config.ts`
 - `createToolsCommand` is imported in `src/index.ts`
+- `ProviderTier` is imported in `src/index.ts`
 
 Run: `npx vitest run && npx tsc --noEmit`
 Expected: Clean pass on both
 
-- [ ] **Step 4: Verify no unused imports**
-
-Scan all modified files for unused imports:
-- `src/config.ts` — confirm `deepMerge` is used
-- `src/tools/web-search.ts` — confirm `GuidanceOverride` is used
-- `src/tools/web-fetch.ts` — confirm `GuidanceOverride` is used
-- `src/tools/web-read.ts` — confirm `GuidanceOverride` is used
-- `src/tools/code-search.ts` — confirm `GuidanceOverride` is used
-- `src/index.ts` — confirm `createToolsCommand`, `ProviderTier`, `loadMergedConfig` imports are used
-
-- [ ] **Step 5: Final commit if any cleanup was needed**
+- [ ] **Step 4: Final commit if any cleanup was needed**
 
 ```bash
 git add -A

@@ -3,6 +3,7 @@ import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { SearchFilters, SearchProvider, SearchResult } from "../providers/types.ts";
 import { AggregateProviderError } from "../utils/errors.ts";
+import type { GuidanceOverride } from "../config.ts";
 
 const WebSearchParams = Type.Object({
   query: Type.String({ description: "Search query" }),
@@ -88,14 +89,16 @@ function buildFilters(params: {
 
 export function createWebSearchTool(
   resolveCandidates: (name?: string) => SearchProvider[],
-  onSuccess?: (providerName: string) => void,
+  onSuccess?: (providerName: string, latencyMs: number) => void,
+  guidance?: GuidanceOverride,
+  onFailure?: (providerName: string) => void,
 ): ToolDefinition<typeof WebSearchParams, WebSearchDetails> {
   return {
     name: "web_search",
     label: "Web Search",
     description: "Search the web for up-to-date information.",
-    promptSnippet: "Search the web for up-to-date information.",
-    promptGuidelines: [
+    promptSnippet: guidance?.promptSnippet ?? "Search the web for up-to-date information.",
+    promptGuidelines: guidance?.promptGuidelines ?? [
       "Use web_search for information beyond training data -- recent events, current library versions, live API docs.",
       "After answering, include a Sources: section listing relevant URLs as markdown hyperlinks.",
       "Use one web_search call per search angle rather than batching multiple queries.",
@@ -116,6 +119,7 @@ export function createWebSearchTool(
       const errors: Array<{ provider: string; error: string }> = [];
 
       for (const provider of candidates) {
+        const startMs = Date.now();
         try {
           const results = await provider.search(
             params.query,
@@ -126,13 +130,14 @@ export function createWebSearchTool(
           const text = params.compact
             ? formatResultsCompact(results)
             : formatResults(results);
-          onSuccess?.(provider.name);
+          onSuccess?.(provider.name, Date.now() - startMs);
 
           return {
             content: [{ type: "text" as const, text }],
             details: { provider: provider.name, resultCount: results.length },
           };
         } catch (error) {
+          onFailure?.(provider.name);
           errors.push({
             provider: provider.name,
             error: error instanceof Error ? error.message : String(error),
