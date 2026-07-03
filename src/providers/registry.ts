@@ -15,11 +15,18 @@ interface RegisteredCodeSearch {
   provider: CodeSearchProvider;
 }
 
+export interface ProviderMetrics {
+  successes: number;
+  failures: number;
+  totalLatencyMs: number;
+}
+
 export class ProviderRegistry {
   private searchProviders = new Map<string, RegisteredSearch>();
   private fetchProviders = new Map<string, RegisteredFetch>();
   private codeSearchProviders = new Map<string, RegisteredCodeSearch>();
   private tracker: UsageTracker;
+  private metrics = new Map<string, ProviderMetrics>();
 
   constructor(tracker: UsageTracker) {
     this.tracker = tracker;
@@ -93,5 +100,26 @@ export class ProviderRegistry {
 
   getSearchProviderNames(): string[] {
     return [...this.searchProviders.keys()];
+  }
+
+  recordSuccess(providerName: string, latencyMs: number): void {
+    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
+    m.successes += 1;
+    m.totalLatencyMs += latencyMs;
+    this.metrics.set(providerName, m);
+  }
+
+  recordFailure(providerName: string): void {
+    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
+    m.failures += 1;
+    this.metrics.set(providerName, m);
+  }
+
+  getMetrics(providerName: string): ProviderMetrics | undefined {
+    return this.metrics.get(providerName);
+  }
+
+  getAllMetrics(): ReadonlyMap<string, ProviderMetrics> {
+    return this.metrics;
   }
 }

@@ -223,4 +223,83 @@ describe("ProviderRegistry", () => {
       expect(registry.selectFetchCandidates()).toEqual([]);
     });
   });
+
+  describe("session metrics", () => {
+    it("records success with latency", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordSuccess("brave", 340);
+      registry.recordSuccess("brave", 500);
+
+      const metrics = registry.getMetrics("brave");
+      expect(metrics).toBeDefined();
+      expect(metrics!.successes).toBe(2);
+      expect(metrics!.failures).toBe(0);
+      expect(metrics!.totalLatencyMs).toBe(840);
+    });
+
+    it("records failure", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordFailure("brave");
+      registry.recordFailure("brave");
+
+      const metrics = registry.getMetrics("brave");
+      expect(metrics).toBeDefined();
+      expect(metrics!.successes).toBe(0);
+      expect(metrics!.failures).toBe(2);
+      expect(metrics!.totalLatencyMs).toBe(0);
+    });
+
+    it("returns undefined metrics for unknown provider", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      expect(registry.getMetrics("unknown")).toBeUndefined();
+    });
+
+    it("tracks metrics independently per provider", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      const exa = mockProvider("exa", "Exa");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
+
+      registry.recordSuccess("brave", 300);
+      registry.recordFailure("exa");
+      registry.recordSuccess("exa", 600);
+
+      const braveMetrics = registry.getMetrics("brave")!;
+      expect(braveMetrics.successes).toBe(1);
+      expect(braveMetrics.failures).toBe(0);
+
+      const exaMetrics = registry.getMetrics("exa")!;
+      expect(exaMetrics.successes).toBe(1);
+      expect(exaMetrics.failures).toBe(1);
+      expect(exaMetrics.totalLatencyMs).toBe(600);
+    });
+
+    it("getAllMetrics returns all tracked providers", () => {
+      const tracker = new UsageTracker();
+      const registry = new ProviderRegistry(tracker);
+      const brave = mockProvider("brave", "Brave");
+      const exa = mockProvider("exa", "Exa");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
+
+      registry.recordSuccess("brave", 300);
+      registry.recordSuccess("exa", 600);
+
+      const all = registry.getAllMetrics();
+      expect(all.size).toBe(2);
+      expect(all.get("brave")?.successes).toBe(1);
+      expect(all.get("exa")?.successes).toBe(1);
+    });
+  });
 });
