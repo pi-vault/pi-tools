@@ -5,23 +5,9 @@ import type { ProviderRegistry } from "../providers/registry.ts";
 import type { ProviderTier } from "../providers/types.ts";
 import { getConfigPath } from "../config.ts";
 
-export interface ToolsCommand {
-  name: string;
-  description: string;
-  handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
-}
-
 function formatNumber(n: number): string {
   if (!Number.isFinite(n)) return "unlimited";
   return n.toLocaleString("en-US");
-}
-
-function padRight(str: string, len: number): string {
-  return str + " ".repeat(Math.max(0, len - str.length));
-}
-
-function padLeft(str: string, len: number): string {
-  return " ".repeat(Math.max(0, len - str.length)) + str;
 }
 
 function buildStatusTable(
@@ -81,22 +67,22 @@ function buildStatusTable(
 
   const sep = "  ";
   const headerLine = [
-    padRight(headers.name, colWidths.name),
-    padRight(headers.tier, colWidths.tier),
-    padLeft(headers.remaining, colWidths.remaining),
-    padLeft(headers.session, colWidths.session),
-    padLeft(headers.latency, colWidths.latency),
+    headers.name.padEnd(colWidths.name),
+    headers.tier.padEnd(colWidths.tier),
+    headers.remaining.padStart(colWidths.remaining),
+    headers.session.padStart(colWidths.session),
+    headers.latency.padStart(colWidths.latency),
   ].join(sep);
 
   const divider = "-".repeat(headerLine.length);
 
   const dataLines = rows.map((r) =>
     [
-      padRight(r.name, colWidths.name),
-      padRight(r.tier, colWidths.tier),
-      padLeft(r.remaining, colWidths.remaining),
-      padLeft(r.session, colWidths.session),
-      padLeft(r.latency, colWidths.latency),
+      r.name.padEnd(colWidths.name),
+      r.tier.padEnd(colWidths.tier),
+      r.remaining.padStart(colWidths.remaining),
+      r.session.padStart(colWidths.session),
+      r.latency.padStart(colWidths.latency),
     ].join(sep),
   );
 
@@ -154,11 +140,11 @@ export function createToolsCommand(
   registry: ProviderRegistry,
   tierMap: ReadonlyMap<string, ProviderTier>,
   allProviderNames?: string[],
-): ToolsCommand {
+) {
   return {
     name: "tools",
     description: "Manage search/fetch providers. Use --status to see provider status.",
-    async handler(args, ctx) {
+    async handler(args: string, ctx: ExtensionCommandContext) {
       if (args.includes("--status")) {
         const table = buildStatusTable(registry, tierMap);
         ctx.ui.notify(table);

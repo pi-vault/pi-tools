@@ -89,16 +89,10 @@ export class ProviderRegistry {
     return candidates;
   }
 
-  // Scoring weights for best-performing strategy
-  static readonly WEIGHT_SUCCESS = 0.5;
-  static readonly WEIGHT_SPEED = 0.3;
-  static readonly WEIGHT_TIER = 0.2;
-
   /**
    * Select the best search provider based on session performance metrics.
    *
-   * Score formula:
-   *   score = (success_rate * WEIGHT_SUCCESS) + (speed_score * WEIGHT_SPEED) + (tier_score * WEIGHT_TIER)
+   * Score = (success_rate * 0.5) + (speed_score * 0.3) + (tier_score * 0.2)
    *
    * Where:
    *   success_rate = successes / (successes + failures)
@@ -127,8 +121,7 @@ export class ProviderRegistry {
       const tierScore = TIER_SCORES[r.tier] ?? 0.3;
 
       if (!m || (m.successes + m.failures) === 0) {
-        // No data — score is tier_score * WEIGHT_TIER only (conservative default)
-        return { provider: r.provider, score: tierScore * ProviderRegistry.WEIGHT_TIER };
+        return { provider: r.provider, score: tierScore * 0.2 };
       }
 
       const total = m.successes + m.failures;
@@ -148,9 +141,7 @@ export class ProviderRegistry {
     for (const s of scored) {
       if ("successRate" in s && s.successRate !== undefined) {
         const speedScore = s.avgLatency === Infinity ? 0 : 1 - (s.avgLatency / (maxLatency || 1));
-        s.score = (s.successRate * ProviderRegistry.WEIGHT_SUCCESS)
-          + (speedScore * ProviderRegistry.WEIGHT_SPEED)
-          + (s.tierScore! * ProviderRegistry.WEIGHT_TIER);
+        s.score = (s.successRate * 0.5) + (speedScore * 0.3) + (s.tierScore! * 0.2);
       }
     }
 
@@ -188,9 +179,5 @@ export class ProviderRegistry {
 
   getMetrics(providerName: string): ProviderMetrics | undefined {
     return this.metrics.get(providerName);
-  }
-
-  getAllMetrics(): ReadonlyMap<string, ProviderMetrics> {
-    return this.metrics;
   }
 }

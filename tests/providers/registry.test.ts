@@ -403,21 +403,5 @@ describe("ProviderRegistry", () => {
       expect(exaMetrics.totalLatencyMs).toBe(600);
     });
 
-    it("getAllMetrics returns all tracked providers", () => {
-      const tracker = new UsageTracker();
-      const registry = new ProviderRegistry(tracker);
-      const brave = mockProvider("brave", "Brave");
-      const exa = mockProvider("exa", "Exa");
-      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
-      registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
-
-      registry.recordSuccess("brave", 300);
-      registry.recordSuccess("exa", 600);
-
-      const all = registry.getAllMetrics();
-      expect(all.size).toBe(2);
-      expect(all.get("brave")?.successes).toBe(1);
-      expect(all.get("exa")?.successes).toBe(1);
-    });
   });
 });
