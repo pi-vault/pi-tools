@@ -1,5 +1,5 @@
 // src/providers/tavily.ts
-import type { FetchProvider, FetchResult, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type { FetchProvider, FetchResult, ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 interface TavilySearchResponse {
   results: Array<{ title: string; url: string; content: string }>;
@@ -64,3 +64,14 @@ export class TavilyProvider implements SearchProvider, FetchProvider {
     return { text: content };
   }
 }
+
+export const providerMeta: ProviderMeta = {
+  name: "tavily",
+  tier: 1,
+  monthlyQuota: 1000,
+  requiresKey: true,
+  create: (key) => {
+    const p = new TavilyProvider(key!);
+    return { search: p, fetch: p };
+  },
+};

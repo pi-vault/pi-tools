@@ -1,6 +1,7 @@
 // src/providers/searxng.ts
+import { resolveApiKey } from "../config.ts";
 import { validateUrl } from "../utils/ssrf.ts";
-import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 const DEFAULT_INSTANCE_URL = "http://localhost:8080";
 
@@ -65,3 +66,16 @@ export class SearXNGProvider implements SearchProvider {
     }));
   }
 }
+
+export const providerMeta: ProviderMeta = {
+  name: "searxng",
+  tier: 2,
+  monthlyQuota: null,
+  requiresKey: false,
+  create: (_key, providerConfig) => ({
+    search: new SearXNGProvider({
+      instanceUrl: providerConfig?.instanceUrl,
+      apiKey: providerConfig?.apiKey ? resolveApiKey(providerConfig.apiKey) : undefined,
+    }),
+  }),
+};

@@ -1,5 +1,5 @@
 // src/providers/serper.ts
-import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 import { applyDomainFilters } from "../utils/filters.ts";
 
 interface SerperResponse {
@@ -68,3 +68,11 @@ function isoToMDY(iso: string): string {
   const [year, month, day] = iso.split("-");
   return `${month}/${day}/${year}`;
 }
+
+export const providerMeta: ProviderMeta = {
+  name: "serper",
+  tier: 1,
+  monthlyQuota: 2500,
+  requiresKey: true,
+  create: (key) => ({ search: new SerperProvider(key!) }),
+};

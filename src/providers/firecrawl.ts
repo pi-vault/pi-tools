@@ -1,5 +1,5 @@
 // src/providers/firecrawl.ts
-import type { FetchProvider, FetchResult, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type { FetchProvider, FetchResult, ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 interface FirecrawlSearchResponse {
   data: Array<{ title: string; url: string; markdown?: string; description?: string }>;
@@ -51,3 +51,14 @@ export class FirecrawlProvider implements SearchProvider, FetchProvider {
     return { text: data.data?.markdown ?? "" };
   }
 }
+
+export const providerMeta: ProviderMeta = {
+  name: "firecrawl",
+  tier: 1,
+  monthlyQuota: 1000,
+  requiresKey: true,
+  create: (key) => {
+    const p = new FirecrawlProvider(key!);
+    return { search: p, fetch: p };
+  },
+};

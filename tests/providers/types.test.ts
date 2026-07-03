@@ -50,19 +50,26 @@ describe("provider types", () => {
     expect(full.title).toBe("Page Title");
   });
 
-  it("ProviderMeta describes provider characteristics", () => {
-    const meta: ProviderMeta = {
+  it("ProviderMeta describes provider registration", () => {
+    const mockSearch: SearchProvider = {
       name: "brave",
       label: "Brave Search",
+      search: async () => [],
+    };
+    const meta: ProviderMeta = {
+      name: "brave",
       tier: 1,
+      monthlyQuota: 2000,
       requiresKey: true,
-      defaultMonthlyQuota: 2000,
-      capabilities: { search: true },
+      create: (_key) => ({ search: mockSearch }),
     };
     expect(meta.tier).toBe(1);
     expect(meta.requiresKey).toBe(true);
-    expect(meta.capabilities.search).toBe(true);
-    expect(meta.capabilities.fetch).toBeUndefined();
+    expect(meta.monthlyQuota).toBe(2000);
+    const instances = meta.create("key");
+    expect(instances.search).toBe(mockSearch);
+    expect(instances.fetch).toBeUndefined();
+    expect(instances.codeSearch).toBeUndefined();
   });
 });
 

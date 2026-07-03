@@ -4,6 +4,7 @@ import type {
   CodeSearchResult,
   FetchProvider,
   FetchResult,
+  ProviderMeta,
   SearchFilters,
   SearchProvider,
   SearchResult,
@@ -103,3 +104,14 @@ export class ExaProvider implements SearchProvider, FetchProvider, CodeSearchPro
     return { text: data.results?.[0]?.text ?? "" };
   }
 }
+
+export const providerMeta: ProviderMeta = {
+  name: "exa",
+  tier: 1,
+  monthlyQuota: 1000,
+  requiresKey: true,
+  create: (key) => {
+    const p = new ExaProvider(key!);
+    return { search: p, fetch: p, codeSearch: p };
+  },
+};

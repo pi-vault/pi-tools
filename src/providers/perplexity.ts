@@ -1,5 +1,5 @@
 // src/providers/perplexity.ts
-import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 interface PerplexityResponse {
   choices: Array<{ message: { content: string } }>;
@@ -48,3 +48,11 @@ export class PerplexityProvider implements SearchProvider {
     return results.slice(0, maxResults);
   }
 }
+
+export const providerMeta: ProviderMeta = {
+  name: "perplexity",
+  tier: 2,
+  monthlyQuota: null,
+  requiresKey: true,
+  create: (key) => ({ search: new PerplexityProvider(key!) }),
+};

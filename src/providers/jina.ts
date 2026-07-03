@@ -1,5 +1,5 @@
 // src/providers/jina.ts
-import type { FetchProvider, FetchResult, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type { FetchProvider, FetchResult, ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 interface JinaSearchResponse {
   data: Array<{
@@ -70,3 +70,14 @@ export class JinaProvider implements SearchProvider, FetchProvider {
     return { text };
   }
 }
+
+export const providerMeta: ProviderMeta = {
+  name: "jina",
+  tier: 3,
+  monthlyQuota: null,
+  requiresKey: false,
+  create: (key) => {
+    const p = new JinaProvider(key);
+    return { search: p, fetch: p };
+  },
+};

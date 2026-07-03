@@ -3,7 +3,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 import { applyDomainFilters } from "../utils/filters.ts";
 
 interface DDGSResult {
@@ -149,3 +149,11 @@ function computeTimelimit(filters?: SearchFilters): string | undefined {
   if (diffDays <= 30) return "m";
   return "y";
 }
+
+export const providerMeta: ProviderMeta = {
+  name: "duckduckgo",
+  tier: 3,
+  monthlyQuota: null,
+  requiresKey: false,
+  create: () => ({ search: new DuckDuckGoProvider() }),
+};
