@@ -36,6 +36,12 @@ const ENV_VAR_PATTERN = /^[A-Z][A-Z0-9_]+$/;
 const SHELL_CMD_PREFIX = "!";
 const SHELL_TIMEOUT_MS = 5000;
 
+export const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
+  enabled: true,
+  maxRepoSizeMB: 350,
+  cloneTimeoutSeconds: 30,
+};
+
 const DEFAULT_CONFIG: PiToolsConfig = {
   defaultProvider: "auto",
   selectionStrategy: "auto",
@@ -54,11 +60,7 @@ const DEFAULT_CONFIG: PiToolsConfig = {
     searxng: { enabled: false, instanceUrl: "http://localhost:8080" },
     websearchapi: { enabled: false, apiKey: "WEBSEARCHAPI_API_KEY" },
   },
-  github: {
-    enabled: true,
-    maxRepoSizeMB: 350,
-    cloneTimeoutSeconds: 30,
-  },
+  github: DEFAULT_GITHUB_CONFIG,
 };
 
 export function getConfigPath(): string {
