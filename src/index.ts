@@ -17,11 +17,12 @@ import { OpenAINativeProvider } from "./providers/openai-native.ts";
 import { ParallelProvider } from "./providers/parallel.ts";
 import { SearXNGProvider } from "./providers/searxng.ts";
 import { WebSearchApiProvider } from "./providers/websearchapi.ts";
-import type { FetchProvider, SearchProvider, CodeSearchProvider } from "./providers/types.ts";
+import type { FetchProvider, SearchProvider, CodeSearchProvider, ProviderTier } from "./providers/types.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
 import { createCodeSearchTool } from "./tools/code-search.ts";
+import { createToolsCommand } from "./commands/tools.ts";
 import { ContentCache } from "./cache.ts";
 
 interface ProviderFactory {
@@ -190,4 +191,18 @@ export default function createExtension(pi: ExtensionAPI): void {
       config.guidance?.code_search,
     ),
   );
+
+  // Build tier map for status display
+  const tierMap = new Map<string, ProviderTier>();
+  for (const [name, factory] of Object.entries(providerFactories)) {
+    tierMap.set(name, factory.tier);
+  }
+
+  // Register /tools command
+  const allProviderNames = Object.keys(providerFactories);
+  const toolsCommand = createToolsCommand(registry, tierMap, allProviderNames);
+  pi.registerCommand(toolsCommand.name, {
+    description: toolsCommand.description,
+    handler: toolsCommand.handler,
+  });
 }
