@@ -170,15 +170,24 @@ export default function createExtension(pi: ExtensionAPI): void {
     createWebSearchTool(
       (name) => registry.selectSearchCandidates(name),
       (providerName) => registry.recordUsage(providerName),
+      config.guidance?.web_search,
     ),
   );
   const fetchCache = new ContentCache(200, 5 * 60_000);
-  pi.registerTool(createWebFetchTool(store, () => registry.selectFetchCandidates(), fetchCache));
-  pi.registerTool(createWebReadTool(store));
+  pi.registerTool(
+    createWebFetchTool(
+      store,
+      () => registry.selectFetchCandidates(),
+      fetchCache,
+      config.guidance?.web_fetch,
+    ),
+  );
+  pi.registerTool(createWebReadTool(store, config.guidance?.web_read));
   pi.registerTool(
     createCodeSearchTool(
       () => registry.selectCodeSearch(),
       (providerName) => registry.recordUsage(providerName),
+      config.guidance?.code_search,
     ),
   );
 }

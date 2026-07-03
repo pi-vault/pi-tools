@@ -3,6 +3,7 @@ import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { SearchFilters, SearchProvider, SearchResult } from "../providers/types.ts";
 import { AggregateProviderError } from "../utils/errors.ts";
+import type { GuidanceOverride } from "../config.ts";
 
 const WebSearchParams = Type.Object({
   query: Type.String({ description: "Search query" }),
@@ -89,13 +90,14 @@ function buildFilters(params: {
 export function createWebSearchTool(
   resolveCandidates: (name?: string) => SearchProvider[],
   onSuccess?: (providerName: string) => void,
+  guidance?: GuidanceOverride,
 ): ToolDefinition<typeof WebSearchParams, WebSearchDetails> {
   return {
     name: "web_search",
     label: "Web Search",
     description: "Search the web for up-to-date information.",
-    promptSnippet: "Search the web for up-to-date information.",
-    promptGuidelines: [
+    promptSnippet: guidance?.promptSnippet ?? "Search the web for up-to-date information.",
+    promptGuidelines: guidance?.promptGuidelines ?? [
       "Use web_search for information beyond training data -- recent events, current library versions, live API docs.",
       "After answering, include a Sources: section listing relevant URLs as markdown hyperlinks.",
       "Use one web_search call per search angle rather than batching multiple queries.",

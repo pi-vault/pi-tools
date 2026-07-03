@@ -3,6 +3,7 @@ import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { CodeSearchProvider, CodeSearchResult } from "../providers/types.ts";
 import { sanitizeError } from "../utils/errors.ts";
+import type { GuidanceOverride } from "../config.ts";
 
 const CodeSearchParams = Type.Object({
   query: Type.String({ description: "Code or technical documentation search query" }),
@@ -29,15 +30,16 @@ function formatCodeResults(results: CodeSearchResult[]): string {
 export function createCodeSearchTool(
   resolveProvider: () => CodeSearchProvider | undefined,
   onSuccess?: (providerName: string) => void,
+  guidance?: GuidanceOverride,
 ): ToolDefinition<typeof CodeSearchParams, CodeSearchDetails> {
   return {
     name: "code_search",
     label: "Code Search",
     description:
       "Search code, library APIs, and technical documentation across the web.",
-    promptSnippet:
+    promptSnippet: guidance?.promptSnippet ??
       "Search code, library APIs, and technical documentation across the web.",
-    promptGuidelines: [
+    promptGuidelines: guidance?.promptGuidelines ?? [
       "Use code_search for finding code examples, library documentation, and API references.",
       "Prefer code_search over web_search for programming-related queries.",
     ],
