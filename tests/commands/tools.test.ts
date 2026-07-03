@@ -6,6 +6,7 @@ import { ProviderRegistry } from "../../src/providers/registry.ts";
 import { UsageTracker } from "../../src/providers/usage.ts";
 import type { SearchProvider, ProviderTier } from "../../src/providers/types.ts";
 import { makeCtx } from "../helpers.ts";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 vi.mock("node:fs");
 
@@ -52,7 +53,7 @@ describe("tools --status command", () => {
     ]);
 
     const command = createToolsCommand(registry, tierMap);
-    const ctx = makeCtx();
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
 
     // handler receives args as a single string
     await command.handler("--status", ctx);
@@ -83,7 +84,7 @@ describe("tools --status command", () => {
 
     const tierMap = new Map<string, ProviderTier>([["duckduckgo", 3]]);
     const command = createToolsCommand(registry, tierMap);
-    const ctx = makeCtx();
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
 
     await command.handler("--status", ctx);
 
@@ -97,7 +98,7 @@ describe("tools --status command", () => {
     const tierMap = new Map<string, ProviderTier>();
 
     const command = createToolsCommand(registry, tierMap);
-    const ctx = makeCtx();
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
 
     await command.handler("--status", ctx);
 
@@ -125,7 +126,7 @@ describe("tools interactive setup", () => {
     const allProviderNames = ["brave", "duckduckgo"];
 
     const command = createToolsCommand(registry, tierMap, allProviderNames);
-    const ctx = makeCtx();
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
 
     // Enable brave, skip duckduckgo
     vi.mocked(ctx.ui.confirm)
@@ -149,7 +150,7 @@ describe("tools interactive setup", () => {
     const allProviderNames = ["brave", "duckduckgo"];
 
     const command = createToolsCommand(registry, tierMap, allProviderNames);
-    const ctx = makeCtx();
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
 
     // Enable brave only
     vi.mocked(ctx.ui.confirm)
@@ -180,7 +181,7 @@ describe("tools interactive setup", () => {
     const allProviderNames = ["brave"];
 
     const command = createToolsCommand(registry, tierMap, allProviderNames);
-    const ctx = makeCtx();
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
 
     vi.mocked(ctx.ui.confirm).mockResolvedValueOnce(true);
     vi.mocked(ctx.ui.input).mockResolvedValueOnce("my-key");
@@ -200,7 +201,7 @@ describe("tools interactive setup", () => {
     const tierMap = new Map<string, ProviderTier>();
 
     const command = createToolsCommand(registry, tierMap, []);
-    const ctx = makeCtx();
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
 
     await command.handler("", ctx);
 
@@ -215,7 +216,7 @@ describe("tools interactive setup", () => {
     const allProviderNames = ["brave", "exa"];
 
     const command = createToolsCommand(registry, tierMap, allProviderNames);
-    const ctx = makeCtx();
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
 
     // Disable both providers
     vi.mocked(ctx.ui.confirm)

@@ -153,7 +153,7 @@ export function findProjectConfigPath(startDir: string): string | undefined {
  */
 export function loadMergedConfig(cwd?: string): PiToolsConfig {
   // Start from built-in defaults
-  let merged = deepMerge(DEFAULT_CONFIG as Record<string, unknown>, {});
+  let merged = deepMerge(DEFAULT_CONFIG as unknown as Record<string, unknown>, {});
 
   // Layer 2: global config
   const globalPath = getConfigPath();
@@ -179,5 +179,5 @@ export function loadMergedConfig(cwd?: string): PiToolsConfig {
     }
   }
 
-  return merged as PiToolsConfig;
+  return merged as unknown as PiToolsConfig;
 }
