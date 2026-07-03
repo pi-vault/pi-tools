@@ -17,18 +17,30 @@ export interface GitHubConfig {
   cloneTimeoutSeconds: number;
 }
 
+export type SelectionStrategy = "auto" | "best-performing";
+
+export interface GuidanceOverride {
+  promptSnippet?: string;
+  promptGuidelines?: string[];
+}
+
 export interface PiToolsConfig {
   defaultProvider: string;
+  selectionStrategy: SelectionStrategy;
   providers: Record<string, ProviderConfigEntry>;
   github: GitHubConfig;
+  guidance?: Record<string, GuidanceOverride>;
 }
 
 const ENV_VAR_PATTERN = /^[A-Z][A-Z0-9_]+$/;
 const SHELL_CMD_PREFIX = "!";
 const SHELL_TIMEOUT_MS = 5000;
 
+const VALID_STRATEGIES: readonly string[] = ["auto", "best-performing"];
+
 const DEFAULT_CONFIG: PiToolsConfig = {
   defaultProvider: "auto",
+  selectionStrategy: "auto",
   providers: {
     brave: { enabled: true, monthlyQuota: 2000, apiKey: "BRAVE_API_KEY" },
     exa: { enabled: true, monthlyQuota: 1000, apiKey: "EXA_API_KEY" },
@@ -60,8 +72,14 @@ export function loadConfig(configPath?: string): PiToolsConfig {
   try {
     const raw = fs.readFileSync(filePath, "utf-8");
     const parsed = JSON.parse(raw);
+
+    const strategy = VALID_STRATEGIES.includes(parsed.selectionStrategy)
+      ? (parsed.selectionStrategy as SelectionStrategy)
+      : DEFAULT_CONFIG.selectionStrategy;
+
     return {
       defaultProvider: parsed.defaultProvider ?? DEFAULT_CONFIG.defaultProvider,
+      selectionStrategy: strategy,
       providers: {
         ...DEFAULT_CONFIG.providers,
         ...parsed.providers,
@@ -70,6 +88,7 @@ export function loadConfig(configPath?: string): PiToolsConfig {
         ...DEFAULT_CONFIG.github,
         ...parsed.github,
       },
+      guidance: parsed.guidance,
     };
   } catch {
     return { ...DEFAULT_CONFIG };

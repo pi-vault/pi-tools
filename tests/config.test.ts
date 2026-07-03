@@ -333,3 +333,71 @@ describe("loadMergedConfig", () => {
     expect(config.github.enabled).toBe(true);
   });
 });
+
+describe("config types — selectionStrategy and guidance", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("loads selectionStrategy from config file", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        defaultProvider: "auto",
+        selectionStrategy: "best-performing",
+        providers: {},
+      }),
+    );
+    const config = loadConfig();
+    expect(config.selectionStrategy).toBe("best-performing");
+  });
+
+  it("defaults selectionStrategy to auto when not specified", () => {
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+    const config = loadConfig();
+    expect(config.selectionStrategy).toBe("auto");
+  });
+
+  it("loads guidance overrides from config file", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        defaultProvider: "auto",
+        providers: {},
+        guidance: {
+          web_search: {
+            promptSnippet: "Custom search snippet",
+            promptGuidelines: ["Guideline A", "Guideline B"],
+          },
+        },
+      }),
+    );
+    const config = loadConfig();
+    expect(config.guidance?.web_search?.promptSnippet).toBe("Custom search snippet");
+    expect(config.guidance?.web_search?.promptGuidelines).toEqual([
+      "Guideline A",
+      "Guideline B",
+    ]);
+  });
+
+  it("defaults guidance to undefined when not specified", () => {
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+    const config = loadConfig();
+    expect(config.guidance).toBeUndefined();
+  });
+
+  it("rejects invalid selectionStrategy values", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        defaultProvider: "auto",
+        selectionStrategy: "invalid-strategy",
+        providers: {},
+      }),
+    );
+    const config = loadConfig();
+    // Invalid value should fall back to default
+    expect(config.selectionStrategy).toBe("auto");
+  });
+});
