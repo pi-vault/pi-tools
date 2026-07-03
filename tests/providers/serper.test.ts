@@ -1,8 +1,10 @@
 // tests/providers/serper.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SerperProvider } from "../../src/providers/serper.ts";
+import { providerMeta } from "../../src/providers/serper.ts";
 import { stubFetch } from "../helpers.ts";
 import type { SearchFilters } from "../../src/providers/types.ts";
+
+const makeProvider = (key = "key") => providerMeta.create(key).search!;
 
 describe("SerperProvider", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
@@ -11,8 +13,9 @@ describe("SerperProvider", () => {
   afterEach(() => { fetchStub.restore(); });
 
   it("has correct name and label", () => {
-    expect(new SerperProvider("key").name).toBe("serper");
-    expect(new SerperProvider("key").label).toBe("Google Serper");
+    const p = makeProvider();
+    expect(p.name).toBe("serper");
+    expect(p.label).toBe("Google Serper");
   });
 
   it("returns normalized search results", async () => {
@@ -23,21 +26,21 @@ describe("SerperProvider", () => {
         ],
       },
     });
-    const results = await new SerperProvider("key").search("test", 5);
+    const results = await makeProvider().search("test", 5);
     expect(results).toHaveLength(1);
     expect(results[0].url).toBe("https://serper.dev");
   });
 
   it("sends API key in X-API-KEY header", async () => {
     fetchStub.addResponse("google.serper.dev", { body: { organic: [] } });
-    await new SerperProvider("my-key").search("test", 5);
+    await makeProvider("my-key").search("test", 5);
     const fetchCall = (globalThis.fetch as any).mock.calls[0];
     expect(fetchCall[1].headers["X-API-KEY"]).toBe("my-key");
   });
 
   it("throws on error response", async () => {
     fetchStub.addResponse("google.serper.dev", { status: 403 });
-    await expect(new SerperProvider("key").search("test", 5)).rejects.toThrow();
+    await expect(makeProvider().search("test", 5)).rejects.toThrow();
   });
 
   describe("search filters", () => {
@@ -46,7 +49,7 @@ describe("SerperProvider", () => {
         body: { organic: [] },
       });
 
-      const provider = new SerperProvider("key");
+      const provider = makeProvider();
       const filters: SearchFilters = { includeDomains: ["example.com", "docs.rs"] };
       await provider.search("rust tutorial", 5, undefined, filters);
 
@@ -61,7 +64,7 @@ describe("SerperProvider", () => {
         body: { organic: [] },
       });
 
-      const provider = new SerperProvider("key");
+      const provider = makeProvider();
       const filters: SearchFilters = { excludeDomains: ["spam.com"] };
       await provider.search("test query", 5, undefined, filters);
 
@@ -76,7 +79,7 @@ describe("SerperProvider", () => {
         body: { organic: [] },
       });
 
-      const provider = new SerperProvider("key");
+      const provider = makeProvider();
       const filters: SearchFilters = {
         startDate: "2025-06-01",
         endDate: "2025-06-30",
@@ -93,7 +96,7 @@ describe("SerperProvider", () => {
         body: { organic: [] },
       });
 
-      const provider = new SerperProvider("key");
+      const provider = makeProvider();
       const filters: SearchFilters = { startDate: "2025-01-15" };
       await provider.search("test", 5, undefined, filters);
 
@@ -107,7 +110,7 @@ describe("SerperProvider", () => {
         body: { organic: [] },
       });
 
-      const provider = new SerperProvider("key");
+      const provider = makeProvider();
       const filters: SearchFilters = { endDate: "2025-12-31" };
       await provider.search("test", 5, undefined, filters);
 
@@ -121,7 +124,7 @@ describe("SerperProvider", () => {
         body: { organic: [] },
       });
 
-      const provider = new SerperProvider("key");
+      const provider = makeProvider();
       const filters: SearchFilters = {
         includeDomains: ["example.com"],
         excludeDomains: ["spam.com"],
@@ -142,7 +145,7 @@ describe("SerperProvider", () => {
         body: { organic: [] },
       });
 
-      const provider = new SerperProvider("key");
+      const provider = makeProvider();
       const filters: SearchFilters = { includeDomains: ["example.com"] };
       await provider.search("test", 5, undefined, filters);
 
@@ -160,8 +163,7 @@ describe("SerperProvider", () => {
         },
       });
 
-      const provider = new SerperProvider("key");
-      const results = await provider.search("test", 5);
+      const results = await makeProvider().search("test", 5);
       expect(results).toHaveLength(1);
       expect(results[0].title).toBe("Result");
     });

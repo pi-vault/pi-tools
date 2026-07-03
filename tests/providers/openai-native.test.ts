@@ -1,7 +1,9 @@
 // tests/providers/openai-native.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { OpenAINativeProvider } from "../../src/providers/openai-native.ts";
+import { providerMeta } from "../../src/providers/openai-native.ts";
 import { stubFetch } from "../helpers.ts";
+
+const makeProvider = (key = "test-key") => providerMeta.create(key).search!;
 
 describe("OpenAINativeProvider", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
@@ -15,7 +17,7 @@ describe("OpenAINativeProvider", () => {
   });
 
   it("has correct name and label", () => {
-    const provider = new OpenAINativeProvider("test-key");
+    const provider = makeProvider();
     expect(provider.name).toBe("openai-native");
     expect(provider.label).toBe("OpenAI Web Search");
   });
@@ -63,8 +65,7 @@ describe("OpenAINativeProvider", () => {
       },
     });
 
-    const provider = new OpenAINativeProvider("test-key");
-    const results = await provider.search("test query", 5);
+    const results = await makeProvider().search("test query", 5);
 
     expect(results).toHaveLength(2);
     expect(results[0]).toEqual({
@@ -129,8 +130,7 @@ describe("OpenAINativeProvider", () => {
       },
     });
 
-    const provider = new OpenAINativeProvider("key");
-    const results = await provider.search("test", 10);
+    const results = await makeProvider("key").search("test", 10);
     expect(results).toHaveLength(2);
     expect(results[0].url).toBe("https://example.com/page");
     expect(results[1].url).toBe("https://other.com");
@@ -141,8 +141,7 @@ describe("OpenAINativeProvider", () => {
       body: { id: "resp_123", output: [] },
     });
 
-    const provider = new OpenAINativeProvider("my-openai-key");
-    await provider.search("my query", 5);
+    await makeProvider("my-openai-key").search("my query", 5);
 
     const fetchCall = (globalThis.fetch as any).mock.calls[0];
     const url = fetchCall[0] as string;
@@ -188,8 +187,7 @@ describe("OpenAINativeProvider", () => {
       },
     });
 
-    const provider = new OpenAINativeProvider("key");
-    const results = await provider.search("test", 3);
+    const results = await makeProvider("key").search("test", 3);
     expect(results).toHaveLength(3);
   });
 
@@ -198,10 +196,7 @@ describe("OpenAINativeProvider", () => {
       status: 401,
       body: "Invalid API key",
     });
-    const provider = new OpenAINativeProvider("bad-key");
-    await expect(provider.search("test", 5)).rejects.toThrow(
-      "OpenAI API error",
-    );
+    await expect(makeProvider("bad-key").search("test", 5)).rejects.toThrow();
   });
 
   it("returns empty results when no message in output", async () => {
@@ -209,8 +204,7 @@ describe("OpenAINativeProvider", () => {
       body: { id: "resp_123", output: [] },
     });
 
-    const provider = new OpenAINativeProvider("key");
-    const results = await provider.search("obscure query", 5);
+    const results = await makeProvider("key").search("obscure query", 5);
     expect(results).toEqual([]);
   });
 
@@ -232,8 +226,7 @@ describe("OpenAINativeProvider", () => {
       },
     });
 
-    const provider = new OpenAINativeProvider("key");
-    const results = await provider.search("nothing found", 5);
+    const results = await makeProvider("key").search("nothing found", 5);
     expect(results).toEqual([]);
   });
 });
