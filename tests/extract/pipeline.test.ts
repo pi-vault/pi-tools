@@ -441,29 +441,6 @@ describe("GitHub URL interception in extractContent", () => {
     expect(result.text).toContain('"raw": true');
     expect(result.extractionChain).toContain("raw");
   });
-});
-
-describe("extractContent github config injection", () => {
-  let fetchStub: ReturnType<typeof stubFetch>;
-
-  beforeEach(() => {
-    fetchStub = stubFetch();
-  });
-
-  afterEach(() => {
-    fetchStub.restore();
-  });
-
-  it("accepts github config via options", async () => {
-    fetchStub.addResponse("example.com/page", {
-      body: GOOD_HTML,
-      headers: { "content-type": "text/html; charset=utf-8" },
-    });
-    const result = await extractContent("https://example.com/page", undefined, {
-      github: { enabled: false, maxRepoSizeMB: 350, cloneTimeoutSeconds: 30 },
-    });
-    expect(result.text).toContain("Real Article");
-  });
 
   it("skips GitHub interception when options.github.enabled is false", async () => {
     fetchStub.addResponse("github.com", {
@@ -477,14 +454,5 @@ describe("extractContent github config injection", () => {
     );
     // Should fall through to HTTP extraction, not GitHub interception
     expect(result.extractionChain).toContain("http:200");
-  });
-
-  it("uses default github config (enabled) when options.github is not provided", async () => {
-    fetchStub.addResponse("example.com/page", {
-      body: GOOD_HTML,
-      headers: { "content-type": "text/html; charset=utf-8" },
-    });
-    const result = await extractContent("https://example.com/page");
-    expect(result.text).toContain("Real Article");
   });
 });

@@ -103,7 +103,7 @@ export function createWebFetchTool(
       const extracted = await extractContent(
         url,
         signal,
-        params.raw ? { raw: true, github: githubConfig } : { github: githubConfig },
+        { raw: params.raw, github: githubConfig },
       );
 
       // Write to cache
@@ -209,7 +209,7 @@ export function createWebFetchTool(
         const extracted = await extractContent(
           u,
           signal ?? undefined,
-          params.raw ? { raw: true, github: githubConfig } : { github: githubConfig },
+          { raw: params.raw, github: githubConfig },
         );
 
         cache?.set(u, extracted);
