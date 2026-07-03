@@ -56,7 +56,7 @@ Both `fetchViaClone` and `extractGitHub` are exported and called directly in tes
 **Files:**
 - Modify: `src/config.ts`
 
-- [ ] **Step 1: Extract and export the github defaults as a named constant**
+- [x] **Step 1: Extract and export the github defaults as a named constant**
 
 In `src/config.ts`, add an exported constant before `DEFAULT_CONFIG` and reference it:
 
@@ -77,12 +77,12 @@ const DEFAULT_CONFIG: PiToolsConfig = {
 
 This establishes `config.ts` as the single source of truth.
 
-- [ ] **Step 2: Run typecheck**
+- [x] **Step 2: Run typecheck**
 
 Run: `pnpm vitest run --typecheck.only`
 Expected: PASS — no consumers change, `DEFAULT_CONFIG.github` still has the same shape.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/config.ts
@@ -97,7 +97,7 @@ git commit -m "refactor: export DEFAULT_GITHUB_CONFIG from config.ts"
 - Modify: `src/extract/pipeline.ts`
 - Test: `tests/extract/pipeline.test.ts`
 
-- [ ] **Step 1: Write failing test that passes github config via options**
+- [x] **Step 1: Write failing test that passes github config via options**
 
 Add to `tests/extract/pipeline.test.ts`:
 
@@ -114,12 +114,12 @@ it("accepts github config via options without calling loadConfig", async () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pnpm vitest run tests/extract/pipeline.test.ts`
 Expected: FAIL — `ExtractOptions` doesn't have a `github` field (TypeScript error)
 
-- [ ] **Step 3: Add github field to ExtractOptions and wire it in**
+- [x] **Step 3: Add github field to ExtractOptions and wire it in**
 
 In `src/extract/pipeline.ts`:
 
@@ -151,12 +151,12 @@ export interface ExtractOptions {
   }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `pnpm vitest run tests/extract/pipeline.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: Write test that verifies injected config controls GitHub interception**
+- [x] **Step 5: Write test that verifies injected config controls GitHub interception**
 
 Add to `tests/extract/pipeline.test.ts`:
 
@@ -185,12 +185,12 @@ it("uses default github config (enabled) when options.github is not provided", a
 });
 ```
 
-- [ ] **Step 6: Run tests and verify**
+- [x] **Step 6: Run tests and verify**
 
 Run: `pnpm vitest run tests/extract/pipeline.test.ts`
 Expected: PASS
 
-- [ ] **Step 7: Verify loadConfig is fully removed from pipeline.ts**
+- [x] **Step 7: Verify loadConfig is fully removed from pipeline.ts**
 
 ```bash
 grep "loadConfig" src/extract/pipeline.ts
@@ -198,7 +198,7 @@ grep "loadConfig" src/extract/pipeline.ts
 
 Expected: no matches.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/extract/pipeline.ts tests/extract/pipeline.test.ts
@@ -215,7 +215,7 @@ git commit -m "refactor: inject github config via ExtractOptions, remove loadCon
 
 The `DEFAULT_GITHUB_CONFIG` in `github.ts` (line 385-389) is used as a fallback in `fetchViaClone()` (line 601: `const cfg = config ?? DEFAULT_GITHUB_CONFIG`). Now that `config.ts` exports the canonical constant, we replace the local duplicate with an import.
 
-- [ ] **Step 1: Replace local DEFAULT_GITHUB_CONFIG with import from config.ts**
+- [x] **Step 1: Replace local DEFAULT_GITHUB_CONFIG with import from config.ts**
 
 In `src/extract/github.ts`:
 
@@ -239,12 +239,12 @@ const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
 
 The `fetchViaClone` fallback (`const cfg = config ?? DEFAULT_GITHUB_CONFIG` at line 601) continues to work — it now references the imported constant.
 
-- [ ] **Step 2: Run github tests**
+- [x] **Step 2: Run github tests**
 
 Run: `pnpm vitest run tests/extract/github.test.ts`
 Expected: PASS — no test behavior changes, only the source of the default constant changed. Tests that call `fetchViaClone(parsed)` or `extractGitHub(parsed)` without config still work because the fallback still resolves via the import.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/extract/github.ts
@@ -259,7 +259,7 @@ git commit -m "refactor: replace local DEFAULT_GITHUB_CONFIG with import from co
 - Modify: `src/tools/web-fetch.ts`
 - Modify: `src/index.ts`
 
-- [ ] **Step 1: Update createWebFetchTool to accept github config**
+- [x] **Step 1: Update createWebFetchTool to accept github config**
 
 In `src/tools/web-fetch.ts`, update the function signature:
 
@@ -295,7 +295,7 @@ const extracted = await extractContent(
 );
 ```
 
-- [ ] **Step 2: Pass github config from index.ts**
+- [x] **Step 2: Pass github config from index.ts**
 
 In `src/index.ts` (line 189), update the `createWebFetchTool` call:
 
@@ -311,12 +311,12 @@ pi.registerTool(
 );
 ```
 
-- [ ] **Step 3: Run full verification**
+- [x] **Step 3: Run full verification**
 
 Run: `pnpm check`
 Expected: lint PASS, typecheck PASS, tests PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/tools/web-fetch.ts src/index.ts
