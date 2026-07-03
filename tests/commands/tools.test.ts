@@ -3,12 +3,13 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { createToolsCommand } from "../../src/commands/tools.ts";
 import { getConfigPath } from "../../src/config.ts";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
-import { UsageTracker } from "../../src/providers/usage.ts";
 import type { SearchProvider, ProviderTier } from "../../src/providers/types.ts";
 import { makeCtx } from "../helpers.ts";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 vi.mock("node:fs");
+
+const mem = () => new ProviderRegistry({ load: () => ({}), save: () => {} });
 
 function mockProvider(name: string, label: string): SearchProvider {
   return {
@@ -29,8 +30,7 @@ describe("tools --status command", () => {
   });
 
   it("displays provider status table with metrics", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const brave = mockProvider("brave", "Brave");
     const exa = mockProvider("exa", "Exa");
     const ddg = mockProvider("duckduckgo", "DuckDuckGo");
@@ -40,11 +40,10 @@ describe("tools --status command", () => {
     registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
     // Simulate some usage
-    registry.recordUsage("brave");
-    registry.recordSuccess("brave", 340);
-    registry.recordSuccess("brave", 340);
-    registry.recordFailure("brave");
-    registry.recordSuccess("exa", 520);
+    registry.recordOutcome("brave", { success: true, latencyMs: 340 });
+    registry.recordOutcome("brave", { success: true, latencyMs: 340 });
+    registry.recordOutcome("brave", { success: false });
+    registry.recordOutcome("exa", { success: true, latencyMs: 520 });
 
     const tierMap = new Map<string, ProviderTier>([
       ["brave", 1],
@@ -70,15 +69,14 @@ describe("tools --status command", () => {
     expect(output).toContain("3");
     // Should contain session stats for brave
     expect(output).toContain("2/1"); // 2 successes, 1 failure
-    // Should contain remaining for brave (2000 - 1 = 1999)
-    expect(output).toContain("1,999");
+    // Should contain remaining for brave (2000 - 3 = 1997)
+    expect(output).toContain("1,997");
     // Should show unlimited for ddg
     expect(output).toMatch(/unlimited/i);
   });
 
   it("shows -- for avg latency when no successful calls", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const ddg = mockProvider("duckduckgo", "DuckDuckGo");
     registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
@@ -93,8 +91,7 @@ describe("tools --status command", () => {
   });
 
   it("handles empty registry gracefully", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const tierMap = new Map<string, ProviderTier>();
 
     const command = createToolsCommand(registry, tierMap);
@@ -120,8 +117,7 @@ describe("tools interactive setup", () => {
   });
 
   it("prompts to enable each provider via confirm", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const tierMap = new Map<string, ProviderTier>();
     const allProviderNames = ["brave", "duckduckgo"];
 
@@ -144,8 +140,7 @@ describe("tools interactive setup", () => {
   });
 
   it("writes config to global config path", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const tierMap = new Map<string, ProviderTier>();
     const allProviderNames = ["brave", "duckduckgo"];
 
@@ -175,8 +170,7 @@ describe("tools interactive setup", () => {
   });
 
   it("notifies user on successful save", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const tierMap = new Map<string, ProviderTier>();
     const allProviderNames = ["brave"];
 
@@ -196,8 +190,7 @@ describe("tools interactive setup", () => {
   });
 
   it("handles no providers available", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const tierMap = new Map<string, ProviderTier>();
 
     const command = createToolsCommand(registry, tierMap, []);
@@ -210,8 +203,7 @@ describe("tools interactive setup", () => {
   });
 
   it("skips API key prompt for providers the user disables", async () => {
-    const tracker = new UsageTracker();
-    const registry = new ProviderRegistry(tracker);
+    const registry = mem();
     const tierMap = new Map<string, ProviderTier>();
     const allProviderNames = ["brave", "exa"];
 

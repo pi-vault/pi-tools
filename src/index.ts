@@ -2,8 +2,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { loadMergedConfig, resolveApiKey } from "./config.ts";
 import { ContentStore, type StoredContent } from "./storage.ts";
-import { UsageTracker } from "./providers/usage.ts";
-import { ProviderRegistry } from "./providers/registry.ts";
+import { ProviderRegistry, createFilePersistence } from "./providers/registry.ts";
 import { allProviders } from "./providers/all.ts";
 import type { ProviderTier } from "./providers/types.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
@@ -31,8 +30,7 @@ export default function createExtension(pi: ExtensionAPI): void {
   const store = new ContentStore((customType, data) =>
     pi.appendEntry(customType, data),
   );
-  const tracker = new UsageTracker();
-  const registry = new ProviderRegistry(tracker);
+  const registry = new ProviderRegistry(createFilePersistence());
 
   // Register providers from the barrel
   for (const meta of allProviders) {
@@ -79,11 +77,10 @@ export default function createExtension(pi: ExtensionAPI): void {
     createWebSearchTool(
       resolveCandidates,
       (providerName, latencyMs) => {
-        registry.recordUsage(providerName);
-        registry.recordSuccess(providerName, latencyMs);
+        registry.recordOutcome(providerName, { success: true, latencyMs });
       },
       config.guidance?.web_search,
-      (providerName) => registry.recordFailure(providerName),
+      (providerName) => registry.recordOutcome(providerName, { success: false }),
     ),
   );
   const fetchCache = new ContentCache(200, 5 * 60_000);
@@ -100,7 +97,8 @@ export default function createExtension(pi: ExtensionAPI): void {
   pi.registerTool(
     createCodeSearchTool(
       () => registry.selectCodeSearch(),
-      (providerName) => registry.recordUsage(providerName),
+      // Usage tick only — code-search has no failure callback
+      (providerName) => registry.recordOutcome(providerName, { success: true }),
       config.guidance?.code_search,
     ),
   );

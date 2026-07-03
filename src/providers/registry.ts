@@ -1,5 +1,7 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
+import * as os from "node:os";
 import type { SearchProvider, FetchProvider, CodeSearchProvider, ProviderTier } from "./types.ts";
-import type { UsageTracker } from "./usage.ts";
 
 interface RegisteredSearch {
   provider: SearchProvider;
@@ -21,15 +23,52 @@ export interface ProviderMetrics {
   totalLatencyMs: number;
 }
 
+interface UsageRecord {
+  count: number;
+  month: string;
+}
+
+export interface PersistenceAdapter {
+  load(): Record<string, UsageRecord>;
+  save(data: Record<string, UsageRecord>): void;
+}
+
+function getCurrentMonth(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
 export class ProviderRegistry {
   private searchProviders = new Map<string, RegisteredSearch>();
   private fetchProviders = new Map<string, RegisteredFetch>();
   private codeSearchProviders = new Map<string, RegisteredCodeSearch>();
-  private tracker: UsageTracker;
   private metrics = new Map<string, ProviderMetrics>();
+  private counts: Record<string, number> = {};
+  private currentMonth: string;
+  private persistence: PersistenceAdapter;
 
-  constructor(tracker: UsageTracker) {
-    this.tracker = tracker;
+  constructor(persistence: PersistenceAdapter) {
+    this.persistence = persistence;
+    this.currentMonth = getCurrentMonth();
+    this.loadUsage();
+  }
+
+  private loadUsage(): void {
+    const data = this.persistence.load();
+    for (const [name, record] of Object.entries(data)) {
+      if (record.month === this.currentMonth) {
+        this.counts[name] = record.count;
+      }
+      // Different month — counts reset to 0 (already initialized)
+    }
+  }
+
+  private saveUsage(): void {
+    const data: Record<string, UsageRecord> = {};
+    for (const [name, count] of Object.entries(this.counts)) {
+      data[name] = { count, month: this.currentMonth };
+    }
+    this.persistence.save(data);
   }
 
   registerSearch(
@@ -51,14 +90,27 @@ export class ProviderRegistry {
     this.codeSearchProviders.set(provider.name, { provider });
   }
 
-  recordUsage(providerName: string): void {
-    this.tracker.increment(providerName);
+  recordOutcome(providerName: string, result: { success: boolean; latencyMs?: number }): void {
+    // Increment usage count (both success and failure count as a "use")
+    this.counts[providerName] = (this.counts[providerName] ?? 0) + 1;
+    this.saveUsage();
+
+    // Update performance metrics
+    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
+    if (result.success) {
+      m.successes += 1;
+      m.totalLatencyMs += result.latencyMs ?? 0;
+    } else {
+      m.failures += 1;
+    }
+    this.metrics.set(providerName, m);
   }
 
   getRemaining(providerName: string): number {
     const reg = this.searchProviders.get(providerName);
     if (!reg) return 0;
-    return this.tracker.getRemaining(providerName, reg.monthlyQuota);
+    if (reg.monthlyQuota === null) return Infinity;
+    return Math.max(0, reg.monthlyQuota - (this.counts[providerName] ?? 0));
   }
 
   selectSearch(name?: string): SearchProvider | undefined {
@@ -77,13 +129,9 @@ export class ProviderRegistry {
         .filter((r) => r.tier === tier)
         .filter((r) => {
           if (r.monthlyQuota === null) return true;
-          return this.tracker.getCount(r.provider.name) < r.monthlyQuota;
+          return (this.counts[r.provider.name] ?? 0) < r.monthlyQuota;
         })
-        .sort((a, b) => {
-          const remA = this.tracker.getRemaining(a.provider.name, a.monthlyQuota);
-          const remB = this.tracker.getRemaining(b.provider.name, b.monthlyQuota);
-          return remB - remA;
-        });
+        .sort((a, b) => this.getRemaining(b.provider.name) - this.getRemaining(a.provider.name));
       candidates.push(...tierCandidates.map((c) => c.provider));
     }
     return candidates;
@@ -109,7 +157,7 @@ export class ProviderRegistry {
     // Build list of eligible (non-exhausted) providers
     const eligible = [...this.searchProviders.values()].filter((r) => {
       if (r.monthlyQuota === null) return true;
-      return this.tracker.getCount(r.provider.name) < r.monthlyQuota;
+      return (this.counts[r.provider.name] ?? 0) < r.monthlyQuota;
     });
 
     if (eligible.length === 0) return undefined;
@@ -164,20 +212,42 @@ export class ProviderRegistry {
     return [...this.searchProviders.keys()];
   }
 
-  recordSuccess(providerName: string, latencyMs: number): void {
-    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
-    m.successes += 1;
-    m.totalLatencyMs += latencyMs;
-    this.metrics.set(providerName, m);
-  }
-
-  recordFailure(providerName: string): void {
-    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
-    m.failures += 1;
-    this.metrics.set(providerName, m);
-  }
-
   getMetrics(providerName: string): ProviderMetrics | undefined {
     return this.metrics.get(providerName);
   }
+}
+
+export function createFilePersistence(filePath?: string): PersistenceAdapter {
+  const usagePath = filePath ?? path.join(os.homedir(), ".pi", "agent", "tools-usage.json");
+  const legacyPath = path.join(os.homedir(), ".pi", "agent", "pi-tools-usage.json");
+
+  return {
+    load(): Record<string, UsageRecord> {
+      // Try primary path first, then legacy fallback (matches old UsageTracker behavior)
+      for (const candidate of [usagePath, legacyPath]) {
+        try {
+          const raw = fs.readFileSync(candidate, "utf-8");
+          const data = JSON.parse(raw);
+          // Migrate from old format { resetAt, counts } to new { [name]: { count, month } }
+          if (data.resetAt && data.counts) {
+            const result: Record<string, UsageRecord> = {};
+            for (const [name, count] of Object.entries(data.counts)) {
+              result[name] = { count: count as number, month: data.resetAt };
+            }
+            return result;
+          }
+          return data as Record<string, UsageRecord>;
+        } catch {}
+      }
+      return {};
+    },
+    save(data: Record<string, UsageRecord>): void {
+      try {
+        fs.mkdirSync(path.dirname(usagePath), { recursive: true });
+        fs.writeFileSync(usagePath, JSON.stringify(data, null, 2));
+      } catch {
+        // Non-fatal: usage tracking is best-effort
+      }
+    },
+  };
 }
