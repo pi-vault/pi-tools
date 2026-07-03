@@ -23,7 +23,7 @@ export interface ProviderMetrics {
   totalLatencyMs: number;
 }
 
-export interface UsageRecord {
+interface UsageRecord {
   count: number;
   month: string;
 }
@@ -113,10 +113,6 @@ export class ProviderRegistry {
     return Math.max(0, reg.monthlyQuota - (this.counts[providerName] ?? 0));
   }
 
-  getCount(providerName: string): number {
-    return this.counts[providerName] ?? 0;
-  }
-
   selectSearch(name?: string): SearchProvider | undefined {
     return this.selectSearchCandidates(name)[0];
   }
@@ -135,11 +131,7 @@ export class ProviderRegistry {
           if (r.monthlyQuota === null) return true;
           return (this.counts[r.provider.name] ?? 0) < r.monthlyQuota;
         })
-        .sort((a, b) => {
-          const remA = a.monthlyQuota === null ? Infinity : Math.max(0, a.monthlyQuota - (this.counts[a.provider.name] ?? 0));
-          const remB = b.monthlyQuota === null ? Infinity : Math.max(0, b.monthlyQuota - (this.counts[b.provider.name] ?? 0));
-          return remB - remA;
-        });
+        .sort((a, b) => this.getRemaining(b.provider.name) - this.getRemaining(a.provider.name));
       candidates.push(...tierCandidates.map((c) => c.provider));
     }
     return candidates;

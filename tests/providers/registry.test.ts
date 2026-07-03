@@ -74,8 +74,6 @@ describe("ProviderRegistry", () => {
 
     registry.recordOutcome("brave", { success: true });
     expect(registry.getRemaining("brave")).toBe(1999);
-    // Verify count incremented
-    expect(registry.getCount("brave")).toBe(1);
   });
 
   it("skips providers at 100% usage", () => {
@@ -161,7 +159,6 @@ describe("ProviderRegistry", () => {
 
     // Full quota available despite persisted count
     expect(registry.getRemaining("brave")).toBe(2000);
-    expect(registry.getCount("brave")).toBe(0);
   });
 
   it("persists usage across registry instances sharing the same adapter state", () => {
