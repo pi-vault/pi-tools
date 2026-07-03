@@ -149,6 +149,21 @@ describe("ProviderRegistry", () => {
     });
   });
 
+  it("resets counts when loaded data is from a previous month", () => {
+    // Stale month data — should be ignored, counts start at 0
+    const adapter = {
+      load: () => ({ brave: { count: 1500, month: "2025-01" } }),
+      save: () => {},
+    };
+    const registry = new ProviderRegistry(adapter);
+    const brave = mockProvider("brave", "Brave");
+    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+    // Full quota available despite persisted count
+    expect(registry.getRemaining("brave")).toBe(2000);
+    expect(registry.getCount("brave")).toBe(0);
+  });
+
   it("persists usage across registry instances sharing the same adapter state", () => {
     const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
     const adapter = {

@@ -245,7 +245,7 @@ export function createFilePersistence(filePath?: string): PersistenceAdapter {
             return result;
           }
           return data as Record<string, UsageRecord>;
-        } catch { continue; }
+        } catch {}
       }
       return {};
     },
