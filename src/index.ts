@@ -77,11 +77,12 @@ export default function createExtension(pi: ExtensionAPI): void {
     createWebSearchTool(
       resolveCandidates,
       (providerName, latencyMs) => {
-        registry.recordUsage(providerName);
-        registry.recordSuccess(providerName, latencyMs);
+        registry.recordOutcome(providerName, { success: true, latencyMs });
       },
       config.guidance?.web_search,
-      (providerName) => registry.recordFailure(providerName),
+      (providerName) => {
+        registry.recordOutcome(providerName, { success: false });
+      },
     ),
   );
   const fetchCache = new ContentCache(200, 5 * 60_000);
@@ -98,7 +99,10 @@ export default function createExtension(pi: ExtensionAPI): void {
   pi.registerTool(
     createCodeSearchTool(
       () => registry.selectCodeSearch(),
-      (providerName) => registry.recordUsage(providerName),
+      // Note: success: true is used as a usage tick — code-search doesn't report
+      // individual failures, and its providers use a separate selection path
+      // (selectCodeSearch), so inflating successes here is harmless.
+      (providerName) => registry.recordOutcome(providerName, { success: true }),
       config.guidance?.code_search,
     ),
   );

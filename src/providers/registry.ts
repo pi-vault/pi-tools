@@ -106,25 +106,6 @@ export class ProviderRegistry {
     this.metrics.set(providerName, m);
   }
 
-  // Legacy methods — kept for backward compatibility during transition
-  recordUsage(providerName: string): void {
-    this.counts[providerName] = (this.counts[providerName] ?? 0) + 1;
-    this.saveUsage();
-  }
-
-  recordSuccess(providerName: string, latencyMs: number): void {
-    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
-    m.successes += 1;
-    m.totalLatencyMs += latencyMs;
-    this.metrics.set(providerName, m);
-  }
-
-  recordFailure(providerName: string): void {
-    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
-    m.failures += 1;
-    this.metrics.set(providerName, m);
-  }
-
   getRemaining(providerName: string): number {
     const reg = this.searchProviders.get(providerName);
     if (!reg) return 0;

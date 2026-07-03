@@ -72,7 +72,7 @@ describe("ProviderRegistry", () => {
     const brave = mockProvider("brave", "Brave");
     registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
 
-    registry.recordUsage("brave");
+    registry.recordOutcome("brave", { success: true });
     expect(registry.getRemaining("brave")).toBe(1999);
     // Verify count incremented
     expect(registry.getCount("brave")).toBe(1);
@@ -86,7 +86,7 @@ describe("ProviderRegistry", () => {
     registry.registerSearch(brave, { tier: 1, monthlyQuota: 1 });
     registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
-    registry.recordUsage("brave"); // Now at 100%
+    registry.recordOutcome("brave", { success: true }); // Now at 100%
     const selected = registry.selectSearch();
     expect(selected?.name).toBe("duckduckgo");
   });
@@ -121,7 +121,7 @@ describe("ProviderRegistry", () => {
       registry.registerSearch(brave, { tier: 1, monthlyQuota: 1 });
       registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
-      registry.recordUsage("brave"); // exhausted
+      registry.recordOutcome("brave", { success: true }); // exhausted
       const candidates = registry.selectSearchCandidates();
       expect(candidates.map((c) => c.name)).toEqual(["duckduckgo"]);
     });
@@ -167,8 +167,8 @@ describe("ProviderRegistry", () => {
     const selected = registry.selectSearch();
     expect(selected?.name).toBe("brave"); // still has quota
 
-    registry.recordUsage("brave"); // 1999 used, 1 remaining
-    registry.recordUsage("brave"); // 2000 used, 0 remaining
+    registry.recordOutcome("brave", { success: true }); // 1999 used, 1 remaining
+    registry.recordOutcome("brave", { success: true }); // 2000 used, 0 remaining
     const afterExhaust = registry.selectSearch();
     expect(afterExhaust?.name).toBe("duckduckgo");
   });
@@ -208,8 +208,8 @@ describe("ProviderRegistry", () => {
       registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
       // brave is tier 1, should be preferred even if ddg has better metrics
-      registry.recordSuccess("duckduckgo", 100);
-      registry.recordFailure("brave");
+      registry.recordOutcome("duckduckgo", { success: true, latencyMs: 100 });
+      registry.recordOutcome("brave", { success: false });
 
       const selected = registry.selectSearch();
       expect(selected?.name).toBe("brave");
@@ -226,15 +226,15 @@ describe("ProviderRegistry", () => {
       registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
       // brave: 100% success, fast
-      registry.recordSuccess("brave", 200);
-      registry.recordSuccess("brave", 200);
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 });
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 });
 
       // exa: 50% success, slower
-      registry.recordSuccess("exa", 600);
-      registry.recordFailure("exa");
+      registry.recordOutcome("exa", { success: true, latencyMs: 600 });
+      registry.recordOutcome("exa", { success: false });
 
       // ddg: 100% success, very slow, low tier
-      registry.recordSuccess("duckduckgo", 1000);
+      registry.recordOutcome("duckduckgo", { success: true, latencyMs: 1000 });
 
       const selected = registry.selectSearchByPerformance();
       // brave should win: perfect success rate, fast, tier 1
@@ -262,8 +262,8 @@ describe("ProviderRegistry", () => {
       registry.registerSearch(brave, { tier: 1, monthlyQuota: 1 });
       registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
-      registry.recordUsage("brave"); // exhausted
-      registry.recordSuccess("brave", 200);
+      registry.recordOutcome("brave", { success: true }); // exhausted
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 }); // still exhausted (quota=1)
 
       const selected = registry.selectSearchByPerformance();
       expect(selected?.name).toBe("duckduckgo");
@@ -278,13 +278,13 @@ describe("ProviderRegistry", () => {
       registry.registerSearch(perplexity, { tier: 2, monthlyQuota: null });
 
       // brave: 50% success, slow
-      registry.recordSuccess("brave", 2000);
-      registry.recordFailure("brave");
+      registry.recordOutcome("brave", { success: true, latencyMs: 2000 });
+      registry.recordOutcome("brave", { success: false });
 
       // perplexity: 100% success, fast (tier 2 but much better performance)
-      registry.recordSuccess("perplexity", 100);
-      registry.recordSuccess("perplexity", 100);
-      registry.recordSuccess("perplexity", 100);
+      registry.recordOutcome("perplexity", { success: true, latencyMs: 100 });
+      registry.recordOutcome("perplexity", { success: true, latencyMs: 100 });
+      registry.recordOutcome("perplexity", { success: true, latencyMs: 100 });
 
       const selected = registry.selectSearchByPerformance();
       // perplexity should win due to much better success rate and speed
@@ -361,8 +361,8 @@ describe("ProviderRegistry", () => {
       const brave = mockProvider("brave", "Brave");
       registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
 
-      registry.recordSuccess("brave", 340);
-      registry.recordSuccess("brave", 500);
+      registry.recordOutcome("brave", { success: true, latencyMs: 340 });
+      registry.recordOutcome("brave", { success: true, latencyMs: 500 });
 
       const metrics = registry.getMetrics("brave");
       expect(metrics).toBeDefined();
@@ -376,8 +376,8 @@ describe("ProviderRegistry", () => {
       const brave = mockProvider("brave", "Brave");
       registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
 
-      registry.recordFailure("brave");
-      registry.recordFailure("brave");
+      registry.recordOutcome("brave", { success: false });
+      registry.recordOutcome("brave", { success: false });
 
       const metrics = registry.getMetrics("brave");
       expect(metrics).toBeDefined();
@@ -398,9 +398,9 @@ describe("ProviderRegistry", () => {
       registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
       registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
 
-      registry.recordSuccess("brave", 300);
-      registry.recordFailure("exa");
-      registry.recordSuccess("exa", 600);
+      registry.recordOutcome("brave", { success: true, latencyMs: 300 });
+      registry.recordOutcome("exa", { success: false });
+      registry.recordOutcome("exa", { success: true, latencyMs: 600 });
 
       const braveMetrics = registry.getMetrics("brave")!;
       expect(braveMetrics.successes).toBe(1);

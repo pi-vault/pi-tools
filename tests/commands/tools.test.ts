@@ -40,11 +40,10 @@ describe("tools --status command", () => {
     registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
     // Simulate some usage
-    registry.recordUsage("brave");
-    registry.recordSuccess("brave", 340);
-    registry.recordSuccess("brave", 340);
-    registry.recordFailure("brave");
-    registry.recordSuccess("exa", 520);
+    registry.recordOutcome("brave", { success: true, latencyMs: 340 });
+    registry.recordOutcome("brave", { success: true, latencyMs: 340 });
+    registry.recordOutcome("brave", { success: false });
+    registry.recordOutcome("exa", { success: true, latencyMs: 520 });
 
     const tierMap = new Map<string, ProviderTier>([
       ["brave", 1],
@@ -70,8 +69,8 @@ describe("tools --status command", () => {
     expect(output).toContain("3");
     // Should contain session stats for brave
     expect(output).toContain("2/1"); // 2 successes, 1 failure
-    // Should contain remaining for brave (2000 - 1 = 1999)
-    expect(output).toContain("1,999");
+    // Should contain remaining for brave (2000 - 3 = 1997)
+    expect(output).toContain("1,997");
     // Should show unlimited for ddg
     expect(output).toMatch(/unlimited/i);
   });
