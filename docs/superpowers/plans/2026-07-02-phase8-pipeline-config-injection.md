@@ -4,7 +4,7 @@
 
 **Goal:** Remove the `loadConfig()` call from inside `extractContent()` — pass GitHub config through `ExtractOptions` instead, making the pipeline a pure function of its inputs.
 
-**Architecture:** Add `github?: GitHubConfig` to `ExtractOptions`. The caller (`createWebFetchTool` in `index.ts`) passes the already-loaded config. Remove duplicate default constants from `github.ts`. Pipeline becomes testable without a config file on disk.
+**Architecture:** Add `github?: GitHubConfig` to `ExtractOptions`. The caller (`createWebFetchTool` in `index.ts`) passes the already-loaded config. Export `DEFAULT_GITHUB_CONFIG` from `config.ts` as the single source of truth for defaults — remove the duplicate constant from `github.ts`. Pipeline becomes testable without a config file on disk.
 
 **Tech Stack:** TypeScript 6, Vitest 4, Node 24+
 
@@ -33,11 +33,65 @@ const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
 };
 ```
 
-These are identical to `src/config.ts` line 57-61. The single source of truth should be `config.ts`.
+These are identical to `src/config.ts` lines 57-61 (inside `DEFAULT_CONFIG`). The single source of truth should be an exported constant from `config.ts`.
+
+### Where the duplicate is actually used
+
+The `DEFAULT_GITHUB_CONFIG` in `github.ts` is used as a fallback in `fetchViaClone()` (line 601), NOT in `extractGitHub()`:
+```ts
+// github.ts line 601
+const cfg = config ?? DEFAULT_GITHUB_CONFIG;
+```
+
+`extractGitHub()` simply passes its `config` parameter through to `fetchViaClone()` — it has no fallback of its own.
+
+Both `fetchViaClone` and `extractGitHub` are exported and called directly in tests without config:
+- `fetchViaClone(parsed)` — 1 test call
+- `extractGitHub(parsed)` — 5 test calls
 
 ---
 
-### Task 1: Add github config to ExtractOptions interface
+### Task 1: Export DEFAULT_GITHUB_CONFIG from config.ts
+
+**Files:**
+- Modify: `src/config.ts`
+
+- [ ] **Step 1: Extract and export the github defaults as a named constant**
+
+In `src/config.ts`, add an exported constant before `DEFAULT_CONFIG` and reference it:
+
+```ts
+export const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
+  enabled: true,
+  maxRepoSizeMB: 350,
+  cloneTimeoutSeconds: 30,
+};
+
+const DEFAULT_CONFIG: PiToolsConfig = {
+  defaultProvider: "auto",
+  selectionStrategy: "auto",
+  providers: { ... },
+  github: DEFAULT_GITHUB_CONFIG,  // ← reference the exported constant
+};
+```
+
+This establishes `config.ts` as the single source of truth.
+
+- [ ] **Step 2: Run typecheck**
+
+Run: `pnpm vitest run --typecheck.only`
+Expected: PASS — no consumers change, `DEFAULT_CONFIG.github` still has the same shape.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/config.ts
+git commit -m "refactor: export DEFAULT_GITHUB_CONFIG from config.ts"
+```
+
+---
+
+### Task 2: Add github config to ExtractOptions and use it in pipeline
 
 **Files:**
 - Modify: `src/extract/pipeline.ts`
@@ -53,7 +107,6 @@ it("accepts github config via options without calling loadConfig", async () => {
     body: GOOD_HTML,
     headers: { "content-type": "text/html; charset=utf-8" },
   });
-  // Pass github: { enabled: false } — should skip GitHub interception
   const result = await extractContent("https://example.com/page", undefined, {
     github: { enabled: false, maxRepoSizeMB: 350, cloneTimeoutSeconds: 30 },
   });
@@ -64,50 +117,51 @@ it("accepts github config via options without calling loadConfig", async () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `pnpm vitest run tests/extract/pipeline.test.ts`
-Expected: FAIL — `ExtractOptions` doesn't have a `github` field (TypeScript error or runtime mismatch)
+Expected: FAIL — `ExtractOptions` doesn't have a `github` field (TypeScript error)
 
-- [ ] **Step 3: Add github field to ExtractOptions**
+- [ ] **Step 3: Add github field to ExtractOptions and wire it in**
 
-In `src/extract/pipeline.ts`, update the interface:
+In `src/extract/pipeline.ts`:
 
+1. Replace the `loadConfig` import with `DEFAULT_GITHUB_CONFIG`:
 ```ts
-import type { GitHubConfig } from "../config.ts";
+// Remove:
+import { loadConfig } from "../config.ts";
+// Add:
+import { DEFAULT_GITHUB_CONFIG, type GitHubConfig } from "../config.ts";
+```
 
+2. Add `github` to the interface:
+```ts
 export interface ExtractOptions {
   raw?: boolean;
   github?: GitHubConfig;
 }
 ```
 
+3. Replace the `loadConfig()` call (lines 62-66) with injected config:
+```ts
+  const ghParsed = parseGitHubUrl(url);
+  if (ghParsed && ghParsed.type !== "unknown") {
+    const githubConfig = options?.github ?? DEFAULT_GITHUB_CONFIG;
+    if (githubConfig.enabled) {
+      const ghResult = await extractGitHub(ghParsed, signal, githubConfig);
+      if (ghResult) return ghResult;
+    }
+  }
+```
+
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `pnpm vitest run tests/extract/pipeline.test.ts`
-Expected: PASS (the field exists now, and the existing code still calls `loadConfig()` internally — the test passes because the URL isn't a GitHub URL)
+Expected: PASS
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/extract/pipeline.ts tests/extract/pipeline.test.ts
-git commit -m "feat: add github field to ExtractOptions interface"
-```
-
----
-
-### Task 2: Use options.github instead of loadConfig() in pipeline
-
-**Files:**
-- Modify: `src/extract/pipeline.ts`
-- Test: `tests/extract/pipeline.test.ts`
-
-- [ ] **Step 1: Write failing test that verifies GitHub interception uses injected config**
+- [ ] **Step 5: Write test that verifies injected config controls GitHub interception**
 
 Add to `tests/extract/pipeline.test.ts`:
 
 ```ts
-import { vi } from "vitest";
-
 it("skips GitHub interception when options.github.enabled is false", async () => {
-  // A GitHub blob URL that would normally trigger interception
   fetchStub.addResponse("github.com", {
     body: GOOD_HTML,
     headers: { "content-type": "text/html; charset=utf-8" },
@@ -122,7 +176,6 @@ it("skips GitHub interception when options.github.enabled is false", async () =>
 });
 
 it("uses default github config (enabled) when options.github is not provided", async () => {
-  // Non-GitHub URL — just verify no crash when github option is omitted
   fetchStub.addResponse("example.com/page", {
     body: GOOD_HTML,
     headers: { "content-type": "text/html; charset=utf-8" },
@@ -132,62 +185,20 @@ it("uses default github config (enabled) when options.github is not provided", a
 });
 ```
 
-- [ ] **Step 2: Run test to verify the first test fails**
-
-Run: `pnpm vitest run tests/extract/pipeline.test.ts`
-Expected: First test FAILS — pipeline still calls `loadConfig()` and config.github.enabled defaults to true
-
-- [ ] **Step 3: Replace loadConfig() with options.github in extractContent**
-
-In `src/extract/pipeline.ts`, update the function:
-
-```ts
-// Remove this import:
-// import { loadConfig } from "../config.ts";
-
-// Add default at top of file:
-const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
-  enabled: true,
-  maxRepoSizeMB: 350,
-  cloneTimeoutSeconds: 30,
-};
-
-export async function extractContent(
-  url: string,
-  signal?: AbortSignal,
-  options?: ExtractOptions,
-): Promise<ExtractedContent> {
-  validateUrl(url);
-
-  // GitHub interception: use injected config or default
-  const ghParsed = parseGitHubUrl(url);
-  if (ghParsed && ghParsed.type !== "unknown") {
-    const githubConfig = options?.github ?? DEFAULT_GITHUB_CONFIG;
-    if (githubConfig.enabled) {
-      const ghResult = await extractGitHub(ghParsed, signal, githubConfig);
-      if (ghResult) return ghResult;
-    }
-  }
-
-  // ... rest of function unchanged
-```
-
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 6: Run tests and verify**
 
 Run: `pnpm vitest run tests/extract/pipeline.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: Remove the loadConfig import from pipeline.ts**
-
-Verify that `loadConfig` is no longer imported in `src/extract/pipeline.ts`:
+- [ ] **Step 7: Verify loadConfig is fully removed from pipeline.ts**
 
 ```bash
 grep "loadConfig" src/extract/pipeline.ts
 ```
 
-Expected: no matches. If there's still an import, remove it.
+Expected: no matches.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add src/extract/pipeline.ts tests/extract/pipeline.test.ts
@@ -202,36 +213,42 @@ git commit -m "refactor: inject github config via ExtractOptions, remove loadCon
 - Modify: `src/extract/github.ts`
 - Test: `tests/extract/github.test.ts`
 
-- [ ] **Step 1: Check where DEFAULT_GITHUB_CONFIG is used in github.ts**
+The `DEFAULT_GITHUB_CONFIG` in `github.ts` (line 385-389) is used as a fallback in `fetchViaClone()` (line 601: `const cfg = config ?? DEFAULT_GITHUB_CONFIG`). Now that `config.ts` exports the canonical constant, we replace the local duplicate with an import.
 
-In `src/extract/github.ts`, the `DEFAULT_GITHUB_CONFIG` constant (line 385-389) is used as a fallback in `extractGitHub()` when no config is passed. Since `extractContent()` now always passes config, this fallback is only needed if `extractGitHub` is called directly (e.g., in tests).
+- [ ] **Step 1: Replace local DEFAULT_GITHUB_CONFIG with import from config.ts**
 
-Find usages:
-```bash
-grep -n "DEFAULT_GITHUB_CONFIG" src/extract/github.ts
+In `src/extract/github.ts`:
+
+1. Update the import:
+```ts
+// Change:
+import type { GitHubConfig } from "../config.ts";
+// To:
+import { DEFAULT_GITHUB_CONFIG, type GitHubConfig } from "../config.ts";
 ```
 
-- [ ] **Step 2: Remove the duplicate constant and use the config parameter**
+2. Remove the local constant (lines 385-389):
+```ts
+// Remove:
+const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
+  enabled: true,
+  maxRepoSizeMB: 350,
+  cloneTimeoutSeconds: 30,
+};
+```
 
-In `src/extract/github.ts`, remove the `DEFAULT_GITHUB_CONFIG` constant (lines 385-389). Update `extractGitHub` to require the config parameter (it already receives it from pipeline.ts):
+The `fetchViaClone` fallback (`const cfg = config ?? DEFAULT_GITHUB_CONFIG` at line 601) continues to work — it now references the imported constant.
 
-If `extractGitHub` has a fallback like `cfg = config ?? DEFAULT_GITHUB_CONFIG`, change it to just use the passed config directly since pipeline.ts always passes it.
-
-- [ ] **Step 3: Run github tests**
+- [ ] **Step 2: Run github tests**
 
 Run: `pnpm vitest run tests/extract/github.test.ts`
-Expected: PASS — if any tests relied on the default, update them to pass config explicitly:
+Expected: PASS — no test behavior changes, only the source of the default constant changed. Tests that call `fetchViaClone(parsed)` or `extractGitHub(parsed)` without config still work because the fallback still resolves via the import.
 
-```ts
-const ghConfig = { enabled: true, maxRepoSizeMB: 350, cloneTimeoutSeconds: 30 };
-const result = await extractGitHub(parsed, undefined, ghConfig);
-```
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add src/extract/github.ts tests/extract/github.test.ts
-git commit -m "refactor: remove duplicate DEFAULT_GITHUB_CONFIG from github.ts"
+git add src/extract/github.ts
+git commit -m "refactor: replace local DEFAULT_GITHUB_CONFIG with import from config.ts"
 ```
 
 ---
@@ -247,7 +264,7 @@ git commit -m "refactor: remove duplicate DEFAULT_GITHUB_CONFIG from github.ts"
 In `src/tools/web-fetch.ts`, update the function signature:
 
 ```ts
-import type { GitHubConfig } from "../config.ts";
+import type { GitHubConfig, GuidanceOverride } from "../config.ts";
 
 export function createWebFetchTool(
   store: ContentStore,
@@ -258,7 +275,7 @@ export function createWebFetchTool(
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
 ```
 
-Then in `executeSingleUrl`, pass it through to `extractContent`:
+Then in `executeSingleUrl` (line 102), pass it through to `extractContent`:
 
 ```ts
 const extracted = await extractContent(
@@ -268,7 +285,7 @@ const extracted = await extractContent(
 );
 ```
 
-And in the multi-URL path:
+And in the multi-URL path (line 208):
 
 ```ts
 const extracted = await extractContent(
@@ -280,7 +297,7 @@ const extracted = await extractContent(
 
 - [ ] **Step 2: Pass github config from index.ts**
 
-In `src/index.ts`, update the `createWebFetchTool` call:
+In `src/index.ts` (line 189), update the `createWebFetchTool` call:
 
 ```ts
 pi.registerTool(
