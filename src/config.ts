@@ -152,17 +152,22 @@ export function findProjectConfigPath(startDir: string): string | undefined {
  * scalars and arrays from higher-priority sources replace lower-priority values.
  */
 export function loadMergedConfig(cwd?: string): PiToolsConfig {
+  // deepMerge operates on Record<string, unknown>; these helpers bridge the typed config boundary.
+  const toRecord = (cfg: PiToolsConfig): Record<string, unknown> => cfg as unknown as Record<string, unknown>;
+  const toConfig = (rec: Record<string, unknown>): PiToolsConfig => rec as unknown as PiToolsConfig;
+
   // Start from built-in defaults
-  let merged = deepMerge(DEFAULT_CONFIG as unknown as Record<string, unknown>, {});
+  let merged = deepMerge(toRecord(DEFAULT_CONFIG), {});
 
   // Layer 2: global config
   const globalPath = getConfigPath();
   try {
     const raw = fs.readFileSync(globalPath, "utf-8");
-    const globalOverrides = JSON.parse(raw);
+    const globalOverrides = JSON.parse(raw) as Record<string, unknown>;
     merged = deepMerge(merged, globalOverrides);
   } catch {
     // No global config or parse error — defaults stand
+    process.env.DEBUG && console.warn(`[pi-tools] Could not load global config at ${globalPath}`);
   }
 
   // Layer 1: project config (highest priority)
@@ -171,13 +176,13 @@ export function loadMergedConfig(cwd?: string): PiToolsConfig {
     if (projectPath) {
       try {
         const raw = fs.readFileSync(projectPath, "utf-8");
-        const projectOverrides = JSON.parse(raw);
+        const projectOverrides = JSON.parse(raw) as Record<string, unknown>;
         merged = deepMerge(merged, projectOverrides);
       } catch {
-        // Malformed project config — skip
+        process.env.DEBUG && console.warn(`[pi-tools] Could not load project config at ${projectPath}`);
       }
     }
   }
 
-  return merged as unknown as PiToolsConfig;
+  return toConfig(merged);
 }
