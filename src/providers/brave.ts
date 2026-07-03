@@ -1,5 +1,5 @@
 // src/providers/brave.ts
-import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 import { applyDomainFilters } from "../utils/filters.ts";
 
 interface BraveSearchResponse {
@@ -66,3 +66,11 @@ function buildFreshness(filters?: SearchFilters): string | null {
   if (!filters.startDate && !filters.endDate) return null;
   return `${filters.startDate ?? ""}to${filters.endDate ?? ""}`;
 }
+
+export const providerMeta: ProviderMeta = {
+  name: "brave",
+  tier: 1,
+  monthlyQuota: 2000,
+  requiresKey: true,
+  create: (key) => ({ search: new BraveProvider(key!) }),
+};

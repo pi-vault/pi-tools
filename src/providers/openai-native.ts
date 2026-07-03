@@ -1,5 +1,5 @@
 // src/providers/openai-native.ts
-import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 const OPENAI_RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses";
 const DEFAULT_MODEL = "gpt-4.1-nano";
@@ -96,3 +96,11 @@ export class OpenAINativeProvider implements SearchProvider {
     return results;
   }
 }
+
+export const providerMeta: ProviderMeta = {
+  name: "openai-native",
+  tier: 1,
+  monthlyQuota: null,
+  requiresKey: true,
+  create: (key) => ({ search: new OpenAINativeProvider(key!) }),
+};

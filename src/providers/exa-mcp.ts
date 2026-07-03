@@ -1,5 +1,5 @@
 // src/providers/exa-mcp.ts
-import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 const EXA_MCP_ENDPOINT = "https://mcp.exa.ai/mcp";
 
@@ -75,3 +75,11 @@ export class ExaMcpProvider implements SearchProvider {
     }));
   }
 }
+
+export const providerMeta: ProviderMeta = {
+  name: "exa-mcp",
+  tier: 3,
+  monthlyQuota: null,
+  requiresKey: false,
+  create: () => ({ search: new ExaMcpProvider() }),
+};

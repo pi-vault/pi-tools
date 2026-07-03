@@ -2,6 +2,7 @@
 import type {
   FetchProvider,
   FetchResult,
+  ProviderMeta,
   SearchFilters,
   SearchProvider,
   SearchResult,
@@ -100,3 +101,14 @@ export class ParallelProvider implements SearchProvider, FetchProvider {
     };
   }
 }
+
+export const providerMeta: ProviderMeta = {
+  name: "parallel",
+  tier: 1,
+  monthlyQuota: null,
+  requiresKey: true,
+  create: (key) => {
+    const p = new ParallelProvider(key!);
+    return { search: p, fetch: p };
+  },
+};

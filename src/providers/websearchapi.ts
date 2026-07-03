@@ -1,5 +1,5 @@
 // src/providers/websearchapi.ts
-import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 const WEBSEARCHAPI_ENDPOINT = "https://api.websearchapi.ai/ai-search";
 
@@ -50,3 +50,11 @@ export class WebSearchApiProvider implements SearchProvider {
     }));
   }
 }
+
+export const providerMeta: ProviderMeta = {
+  name: "websearchapi",
+  tier: 1,
+  monthlyQuota: null,
+  requiresKey: true,
+  create: (key) => ({ search: new WebSearchApiProvider(key!) }),
+};
