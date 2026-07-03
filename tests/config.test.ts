@@ -70,6 +70,14 @@ describe("loadConfig", () => {
     const config = loadConfig();
     expect(config.defaultProvider).toBe("exa");
   });
+
+  it("does not fall back to legacy when custom path is provided", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      throw new Error("ENOENT");
+    });
+    const config = loadConfig("/custom/path.json");
+    expect(config.defaultProvider).toBe("auto");
+  });
 });
 
 describe("resolveApiKey", () => {

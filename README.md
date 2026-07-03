@@ -52,6 +52,8 @@ Create `~/.pi/agent/extensions/tools.json`:
 }
 ```
 
+The legacy filename `pi-tools.json` is still supported as a fallback.
+
 `apiKey` supports three forms:
 
 - environment variable name: `"EXA_API_KEY"`
