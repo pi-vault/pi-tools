@@ -1,6 +1,10 @@
-import { describe, expect, it } from "vitest";
+import * as fs from "node:fs";
+import { describe, expect, it, vi } from "vitest";
 import createExtension from "../src/index.ts";
+import { ProviderRegistry } from "../src/providers/registry.ts";
 import { createMockPi, makeCtx } from "./helpers.ts";
+
+vi.mock("node:fs");
 
 describe("tools extension", () => {
   it("exports a function", () => {
@@ -139,5 +143,67 @@ describe("tools extension", () => {
     const corruptResult = await webRead?.execute("r2", { contentId: "wc-corrupt" }, undefined, undefined, ctx);
     const corruptText = (corruptResult?.content[0] as { type: "text"; text: string }).text;
     expect(corruptText.toLowerCase()).toContain("not found");
+  });
+});
+
+describe("defaultProvider wiring", () => {
+  it("passes configured defaultProvider to selector when web_search call omits provider", async () => {
+    vi.restoreAllMocks();
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      if (typeof filePath === "string" && filePath.endsWith("tools.json")) {
+        return JSON.stringify({ defaultProvider: "exa" });
+      }
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const selectCandidatesSpy = vi
+      .spyOn(ProviderRegistry.prototype, "selectSearchCandidates")
+      .mockReturnValue([]);
+
+    const pi = createMockPi();
+    createExtension(pi as any); // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
+
+    const webSearch = pi.tools.find((t) => t.name === "web_search")!;
+    const ctx = makeCtx();
+    await webSearch.execute(
+      "call-default-provider",
+      { query: "test query" },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(selectCandidatesSpy).toHaveBeenCalledWith("exa");
+  });
+
+  it("prefers explicit provider over configured defaultProvider", async () => {
+    vi.restoreAllMocks();
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      if (typeof filePath === "string" && filePath.endsWith("tools.json")) {
+        return JSON.stringify({ defaultProvider: "exa" });
+      }
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const selectCandidatesSpy = vi
+      .spyOn(ProviderRegistry.prototype, "selectSearchCandidates")
+      .mockReturnValue([]);
+
+    const pi = createMockPi();
+    createExtension(pi as any); // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
+
+    const webSearch = pi.tools.find((t) => t.name === "web_search")!;
+    const ctx = makeCtx();
+    await webSearch.execute(
+      "call-explicit-provider",
+      { query: "test query", provider: "duckduckgo" },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(selectCandidatesSpy).toHaveBeenCalledWith("duckduckgo");
   });
 });
