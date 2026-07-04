@@ -35,6 +35,7 @@ Create `~/.pi/agent/extensions/tools.json`:
 ```json
 {
   "defaultProvider": "auto",
+  "selectionStrategy": "auto",
   "providers": {
     "duckduckgo": { "enabled": true },
     "jina": { "enabled": true },
@@ -44,13 +45,32 @@ Create `~/.pi/agent/extensions/tools.json`:
       "apiKey": "BRAVE_API_KEY"
     },
     "exa": { "enabled": true, "monthlyQuota": 1000, "apiKey": "EXA_API_KEY" },
+    "exa-mcp": { "enabled": true },
     "firecrawl": { "enabled": true, "apiKey": "FIRECRAWL_API_KEY" },
-    "tavily": { "enabled": false, "apiKey": "TAVILY_API_KEY" },
+    "openai-native": { "enabled": true, "apiKey": "OPENAI_API_KEY" },
+    "parallel": { "enabled": false, "apiKey": "PARALLEL_API_KEY" },
+    "perplexity": { "enabled": true, "apiKey": "PERPLEXITY_API_KEY" },
+    "searxng": { "enabled": false, "instanceUrl": "http://localhost:8080" },
     "serper": { "enabled": false, "apiKey": "SERPER_API_KEY" },
-    "perplexity": { "enabled": true, "apiKey": "PERPLEXITY_API_KEY" }
+    "tavily": { "enabled": false, "apiKey": "TAVILY_API_KEY" },
+    "websearchapi": { "enabled": false, "apiKey": "WEBSEARCHAPI_API_KEY" }
+  },
+  "github": {
+    "enabled": true,
+    "maxRepoSizeMB": 350,
+    "cloneTimeoutSeconds": 30
   }
 }
 ```
+
+## Configuration features
+
+- Preferred config file: `~/.pi/agent/extensions/tools.json`
+- Legacy fallback: `pi-tools.json`
+- Project override file: `.pi/tools.json`
+- `selectionStrategy`: `auto` or `best-performing`
+- `github`: controls GitHub URL extraction limits
+- `guidance`: optional per-tool prompt overrides
 
 The legacy filename `pi-tools.json` is still supported as a fallback.
 
@@ -62,16 +82,21 @@ The legacy filename `pi-tools.json` is still supported as a fallback.
 
 ## Provider overview
 
-| Provider   | Web search | Web fetch | Code search | Key required                |
-| ---------- | ---------- | --------- | ----------- | --------------------------- |
-| DuckDuckGo | Yes        | No        | No          | No, but requires `ddgs` CLI |
-| Jina       | Yes        | Yes       | No          | Optional                    |
-| Brave      | Yes        | No        | No          | Yes                         |
-| Exa        | Yes        | Yes       | Yes         | Yes                         |
-| Firecrawl  | Yes        | Yes       | No          | Yes                         |
-| Tavily     | Yes        | Yes       | No          | Yes                         |
-| Serper     | Yes        | No        | No          | Yes                         |
-| Perplexity | Yes        | No        | No          | Yes                         |
+| Provider      | Web search | Web fetch | Code search | Key required                             |
+| ------------- | ---------- | --------- | ----------- | ---------------------------------------- |
+| DuckDuckGo    | Yes        | No        | No          | No, but requires `ddgs` CLI              |
+| Jina          | Yes        | Yes       | No          | Optional                                 |
+| Brave         | Yes        | No        | No          | Yes                                      |
+| Exa           | Yes        | Yes       | Yes         | Yes                                      |
+| Exa MCP       | Yes        | No        | No          | No                                       |
+| Firecrawl     | Yes        | Yes       | No          | Yes                                      |
+| OpenAI native | Yes        | No        | No          | Yes                                      |
+| Parallel      | Yes        | Yes       | No          | Yes                                      |
+| Perplexity    | Yes        | No        | No          | Yes                                      |
+| SearXNG       | Yes        | No        | No          | No, optional API key for self-hosted use |
+| Serper        | Yes        | No        | No          | Yes                                      |
+| Tavily        | Yes        | Yes       | No          | Yes                                      |
+| WebSearchAPI  | Yes        | No        | No          | Yes                                      |
 
 DuckDuckGo support shells out to the `ddgs` CLI. Install it with one of:
 
@@ -99,13 +124,22 @@ Search the web for the latest Vitest mocking docs and summarize the best source.
 
 Use it when you already have a URL and want the page content, not a fresh search.
 
-Example prompt:
+Example prompts:
 
 ```text
 Fetch https://example.com/spec and summarize the main requirements.
+Fetch these URLs and compare them: https://a.dev/docs, https://b.dev/docs
+Fetch https://example.com/page in raw mode.
 ```
 
-`web_fetch` can extract content from normal HTML pages, PDFs, some Next.js RSC pages, and JS-heavy pages that work through the Jina Reader fallback.
+`web_fetch` supports:
+
+- `url` for one page
+- `urls` for up to 20 URLs in one call
+- `raw` to return the HTTP body without readability extraction
+- `fresh` to bypass the in-memory cache
+
+It can extract content from normal HTML pages, PDFs, GitHub repository/file URLs, some Next.js RSC pages, and JS-heavy pages that work through the Jina Reader fallback.
 
 ### `web_read`
 
@@ -135,6 +169,16 @@ Find TypeScript examples for AbortSignal.timeout using code_search.
 - Large `web_fetch` results are truncated in the initial response and stored for follow-up reads through `web_read`.
 - `web_read` retrieves stored content from the current session only.
 - `web_fetch` blocks unsupported binary content types.
+
+## Provider status
+
+Use the built-in command to inspect configured search providers:
+
+```text
+/tools --status
+```
+
+Run `/tools` with no arguments for interactive setup.
 
 ## Development and verification
 

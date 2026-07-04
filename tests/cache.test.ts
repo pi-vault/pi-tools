@@ -34,8 +34,8 @@ describe("ContentCache", () => {
     cache.set("https://example.com/page", content);
     const hit = cache.get("https://example.com/page");
     expect(hit).toBeDefined();
-    expect(hit!.text).toBe("Content for https://example.com/page");
-    expect(hit!.title).toBe("Title for https://example.com/page");
+    expect(hit?.text).toBe("Content for https://example.com/page");
+    expect(hit?.title).toBe("Title for https://example.com/page");
   });
 
   it("evicts oldest entry when maxSize is exceeded", () => {
@@ -76,7 +76,7 @@ describe("ContentCache", () => {
     // Adding a 4th should now evict "b" (the oldest remaining)
     cache.set("https://d.com", makeContent("https://d.com"));
     expect(cache.get("https://a.com")).toBeDefined();
-    expect(cache.get("https://a.com")!.text).toBe("Updated");
+    expect(cache.get("https://a.com")?.text).toBe("Updated");
     expect(cache.get("https://b.com")).toBeUndefined();
   });
 

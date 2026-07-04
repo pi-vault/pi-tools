@@ -66,12 +66,14 @@ export default function createExtension(pi: ExtensionAPI): void {
     }
   });
 
+  const resolveProviderName = (name?: string) => name ?? config.defaultProvider;
+
   const resolveCandidates = config.selectionStrategy === "best-performing"
     ? (name?: string) => {
-        const provider = registry.selectSearchByPerformance(name);
+        const provider = registry.selectSearchByPerformance(resolveProviderName(name));
         return provider ? [provider] : [];
       }
-    : (name?: string) => registry.selectSearchCandidates(name);
+    : (name?: string) => registry.selectSearchCandidates(resolveProviderName(name));
 
   pi.registerTool(
     createWebSearchTool(
