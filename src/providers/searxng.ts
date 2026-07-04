@@ -27,7 +27,7 @@ export class SearXNGProvider implements SearchProvider {
   constructor(options?: SearXNGOptions) {
     this.instanceUrl =
       options?.instanceUrl ??
-      process.env["SEARXNG_URL"] ??
+      process.env.SEARXNG_URL ??
       DEFAULT_INSTANCE_URL;
     this.apiKey = options?.apiKey;
   }
@@ -47,7 +47,7 @@ export class SearXNGProvider implements SearchProvider {
       Accept: "application/json",
     };
     if (this.apiKey) {
-      headers["Authorization"] = `Bearer ${this.apiKey}`;
+      headers.Authorization = `Bearer ${this.apiKey}`;
     }
 
     const response = await fetch(url, { headers, signal });

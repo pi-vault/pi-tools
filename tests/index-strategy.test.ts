@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import createExtension from "../src/index.ts";
 import { ProviderRegistry } from "../src/providers/registry.ts";
@@ -30,9 +31,11 @@ describe("selectionStrategy routing", () => {
     );
 
     const pi = createMockPi();
-    createExtension(pi as any); // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
+    createExtension(pi as unknown as ExtensionAPI);
 
-    const webSearch = pi.tools.find((t) => t.name === "web_search")!;
+    const webSearch = pi.tools.find((t) => t.name === "web_search");
+    expect(webSearch).toBeDefined();
+    if (!webSearch) throw new Error("web_search tool not registered");
     const ctx = makeCtx();
     await webSearch.execute("id", { query: "test" }, undefined, undefined, ctx);
 
@@ -51,9 +54,11 @@ describe("selectionStrategy routing", () => {
       .mockReturnValue([]);
 
     const pi = createMockPi();
-    createExtension(pi as any); // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
+    createExtension(pi as unknown as ExtensionAPI);
 
-    const webSearch = pi.tools.find((t) => t.name === "web_search")!;
+    const webSearch = pi.tools.find((t) => t.name === "web_search");
+    expect(webSearch).toBeDefined();
+    if (!webSearch) throw new Error("web_search tool not registered");
     const ctx = makeCtx();
     await webSearch.execute("id", { query: "test" }, undefined, undefined, ctx);
 
