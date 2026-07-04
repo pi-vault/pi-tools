@@ -1,6 +1,6 @@
 {
   "name": "@pi-vault/pi-tools",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Pi extension for quick access to code search, web fetch, and web search tools",
   "author": "Lanh Hoang <lanhhoang@users.noreply.github.com>",
