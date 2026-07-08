@@ -4,6 +4,7 @@ import {
   ipv4ToBytes,
   ipv6GroupsToBytes,
   ipToBytes,
+  parseCidr,
 } from "../../src/utils/ssrf.ts";
 
 describe("parseIPv6", () => {
@@ -96,5 +97,83 @@ describe("ipToBytes", () => {
 
   it("returns null for unknown version", () => {
     expect(ipToBytes("10.0.0.1", 0)).toBeNull();
+  });
+});
+
+describe("parseCidr", () => {
+  it("parses an IPv4 CIDR", () => {
+    const result = parseCidr("198.18.0.0/15");
+    expect(result).toEqual({
+      bytes: new Uint8Array([198, 18, 0, 0]),
+      prefix: 15,
+    });
+  });
+
+  it("parses an IPv4 /32 (single host)", () => {
+    const result = parseCidr("10.0.0.1/32");
+    expect(result).toEqual({
+      bytes: new Uint8Array([10, 0, 0, 1]),
+      prefix: 32,
+    });
+  });
+
+  it("treats bare IPv4 as /32", () => {
+    const result = parseCidr("192.168.1.1");
+    expect(result).toEqual({
+      bytes: new Uint8Array([192, 168, 1, 1]),
+      prefix: 32,
+    });
+  });
+
+  it("parses an IPv6 CIDR", () => {
+    const result = parseCidr("fd00::/8");
+    expect(result).not.toBeNull();
+    expect(result!.prefix).toBe(8);
+    expect(result!.bytes.length).toBe(16);
+    expect(result!.bytes[0]).toBe(0xfd);
+  });
+
+  it("parses an IPv6 /128 (single host)", () => {
+    const result = parseCidr("::1/128");
+    expect(result).not.toBeNull();
+    expect(result!.prefix).toBe(128);
+  });
+
+  it("treats bare IPv6 as /128", () => {
+    const result = parseCidr("fe80::1");
+    expect(result).not.toBeNull();
+    expect(result!.prefix).toBe(128);
+  });
+
+  it("rejects /0 prefix (would exempt everything)", () => {
+    expect(parseCidr("0.0.0.0/0")).toBeNull();
+    expect(parseCidr("::/0")).toBeNull();
+  });
+
+  it("rejects empty string", () => {
+    expect(parseCidr("")).toBeNull();
+  });
+
+  it("rejects non-IP addresses", () => {
+    expect(parseCidr("not-an-ip/8")).toBeNull();
+    expect(parseCidr("example.com/24")).toBeNull();
+  });
+
+  it("rejects missing prefix digits after slash", () => {
+    expect(parseCidr("10.0.0.0/")).toBeNull();
+    expect(parseCidr("10.0.0.0/ ")).toBeNull();
+  });
+
+  it("rejects prefix out of range", () => {
+    expect(parseCidr("10.0.0.0/33")).toBeNull();
+    expect(parseCidr("::1/129")).toBeNull();
+  });
+
+  it("trims whitespace", () => {
+    const result = parseCidr("  198.18.0.0/15  ");
+    expect(result).toEqual({
+      bytes: new Uint8Array([198, 18, 0, 0]),
+      prefix: 15,
+    });
   });
 });

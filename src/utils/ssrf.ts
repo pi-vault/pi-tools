@@ -178,3 +178,38 @@ export function ipToBytes(address: string, version: number): Uint8Array | null {
   }
   return null;
 }
+
+/**
+ * Parse a single CIDR (e.g., "198.18.0.0/15", "fd00::/8") or bare IP ("1.2.3.4").
+ * Bare IPs are treated as /32 (IPv4) or /128 (IPv6).
+ * Returns null if invalid. Rejects /0 prefixes (would exempt all addresses).
+ */
+export function parseCidr(raw: string): ParsedCidr | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  const slash = trimmed.lastIndexOf("/");
+  const addrPart = slash >= 0 ? trimmed.slice(0, slash) : trimmed;
+  const prefixPart = slash >= 0 ? trimmed.slice(slash + 1) : null;
+
+  // A slash must be followed by digits only. Reject "" and whitespace to
+  // prevent Number("") === 0 silently turning "198.18.0.0/" into /0.
+  if (prefixPart !== null && !/^\d+$/.test(prefixPart)) return null;
+
+  const version = net.isIP(addrPart);
+
+  if (version === 4) {
+    const bytes = ipv4ToBytes(addrPart);
+    if (!bytes) return null;
+    const prefix = prefixPart === null ? 32 : Number(prefixPart);
+    if (!Number.isInteger(prefix) || prefix < 1 || prefix > 32) return null;
+    return { bytes, prefix };
+  }
+  if (version === 6) {
+    const groups = parseIPv6(addrPart);
+    if (!groups) return null;
+    const prefix = prefixPart === null ? 128 : Number(prefixPart);
+    if (!Number.isInteger(prefix) || prefix < 1 || prefix > 128) return null;
+    return { bytes: ipv6GroupsToBytes(groups), prefix };
+  }
+  return null;
+}
