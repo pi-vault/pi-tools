@@ -1,9 +1,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { getConfigPath } from "../config.ts";
 import type { ProviderRegistry } from "../providers/registry.ts";
 import type { ProviderTier } from "../providers/types.ts";
-import { getConfigPath } from "../config.ts";
 
 function formatNumber(n: number): string {
   if (!Number.isFinite(n)) return "unlimited";
@@ -60,18 +60,9 @@ function buildStatusTable(
   const colWidths = {
     name: Math.max(headers.name.length, ...rows.map((r) => r.name.length)),
     tier: Math.max(headers.tier.length, ...rows.map((r) => r.tier.length)),
-    remaining: Math.max(
-      headers.remaining.length,
-      ...rows.map((r) => r.remaining.length),
-    ),
-    session: Math.max(
-      headers.session.length,
-      ...rows.map((r) => r.session.length),
-    ),
-    latency: Math.max(
-      headers.latency.length,
-      ...rows.map((r) => r.latency.length),
-    ),
+    remaining: Math.max(headers.remaining.length, ...rows.map((r) => r.remaining.length)),
+    session: Math.max(headers.session.length, ...rows.map((r) => r.session.length)),
+    latency: Math.max(headers.latency.length, ...rows.map((r) => r.latency.length)),
   };
 
   const sep = "  ";
@@ -117,10 +108,7 @@ async function handleInteractiveSetup(
 
     if (enabled) {
       enabledNames.push(name);
-      const apiKey = await ctx.ui.input(
-        `API key for ${name}`,
-        "Leave empty to skip",
-      );
+      const apiKey = await ctx.ui.input(`API key for ${name}`, "Leave empty to skip");
       if (apiKey && apiKey.trim().length > 0) {
         providers[name].apiKey = apiKey.trim();
       }
@@ -129,8 +117,7 @@ async function handleInteractiveSetup(
 
   // Step 2: Select default provider
   const defaultOptions = ["auto", ...enabledNames];
-  const defaultProvider =
-    (await ctx.ui.select("Default provider:", defaultOptions)) ?? "auto";
+  const defaultProvider = (await ctx.ui.select("Default provider:", defaultOptions)) ?? "auto";
 
   // Step 3: Build and write config
   const config = {

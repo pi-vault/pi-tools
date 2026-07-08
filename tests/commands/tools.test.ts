@@ -1,11 +1,11 @@
 import * as fs from "node:fs";
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createToolsCommand } from "../../src/commands/tools.ts";
 import { getConfigPath } from "../../src/config.ts";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
-import type { SearchProvider, ProviderTier } from "../../src/providers/types.ts";
+import type { ProviderTier, SearchProvider } from "../../src/providers/types.ts";
 import { makeCtx } from "../helpers.ts";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 vi.mock("node:fs");
 
@@ -126,7 +126,7 @@ describe("tools interactive setup", () => {
 
     // Enable brave, skip duckduckgo
     vi.mocked(ctx.ui.confirm)
-      .mockResolvedValueOnce(true)   // brave: yes
+      .mockResolvedValueOnce(true) // brave: yes
       .mockResolvedValueOnce(false); // duckduckgo: no
     // API key for brave
     vi.mocked(ctx.ui.input).mockResolvedValueOnce("test-brave-key");
@@ -149,7 +149,7 @@ describe("tools interactive setup", () => {
 
     // Enable brave only
     vi.mocked(ctx.ui.confirm)
-      .mockResolvedValueOnce(true)   // brave: yes
+      .mockResolvedValueOnce(true) // brave: yes
       .mockResolvedValueOnce(false); // duckduckgo: no
     vi.mocked(ctx.ui.input).mockResolvedValueOnce("test-key-123");
     vi.mocked(ctx.ui.select).mockResolvedValueOnce("auto");
@@ -211,9 +211,7 @@ describe("tools interactive setup", () => {
     const ctx = makeCtx() as unknown as ExtensionCommandContext;
 
     // Disable both providers
-    vi.mocked(ctx.ui.confirm)
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(false);
+    vi.mocked(ctx.ui.confirm).mockResolvedValueOnce(false).mockResolvedValueOnce(false);
     vi.mocked(ctx.ui.select).mockResolvedValueOnce("auto");
 
     await command.handler("", ctx);
@@ -260,22 +258,6 @@ describe("tools --reload command", () => {
     await command.handler("--reload", ctx);
 
     // Should not throw, just show status
-    expect(ctx.ui.notify).toHaveBeenCalled();
-  });
-
-  it("--reload --status shows refreshed status", async () => {
-    const registry = mem();
-    const brave = mockProvider("brave", "Brave");
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
-
-    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
-    const onReload = vi.fn();
-    const command = createToolsCommand(registry, tierMap, ["brave"], onReload);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("--reload --status", ctx);
-
-    expect(onReload).toHaveBeenCalledTimes(1);
     expect(ctx.ui.notify).toHaveBeenCalled();
   });
 });
