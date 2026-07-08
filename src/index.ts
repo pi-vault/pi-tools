@@ -9,6 +9,7 @@ import { createWebSearchTool } from "./tools/web-search.ts";
 import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
 import { createCodeSearchTool } from "./tools/code-search.ts";
+import { createWebDocsSearchTool } from "./tools/web-docs-search.ts";
 import { createToolsCommand } from "./commands/tools.ts";
 import { ContentCache } from "./cache.ts";
 
@@ -107,6 +108,17 @@ export default function createExtension(pi: ExtensionAPI): void {
       config.guidance?.code_search,
     ),
   );
+
+  // Register docs tools when Context7 provider is available
+  const docsProvider = registry.selectDocs();
+  if (docsProvider) {
+    pi.registerTool(
+      createWebDocsSearchTool(
+        () => docsProvider,
+        config.guidance?.web_docs_search,
+      ),
+    );
+  }
 
   // Build tier map for status display
   const tierMap = new Map<string, ProviderTier>();

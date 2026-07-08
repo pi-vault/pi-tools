@@ -4,12 +4,13 @@
 
 **Goal:** Implement the `web_docs_search` tool that searches Context7 for libraries by name and returns a ranked markdown table. Wire it into the extension registration flow.
 
-**Architecture:** A `createWebDocsSearchTool` factory function (same pattern as `createCodeSearchTool`) takes a `resolveProvider` closure and returns a `ToolDefinition`. The tool is conditionally registered in `src/index.ts` only when `registry.selectDocs()` returns a provider. Errors from the Context7 API propagate as throws (Pi marks the tool result as failed).
+**Architecture:** A `createWebDocsSearchTool` factory function (same pattern as `createCodeSearchTool`) takes a `resolveProvider` closure and returns a `ToolDefinition`. The tool is conditionally registered in `src/index.ts` only when `registry.selectDocs()` returns a provider. API errors propagate as throws (Pi marks the tool result as failed).
 
 **Tech Stack:** TypeScript, typebox (schema), @earendil-works/pi-coding-agent (ToolDefinition), @earendil-works/pi-tui (Text for rendering), Vitest.
 
 **Spec:** `docs/superpowers/specs/2026-07-07-context7-docs-lookup-design.md`
 **Main plan:** `docs/superpowers/plans/2026-07-07-context7-docs-lookup.md`
+**Reference:** `@mrclrchtr/supi-web` (`packages/supi-web/src/docs.ts`) — same Context7 tools, different codebase conventions
 
 **Depends on:** Phase 2 (registry has `selectDocs()`, context7 is in the barrel)
 **Produces:** Working `web_docs_search` tool, end-to-end registered when API key is present.
@@ -27,7 +28,7 @@ The closest existing tool to model from is `src/tools/code-search.ts`:
 - Returns `{ content: [{ type: "text", text }], details: {...} }`
 - Has `renderCall` and `renderResult` for TUI display
 - Handles "provider unavailable" with a helpful message (does not throw)
-- API errors ARE allowed to throw — Pi marks the tool result as failed
+- API errors in code_search are caught and returned as text; for docs tools, we let them throw instead (matching the supi-web pattern and Pi's recommended approach for real failures)
 
 The `DocsProvider` interface (from Phase 1):
 
@@ -47,6 +48,8 @@ interface DocsProvider {
   ): Promise<string>;
 }
 ```
+
+Parameter naming uses camelCase to match pi-tools conventions (`numResults`, `includeDomains`, etc.) and the Context7 API's own query parameter names.
 
 ---
 
@@ -107,14 +110,32 @@ describe("web_docs_search tool", () => {
     expect(tool.label).toBe("Docs Search");
   });
 
-  it("returns formatted markdown table on success", async () => {
+  it("rejects empty libraryName", async () => {
     const tool = createWebDocsSearchTool(() => mockDocsProvider(sampleResults));
+    const ctx = makeCtx();
+    await expect(
+      tool.execute("call-1", { libraryName: "  ", query: "hooks" }, undefined, undefined, ctx),
+    ).rejects.toThrow("libraryName");
+  });
+
+  it("rejects empty query", async () => {
+    const tool = createWebDocsSearchTool(() => mockDocsProvider(sampleResults));
+    const ctx = makeCtx();
+    await expect(
+      tool.execute("call-1", { libraryName: "react", query: "" }, undefined, undefined, ctx),
+    ).rejects.toThrow("query");
+  });
+
+  it("returns formatted markdown table on success", async () => {
+    const provider = mockDocsProvider(sampleResults);
+    const onUpdate = vi.fn();
+    const tool = createWebDocsSearchTool(() => provider);
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-1",
       { libraryName: "react", query: "state management" },
       undefined,
-      undefined,
+      onUpdate,
       ctx,
     );
     const text = (result.content[0] as { type: "text"; text: string }).text;
@@ -127,6 +148,23 @@ describe("web_docs_search tool", () => {
     expect(text).toContain("v18.2.0"); // versions
     expect(text).toContain("/preactjs/preact");
     expect(text).toContain("web_docs_fetch"); // footer guidance
+
+    // Verify onUpdate was called for progress
+    expect(onUpdate).toHaveBeenCalled();
+  });
+
+  it("trims libraryName before calling provider", async () => {
+    const provider = mockDocsProvider([]);
+    const tool = createWebDocsSearchTool(() => provider);
+    const ctx = makeCtx();
+    await tool.execute(
+      "call-1",
+      { libraryName: "  react  ", query: "hooks" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(provider.searchLibrary).toHaveBeenCalledWith("react", "hooks", undefined);
   });
 
   it("returns 'no libraries found' for empty results", async () => {
@@ -202,6 +240,33 @@ describe("web_docs_search tool", () => {
       controller.signal,
     );
   });
+
+  it("limits visible results to 10 and shows overflow note", async () => {
+    const manyResults = Array.from({ length: 12 }, (_, i) => ({
+      id: `/org/lib-${i}`,
+      name: `Library ${i}`,
+      description: `Description ${i}`,
+      totalSnippets: 100 + i,
+      trustScore: 8,
+      benchmarkScore: 90 + i,
+      versions: ["v1", "v2", "v3", "v4", "v5", "v6", "v7"],
+    }));
+    const tool = createWebDocsSearchTool(() => mockDocsProvider(manyResults));
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-6",
+      { libraryName: "lib", query: "docs" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+
+    expect(text).toContain("showing top 10");
+    expect(text).toContain("2 more omitted");
+    expect(text).toContain("v1, v2, v3, v4, v5, +2"); // MAX_VERSION_COUNT=5
+    expect(text).not.toContain("/org/lib-10");
+  });
 });
 ```
 
@@ -238,6 +303,7 @@ const WebDocsSearchParams = Type.Object({
 interface WebDocsSearchDetails {
   provider: string;
   resultCount: number;
+  libraryName: string;
 }
 
 function escapeMd(text: string): string {
@@ -323,7 +389,13 @@ export function createWebDocsSearchTool(
       "Prefer web_docs_search + web_docs_fetch over web_search for library/framework documentation.",
     ],
     parameters: WebDocsSearchParams,
-    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+      const libraryName = params.libraryName?.trim();
+      const query = params.query?.trim();
+
+      if (!libraryName) throw new Error("'libraryName' parameter is required");
+      if (!query) throw new Error("'query' parameter is required");
+
       const provider = resolveProvider();
       if (!provider) {
         return {
@@ -333,20 +405,25 @@ export function createWebDocsSearchTool(
               text: "web_docs_search requires a Context7 API key. Set the CONTEXT7_API_KEY environment variable or configure it in ~/.pi/agent/extensions/tools.json under providers.context7.apiKey.",
             },
           ],
-          details: { provider: "none", resultCount: 0 },
+          details: { provider: "none", resultCount: 0, libraryName },
         };
       }
 
+      onUpdate?.({
+        content: [{ type: "text" as const, text: `Searching Context7 for "${libraryName}"...` }],
+        details: { provider: provider.name, resultCount: 0, libraryName },
+      });
+
       const results = await provider.searchLibrary(
-        params.libraryName,
-        params.query,
+        libraryName,
+        query,
         signal ?? undefined,
       );
-      const text = formatResultsTable(params.libraryName, results);
+      const text = formatResultsTable(libraryName, results);
 
       return {
         content: [{ type: "text" as const, text }],
-        details: { provider: provider.name, resultCount: results.length },
+        details: { provider: provider.name, resultCount: results.length, libraryName },
       };
     },
     renderCall(args, theme: Theme, context) {
@@ -401,7 +478,7 @@ export function createWebDocsSearchTool(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm test -- tests/tools/web-docs-search.test.ts`
-Expected: PASS (all 5 tests green)
+Expected: PASS (all 9 tests green)
 
 - [ ] **Step 5: Run full check**
 
@@ -431,7 +508,7 @@ In `src/index.ts`, add the import at the top (after the existing `createCodeSear
 import { createWebDocsSearchTool } from "./tools/web-docs-search.ts";
 ```
 
-After the existing `pi.registerTool(createCodeSearchTool(...))` block (around line 105), add:
+After the existing `pi.registerTool(createCodeSearchTool(...))` block (around line 109), add:
 
 ```typescript
 // Register docs tools when Context7 provider is available
