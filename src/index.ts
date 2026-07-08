@@ -88,6 +88,9 @@ export default function createExtension(pi: ExtensionAPI): void {
       },
       config.guidance?.web_search,
       (providerName) => registry.recordOutcome(providerName, { success: false }),
+      (providerName, resultCount, requestedCount) => {
+        registry.recordResultQuality(providerName, resultCount, requestedCount);
+      },
     ),
   );
   const fetchCache = new ContentCache(200, 5 * 60_000);
