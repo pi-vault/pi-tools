@@ -222,3 +222,60 @@ describe("tools interactive setup", () => {
     expect(ctx.ui.input).not.toHaveBeenCalled();
   });
 });
+
+describe("tools --reload command", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("calls onReload callback when --reload is passed", async () => {
+    const registry = mem();
+    const brave = mockProvider("brave", "Brave");
+    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
+    const onReload = vi.fn();
+    const command = createToolsCommand(registry, tierMap, ["brave"], onReload);
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+
+    await command.handler("--reload", ctx);
+
+    expect(onReload).toHaveBeenCalledTimes(1);
+    // Should also show status after reload
+    expect(ctx.ui.notify).toHaveBeenCalled();
+    const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
+    expect(output).toContain("brave");
+  });
+
+  it("--reload without callback still shows status", async () => {
+    const registry = mem();
+    const brave = mockProvider("brave", "Brave");
+    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
+    // No onReload callback provided
+    const command = createToolsCommand(registry, tierMap, ["brave"]);
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+
+    await command.handler("--reload", ctx);
+
+    // Should not throw, just show status
+    expect(ctx.ui.notify).toHaveBeenCalled();
+  });
+
+  it("--reload --status shows refreshed status", async () => {
+    const registry = mem();
+    const brave = mockProvider("brave", "Brave");
+    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
+    const onReload = vi.fn();
+    const command = createToolsCommand(registry, tierMap, ["brave"], onReload);
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+
+    await command.handler("--reload --status", ctx);
+
+    expect(onReload).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.notify).toHaveBeenCalled();
+  });
+});

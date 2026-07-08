@@ -153,12 +153,20 @@ export function createToolsCommand(
   registry: ProviderRegistry,
   tierMap: ReadonlyMap<string, ProviderTier>,
   allProviderNames?: string[],
+  onReload?: () => void,
 ) {
   return {
     name: "tools",
     description:
-      "Manage search/fetch providers. Use --status to see provider status.",
+      "Manage search/fetch providers. Use --status to see provider status, --reload to refresh config.",
     async handler(args: string, ctx: ExtensionCommandContext) {
+      if (args.includes("--reload")) {
+        onReload?.();
+        const table = buildStatusTable(registry, tierMap);
+        ctx.ui.notify(table);
+        return;
+      }
+
       if (args.includes("--status")) {
         const table = buildStatusTable(registry, tierMap);
         ctx.ui.notify(table);
