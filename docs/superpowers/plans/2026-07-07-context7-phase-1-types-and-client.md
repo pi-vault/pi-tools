@@ -29,11 +29,27 @@ Each provider file (e.g., `src/providers/exa.ts`) exports a `providerMeta: Provi
 
 Tests use `stubFetch()` from `tests/helpers.ts` which mocks `globalThis.fetch` with route-based matching. Pattern: `beforeEach(() => fetchStub = stubFetch())` / `afterEach(() => fetchStub.restore())`.
 
-**Context7 API endpoints we use:**
+**Context7 API reference:** https://context7.com/docs/api-guide
 
-- `GET https://context7.com/api/v2/libs/search` — params: `libraryName`, `query`
-- `GET https://context7.com/api/v2/context` — params: `libraryId`, `query` (returns text/plain by default)
+**Endpoints we use:**
+
+- `GET /api/v2/libs/search` — params: `libraryName` (required), `query` (required), `fast` (optional, out of scope)
+- `GET /api/v2/context` — params: `libraryId` (required), `query` (required), `type` (`json`|`txt`, default `txt`, JSON mode out of scope), `fast` (optional, out of scope)
 - Auth: `Authorization: Bearer <key>`
+- All errors return `{ error: string, message: string }`
+
+**Status codes we handle (from API docs):**
+
+| Code | Meaning | Our handling |
+|---|---|---|
+| 200 | Success | Parse response normally |
+| 202 | Library not finalized | Return friendly "try again" message (getContext only) |
+| 301 | Library redirected | Follow `redirectUrl` from JSON body (getContext only; no HTTP Location header — application-level redirect) |
+| 401 | Invalid API key | Throw `Context7Error` |
+| 402 | Spending limit exceeded | Throw `Context7Error` |
+| 404 | Library not found | Throw `Context7Error` |
+| 429 | Rate limited | Throw `Context7Error` |
+| Other (400, 403, 422, 500, 503) | Various errors | Throw `Context7Error` via generic fallback |
 
 ---
 
@@ -215,7 +231,7 @@ describe("Context7DocsProvider", () => {
     it("throws Context7Error on 429", async () => {
       fetchStub.addResponse("context7.com/api/v2/libs/search", {
         status: 429,
-        body: { error: "rate_limited", message: "Too many requests." },
+        body: { error: "rate_limit_exceeded", message: "Rate limit exceeded. Please try again later." },
       });
 
       const provider = new Context7DocsProvider("ctx7sk_test");
@@ -273,12 +289,12 @@ describe("Context7DocsProvider", () => {
       expect(url).toContain("query=app+router+middleware");
     });
 
-    it("returns friendly message on 202 (library processing)", async () => {
+    it("returns friendly message on 202 (library not finalized)", async () => {
       fetchStub.addResponse("context7.com/api/v2/context", {
         status: 202,
         body: {
-          error: "library_processing",
-          message: "Library is not finalized yet.",
+          error: "library_not_finalized",
+          message: "Library /new/library not finalized yet.",
         },
       });
 
@@ -319,12 +335,13 @@ describe("Context7DocsProvider", () => {
     });
 
     it("follows 301 redirect", async () => {
-      // Use regex patterns to differentiate the two calls by libraryId param
+      // Context7 uses application-level redirects: JSON body with redirectUrl,
+      // no HTTP Location header. fetch(redirect:"follow") returns 301 as-is.
       fetchStub.addResponse(/libraryId=%2Fold%2Flibrary/, {
         status: 301,
         body: {
-          error: "library_moved",
-          message: "Moved",
+          error: "library_redirected",
+          message: "Library /old/library has been redirected to this library: /new/location.",
           redirectUrl: "/new/location",
         },
       });
@@ -458,7 +475,7 @@ export class Context7DocsProvider implements DocsProvider {
       return "Library is being processed. Try again in a few minutes.";
     }
 
-    // 301: library moved — follow redirect
+    // 301: library redirected — application-level redirect (JSON body, no Location header)
     if (response.status === 301) {
       try {
         const body = (await response.json()) as { redirectUrl?: string };

@@ -62,5 +62,31 @@ export interface ProviderMeta {
     search?: SearchProvider;
     fetch?: FetchProvider;
     codeSearch?: CodeSearchProvider;
+    docs?: DocsProvider;
   };
+}
+
+export interface DocsSearchResult {
+  id: string;
+  name: string;
+  description: string;
+  totalSnippets: number;
+  trustScore: number;
+  benchmarkScore: number;
+  versions?: string[];
+}
+
+export interface DocsProvider {
+  readonly name: string;
+  readonly label: string;
+  searchLibrary(
+    libraryName: string,
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<DocsSearchResult[]>;
+  getContext(
+    libraryId: string,
+    query: string,
+    signal?: AbortSignal,
+  ): Promise<string>;
 }
