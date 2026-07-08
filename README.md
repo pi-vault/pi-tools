@@ -5,7 +5,7 @@
 [![Node >= 24.15.0](https://img.shields.io/badge/node-%3E%3D24.15.0-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-Add four web-aware tools to Pi: `web_search`, `web_fetch`, `web_read`, and `code_search`.
+Add six web-aware tools to Pi: `web_search`, `web_fetch`, `web_read`, `code_search`, `web_docs_search`, and `web_docs_fetch`.
 
 ## What it adds
 
@@ -13,6 +13,8 @@ Add four web-aware tools to Pi: `web_search`, `web_fetch`, `web_read`, and `code
 - `web_fetch` — fetch a URL and extract readable content
 - `web_read` — reopen large fetched content stored in the current session
 - `code_search` — search code examples and technical documentation on the web
+- `web_docs_search` — search for library documentation via Context7
+- `web_docs_fetch` — retrieve focused documentation for a specific library via Context7
 
 ## Install
 
@@ -53,7 +55,8 @@ Create `~/.pi/agent/extensions/tools.json`:
     "searxng": { "enabled": false, "instanceUrl": "http://localhost:8080" },
     "serper": { "enabled": false, "apiKey": "SERPER_API_KEY" },
     "tavily": { "enabled": false, "apiKey": "TAVILY_API_KEY" },
-    "websearchapi": { "enabled": false, "apiKey": "WEBSEARCHAPI_API_KEY" }
+    "websearchapi": { "enabled": false, "apiKey": "WEBSEARCHAPI_API_KEY" },
+    "context7": { "enabled": true, "apiKey": "CONTEXT7_API_KEY" }
   },
   "github": {
     "enabled": true,
@@ -82,21 +85,22 @@ The legacy filename `pi-tools.json` is still supported as a fallback.
 
 ## Provider overview
 
-| Provider      | Web search | Web fetch | Code search | Key required                             |
-| ------------- | ---------- | --------- | ----------- | ---------------------------------------- |
-| DuckDuckGo    | Yes        | No        | No          | No, but requires `ddgs` CLI              |
-| Jina          | Yes        | Yes       | No          | Optional                                 |
-| Brave         | Yes        | No        | No          | Yes                                      |
-| Exa           | Yes        | Yes       | Yes         | Yes                                      |
-| Exa MCP       | Yes        | No        | No          | No                                       |
-| Firecrawl     | Yes        | Yes       | No          | Yes                                      |
-| OpenAI native | Yes        | No        | No          | Yes                                      |
-| Parallel      | Yes        | Yes       | No          | Yes                                      |
-| Perplexity    | Yes        | No        | No          | Yes                                      |
-| SearXNG       | Yes        | No        | No          | No, optional API key for self-hosted use |
-| Serper        | Yes        | No        | No          | Yes                                      |
-| Tavily        | Yes        | Yes       | No          | Yes                                      |
-| WebSearchAPI  | Yes        | No        | No          | Yes                                      |
+| Provider      | Web search | Web fetch | Code search | Docs lookup | Key required                             |
+| ------------- | ---------- | --------- | ----------- | ----------- | ---------------------------------------- |
+| DuckDuckGo    | Yes        | No        | No          | No          | No, but requires `ddgs` CLI              |
+| Jina          | Yes        | Yes       | No          | No          | Optional                                 |
+| Brave         | Yes        | No        | No          | No          | Yes                                      |
+| Exa           | Yes        | Yes       | Yes         | No          | Yes                                      |
+| Exa MCP       | Yes        | No        | No          | No          | No                                       |
+| Firecrawl     | Yes        | Yes       | No          | No          | Yes                                      |
+| OpenAI native | Yes        | No        | No          | No          | Yes                                      |
+| Parallel      | Yes        | Yes       | No          | No          | Yes                                      |
+| Perplexity    | Yes        | No        | No          | No          | Yes                                      |
+| SearXNG       | Yes        | No        | No          | No          | No, optional API key for self-hosted use |
+| Serper        | Yes        | No        | No          | No          | Yes                                      |
+| Tavily        | Yes        | Yes       | No          | No          | Yes                                      |
+| WebSearchAPI  | Yes        | No        | No          | No          | Yes                                      |
+| Context7      | No         | No        | No          | Yes         | Yes                                      |
 
 DuckDuckGo support shells out to the `ddgs` CLI. Install it with one of:
 
@@ -163,12 +167,44 @@ Find TypeScript examples for AbortSignal.timeout using code_search.
 
 `code_search` is only available when Exa is configured.
 
+### `web_docs_search`
+
+Use it to find library documentation when you need up-to-date API docs or framework guides.
+
+Example prompt:
+
+```text
+Search for React documentation about hooks.
+```
+
+Returns a table of matching libraries with IDs that can be passed to `web_docs_fetch`.
+
+### `web_docs_fetch`
+
+Use it after `web_docs_search` to retrieve focused documentation for a specific library.
+
+Example prompt:
+
+```text
+Fetch Context7 docs for /facebook/react about useState hooks.
+```
+
+`web_docs_fetch` supports:
+
+- `libraryId` — Context7 library ID from a previous search (e.g. `/facebook/react`)
+- `query` — specific question for relevance ranking
+
+Large documentation responses are truncated and stored for retrieval via `web_read`.
+
+Both `web_docs_search` and `web_docs_fetch` require a Context7 API key (`CONTEXT7_API_KEY`).
+
 ## Notes and limits
 
 - In `auto` mode, `web_search` chooses among enabled providers based on availability.
-- Large `web_fetch` results are truncated in the initial response and stored for follow-up reads through `web_read`.
+- Large `web_fetch` and `web_docs_fetch` results are truncated in the initial response and stored for follow-up reads through `web_read`.
 - `web_read` retrieves stored content from the current session only.
 - `web_fetch` blocks unsupported binary content types.
+- `web_docs_search` and `web_docs_fetch` are only available when Context7 is configured with an API key.
 
 ## Provider status
 
