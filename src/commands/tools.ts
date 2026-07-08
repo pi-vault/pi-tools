@@ -35,8 +35,8 @@ function buildStatusTable(
     const sessionStr = `${successes}/${failures}`;
 
     let latencyStr = "--";
-    if (metrics && metrics.successes > 0) {
-      const avgMs = Math.round(metrics.totalLatencyMs / metrics.successes);
+    if (metrics && metrics.latencySamples > 0) {
+      const avgMs = Math.round(metrics.avgLatency);
       latencyStr = `${avgMs}ms`;
     }
 
@@ -60,9 +60,18 @@ function buildStatusTable(
   const colWidths = {
     name: Math.max(headers.name.length, ...rows.map((r) => r.name.length)),
     tier: Math.max(headers.tier.length, ...rows.map((r) => r.tier.length)),
-    remaining: Math.max(headers.remaining.length, ...rows.map((r) => r.remaining.length)),
-    session: Math.max(headers.session.length, ...rows.map((r) => r.session.length)),
-    latency: Math.max(headers.latency.length, ...rows.map((r) => r.latency.length)),
+    remaining: Math.max(
+      headers.remaining.length,
+      ...rows.map((r) => r.remaining.length),
+    ),
+    session: Math.max(
+      headers.session.length,
+      ...rows.map((r) => r.session.length),
+    ),
+    latency: Math.max(
+      headers.latency.length,
+      ...rows.map((r) => r.latency.length),
+    ),
   };
 
   const sep = "  ";
@@ -108,7 +117,10 @@ async function handleInteractiveSetup(
 
     if (enabled) {
       enabledNames.push(name);
-      const apiKey = await ctx.ui.input(`API key for ${name}`, "Leave empty to skip");
+      const apiKey = await ctx.ui.input(
+        `API key for ${name}`,
+        "Leave empty to skip",
+      );
       if (apiKey && apiKey.trim().length > 0) {
         providers[name].apiKey = apiKey.trim();
       }
@@ -117,7 +129,8 @@ async function handleInteractiveSetup(
 
   // Step 2: Select default provider
   const defaultOptions = ["auto", ...enabledNames];
-  const defaultProvider = (await ctx.ui.select("Default provider:", defaultOptions)) ?? "auto";
+  const defaultProvider =
+    (await ctx.ui.select("Default provider:", defaultOptions)) ?? "auto";
 
   // Step 3: Build and write config
   const config = {
@@ -143,7 +156,8 @@ export function createToolsCommand(
 ) {
   return {
     name: "tools",
-    description: "Manage search/fetch providers. Use --status to see provider status.",
+    description:
+      "Manage search/fetch providers. Use --status to see provider status.",
     async handler(args: string, ctx: ExtensionCommandContext) {
       if (args.includes("--status")) {
         const table = buildStatusTable(registry, tierMap);
