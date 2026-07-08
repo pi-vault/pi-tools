@@ -1,7 +1,13 @@
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
-import type { SearchProvider, FetchProvider, CodeSearchProvider, DocsProvider, ProviderTier } from "./types.ts";
+import * as path from "node:path";
+import type {
+  CodeSearchProvider,
+  DocsProvider,
+  FetchProvider,
+  ProviderTier,
+  SearchProvider,
+} from "./types.ts";
 
 interface RegisteredSearch {
   provider: SearchProvider;
@@ -124,6 +130,15 @@ export class ProviderRegistry {
     this.codeSearchProviders.set(provider.name, { provider });
   }
 
+  unregisterAll(name: string): void {
+    this.searchProviders.delete(name);
+    this.fetchProviders.delete(name);
+    this.codeSearchProviders.delete(name);
+    if (this.docsProvider?.name === name) {
+      this.docsProvider = undefined;
+    }
+  }
+
   recordOutcome(providerName: string, result: { success: boolean; latencyMs?: number }): void {
     // Increment usage count (both success and failure count as a "use")
     this.counts[providerName] = (this.counts[providerName] ?? 0) + 1;
@@ -204,7 +219,7 @@ export class ProviderRegistry {
     const scored = eligible.map((r) => {
       const m = this.getActiveMetrics(r.provider.name);
 
-      if (!m || (m.successes + m.failures) === 0) {
+      if (!m || m.successes + m.failures === 0) {
         return { provider: r.provider, score: 0.5 };
       }
 
@@ -223,7 +238,8 @@ export class ProviderRegistry {
 
     for (const s of scored) {
       if ("successRate" in s && s.successRate !== undefined) {
-        const speedScore = s.avgLatency === Infinity ? 0 : Math.max(0, 1 - s.avgLatency / (maxLatency || 1));
+        const speedScore =
+          s.avgLatency === Infinity ? 0 : Math.max(0, 1 - s.avgLatency / (maxLatency || 1));
         s.score = s.successRate * 0.5 + speedScore * 0.3 + s.qualityScore! * 0.2;
       }
     }
