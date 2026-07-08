@@ -50,12 +50,12 @@ Append this describe block to `tests/providers/registry.test.ts`:
 ```typescript
 describe("docs provider registration", () => {
   it("selectDocs returns undefined when no docs provider registered", () => {
-    const registry = new ProviderRegistry(mockPersistence());
+    const registry = mem();
     expect(registry.selectDocs()).toBeUndefined();
   });
 
   it("registerDocs and selectDocs round-trip", () => {
-    const registry = new ProviderRegistry(mockPersistence());
+    const registry = mem();
     const docsProvider = {
       name: "context7",
       label: "Context7",
@@ -68,18 +68,10 @@ describe("docs provider registration", () => {
 });
 ```
 
-Note: `mockPersistence()` should already exist in this test file (it's used by the search provider tests). If it doesn't exist, add at the top of the file:
+Note: `mem()` already exists in this test file (line 16) and creates a `ProviderRegistry` with a no-op persistence adapter. `vi` is already imported. Add `DocsProvider` to the existing type import:
 
 ```typescript
-function mockPersistence(): PersistenceAdapter {
-  return { load: () => ({}), save: () => {} };
-}
-```
-
-Also ensure `vi` is imported and `DocsProvider` type is available (add to existing imports if needed):
-
-```typescript
-import type { DocsProvider } from "../../src/providers/types.ts";
+import type { DocsProvider, FetchProvider, SearchProvider } from "../../src/providers/types.ts";
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
