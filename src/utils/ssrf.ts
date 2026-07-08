@@ -148,3 +148,33 @@ export function parseIPv6(address: string): number[] | null {
     ? groups
     : null;
 }
+
+export function ipv4ToBytes(address: string): Uint8Array | null {
+  const parts = address.split(".");
+  if (parts.length !== 4) return null;
+  const bytes = new Uint8Array(4);
+  for (let i = 0; i < 4; i++) {
+    const octet = Number(parts[i]);
+    if (!Number.isInteger(octet) || octet < 0 || octet > 255) return null;
+    bytes[i] = octet;
+  }
+  return bytes;
+}
+
+export function ipv6GroupsToBytes(groups: number[]): Uint8Array {
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 8; i++) {
+    bytes[i * 2] = groups[i] >> 8;
+    bytes[i * 2 + 1] = groups[i] & 0xff;
+  }
+  return bytes;
+}
+
+export function ipToBytes(address: string, version: number): Uint8Array | null {
+  if (version === 4) return ipv4ToBytes(address);
+  if (version === 6) {
+    const groups = parseIPv6(address);
+    return groups ? ipv6GroupsToBytes(groups) : null;
+  }
+  return null;
+}

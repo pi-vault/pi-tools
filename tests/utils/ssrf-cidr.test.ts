@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { parseIPv6 } from "../../src/utils/ssrf.ts";
+import {
+  parseIPv6,
+  ipv4ToBytes,
+  ipv6GroupsToBytes,
+  ipToBytes,
+} from "../../src/utils/ssrf.ts";
 
 describe("parseIPv6", () => {
   it("parses a full address", () => {
@@ -40,5 +45,56 @@ describe("parseIPv6", () => {
   it("returns null for invalid hex groups", () => {
     expect(parseIPv6("gggg::1")).toBeNull();
     expect(parseIPv6("12345::1")).toBeNull(); // 5 hex digits
+  });
+});
+
+describe("ipv4ToBytes", () => {
+  it("converts a valid IPv4 address to 4 bytes", () => {
+    expect(ipv4ToBytes("192.168.1.1")).toEqual(
+      new Uint8Array([192, 168, 1, 1]),
+    );
+  });
+
+  it("converts 0.0.0.0", () => {
+    expect(ipv4ToBytes("0.0.0.0")).toEqual(new Uint8Array([0, 0, 0, 0]));
+  });
+
+  it("converts 255.255.255.255", () => {
+    expect(ipv4ToBytes("255.255.255.255")).toEqual(
+      new Uint8Array([255, 255, 255, 255]),
+    );
+  });
+
+  it("returns null for invalid addresses", () => {
+    expect(ipv4ToBytes("256.0.0.0")).toBeNull();
+    expect(ipv4ToBytes("1.2.3")).toBeNull();
+    expect(ipv4ToBytes("1.2.3.4.5")).toBeNull();
+    expect(ipv4ToBytes("abc.def.ghi.jkl")).toBeNull();
+  });
+});
+
+describe("ipv6GroupsToBytes", () => {
+  it("converts 8 groups to 16 bytes", () => {
+    const bytes = ipv6GroupsToBytes([0xfe80, 0, 0, 0, 0, 0, 0, 1]);
+    expect(bytes).toEqual(
+      new Uint8Array([0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]),
+    );
+  });
+});
+
+describe("ipToBytes", () => {
+  it("dispatches IPv4", () => {
+    expect(ipToBytes("10.0.0.1", 4)).toEqual(new Uint8Array([10, 0, 0, 1]));
+  });
+
+  it("dispatches IPv6", () => {
+    const bytes = ipToBytes("::1", 6);
+    expect(bytes).toEqual(
+      new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]),
+    );
+  });
+
+  it("returns null for unknown version", () => {
+    expect(ipToBytes("10.0.0.1", 0)).toBeNull();
   });
 });
