@@ -119,7 +119,13 @@ export class ConfigManager {
     const resolvedKey = resolveApiKey(providerConfig?.apiKey);
     if (meta.requiresKey && !resolvedKey) return;
 
-    const instances = meta.create(resolvedKey, providerConfig);
+    let instances: ReturnType<typeof meta.create>;
+    try {
+      instances = meta.create(resolvedKey, providerConfig);
+    } catch {
+      // Provider instantiation failed — skip, other providers unaffected
+      return;
+    }
     const quota = providerConfig?.monthlyQuota ?? meta.monthlyQuota;
 
     if (instances.search) {

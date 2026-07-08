@@ -412,4 +412,84 @@ describe("ConfigManager", () => {
 
     expect(registry.getSearchProviderNames()).toEqual([]);
   });
+
+  it("skips provider when meta.create throws during hot-add", () => {
+    const initialConfig = makeConfig({
+      providers: {
+        brave: { enabled: true },
+        exa: { enabled: false },
+      },
+    });
+    const updatedConfig = makeConfig({
+      providers: {
+        brave: { enabled: true },
+        exa: { enabled: true },
+      },
+    });
+
+    vi.mocked(loadMergedConfig)
+      .mockReturnValueOnce(initialConfig)
+      .mockReturnValueOnce(updatedConfig);
+    vi.mocked(resolveApiKey).mockReturnValue(undefined);
+
+    const throwingCreate = () => {
+      throw new Error("provider init failed");
+    };
+
+    const registry = mem();
+    const manager = new ConfigManager("/test/cwd", registry, [
+      makeMeta("brave"),
+      makeMeta("exa", { create: throwingCreate }),
+    ]);
+
+    expect(registry.getSearchProviderNames()).toEqual(["brave"]);
+
+    manager.expireTtlForTest();
+    manager.refresh();
+
+    // exa's create throws — brave still registered, no crash
+    expect(registry.getSearchProviderNames()).toEqual(["brave"]);
+  });
+
+  it("updates current config when defaultProvider changes", () => {
+    const initialConfig = makeConfig({ defaultProvider: "auto" });
+    const updatedConfig = makeConfig({ defaultProvider: "brave" });
+
+    vi.mocked(loadMergedConfig)
+      .mockReturnValueOnce(initialConfig)
+      .mockReturnValueOnce(updatedConfig);
+    vi.mocked(resolveApiKey).mockReturnValue(undefined);
+
+    const registry = mem();
+    const manager = new ConfigManager("/test/cwd", registry, [makeMeta("brave")]);
+
+    expect(manager.current.defaultProvider).toBe("auto");
+
+    manager.expireTtlForTest();
+    manager.refresh();
+
+    expect(manager.current.defaultProvider).toBe("brave");
+  });
+
+  it("updates current config when guidance changes", () => {
+    const initialConfig = makeConfig();
+    const updatedConfig = makeConfig({
+      guidance: { web_search: { promptSnippet: "Be concise" } },
+    });
+
+    vi.mocked(loadMergedConfig)
+      .mockReturnValueOnce(initialConfig)
+      .mockReturnValueOnce(updatedConfig);
+    vi.mocked(resolveApiKey).mockReturnValue(undefined);
+
+    const registry = mem();
+    const manager = new ConfigManager("/test/cwd", registry, [makeMeta("brave")]);
+
+    expect(manager.current.guidance).toBeUndefined();
+
+    manager.expireTtlForTest();
+    manager.refresh();
+
+    expect(manager.current.guidance?.web_search?.promptSnippet).toBe("Be concise");
+  });
 });
