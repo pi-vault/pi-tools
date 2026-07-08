@@ -238,3 +238,38 @@ export function parseAllowRanges(input: unknown): ParsedCidr[] {
   }
   return rules;
 }
+
+/** Compare the leading `prefix` bits of two equal-length byte arrays. */
+export function bytesMatchPrefix(
+  addr: Uint8Array,
+  network: Uint8Array,
+  prefix: number,
+): boolean {
+  const fullBytes = prefix >> 3;
+  const remBits = prefix & 7;
+  for (let i = 0; i < fullBytes; i++) {
+    if (addr[i] !== network[i]) return false;
+  }
+  if (remBits > 0 && fullBytes < addr.length) {
+    const mask = (0xff << (8 - remBits)) & 0xff;
+    if ((addr[fullBytes] & mask) !== (network[fullBytes] & mask)) return false;
+  }
+  return true;
+}
+
+/** True if `address` (already validated as `ipVersion`) falls within any allowed CIDR. */
+export function isInAllowedRange(
+  address: string,
+  ipVersion: number,
+  allowRanges: ParsedCidr[],
+): boolean {
+  if (allowRanges.length === 0) return false;
+  const addrBytes = ipToBytes(address, ipVersion);
+  if (!addrBytes) return false;
+  for (const rule of allowRanges) {
+    // Only compare same-family rules (4-byte IPv4 vs 16-byte IPv6).
+    if (rule.bytes.length !== addrBytes.length) continue;
+    if (bytesMatchPrefix(addrBytes, rule.bytes, rule.prefix)) return true;
+  }
+  return false;
+}

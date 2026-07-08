@@ -6,6 +6,8 @@ import {
   ipToBytes,
   parseCidr,
   parseAllowRanges,
+  bytesMatchPrefix,
+  isInAllowedRange,
 } from "../../src/utils/ssrf.ts";
 
 describe("parseIPv6", () => {
@@ -217,5 +219,90 @@ describe("parseAllowRanges", () => {
     expect(() => parseAllowRanges(["10.0.0.0/0"])).toThrow(
       "Invalid CIDR notation",
     );
+  });
+});
+
+describe("bytesMatchPrefix", () => {
+  it("matches when prefix bits are identical", () => {
+    const addr = new Uint8Array([198, 18, 1, 5]);
+    const network = new Uint8Array([198, 18, 0, 0]);
+    expect(bytesMatchPrefix(addr, network, 15)).toBe(true);
+  });
+
+  it("does not match when prefix bits differ", () => {
+    const addr = new Uint8Array([198, 20, 0, 1]); // 198.20.x.x is outside 198.18/15
+    const network = new Uint8Array([198, 18, 0, 0]);
+    expect(bytesMatchPrefix(addr, network, 15)).toBe(false);
+  });
+
+  it("handles exact /32 match", () => {
+    const addr = new Uint8Array([10, 0, 0, 1]);
+    const network = new Uint8Array([10, 0, 0, 1]);
+    expect(bytesMatchPrefix(addr, network, 32)).toBe(true);
+  });
+
+  it("rejects one-off on /32", () => {
+    const addr = new Uint8Array([10, 0, 0, 2]);
+    const network = new Uint8Array([10, 0, 0, 1]);
+    expect(bytesMatchPrefix(addr, network, 32)).toBe(false);
+  });
+
+  it("handles partial-byte prefix (/12)", () => {
+    // 172.16.0.0/12 means first 12 bits must match: 10101100.0001xxxx
+    const addr = new Uint8Array([172, 31, 255, 255]); // inside
+    const network = new Uint8Array([172, 16, 0, 0]);
+    expect(bytesMatchPrefix(addr, network, 12)).toBe(true);
+
+    const outside = new Uint8Array([172, 32, 0, 0]); // outside (bit 13 differs)
+    expect(bytesMatchPrefix(outside, network, 12)).toBe(false);
+  });
+});
+
+describe("isInAllowedRange", () => {
+  it("returns false for empty allowRanges", () => {
+    expect(isInAllowedRange("198.18.1.1", 4, [])).toBe(false);
+  });
+
+  it("returns true when IP is inside an allowed CIDR", () => {
+    const ranges = parseAllowRanges(["198.18.0.0/15"]);
+    expect(isInAllowedRange("198.18.1.1", 4, ranges)).toBe(true);
+    expect(isInAllowedRange("198.19.255.255", 4, ranges)).toBe(true);
+  });
+
+  it("returns false when IP is outside allowed CIDR", () => {
+    const ranges = parseAllowRanges(["198.18.0.0/15"]);
+    expect(isInAllowedRange("198.20.0.1", 4, ranges)).toBe(false);
+    expect(isInAllowedRange("10.0.0.1", 4, ranges)).toBe(false);
+  });
+
+  it("IPv4 rule does not match IPv6 address", () => {
+    const ranges = parseAllowRanges(["10.0.0.0/8"]);
+    expect(isInAllowedRange("::1", 6, ranges)).toBe(false);
+  });
+
+  it("IPv6 rule does not match IPv4 address", () => {
+    const ranges = parseAllowRanges(["fd00::/8"]);
+    expect(isInAllowedRange("10.0.0.1", 4, ranges)).toBe(false);
+  });
+
+  it("matches IPv6 CIDR", () => {
+    const ranges = parseAllowRanges(["fd00::/8"]);
+    expect(isInAllowedRange("fd12:3456::1", 6, ranges)).toBe(true);
+    expect(isInAllowedRange("fe80::1", 6, ranges)).toBe(false);
+  });
+
+  it("first IP in range matches", () => {
+    const ranges = parseAllowRanges(["198.18.0.0/15"]);
+    expect(isInAllowedRange("198.18.0.0", 4, ranges)).toBe(true);
+  });
+
+  it("last IP in range matches", () => {
+    const ranges = parseAllowRanges(["198.18.0.0/15"]);
+    expect(isInAllowedRange("198.19.255.255", 4, ranges)).toBe(true);
+  });
+
+  it("one IP past the range does not match", () => {
+    const ranges = parseAllowRanges(["198.18.0.0/15"]);
+    expect(isInAllowedRange("198.20.0.0", 4, ranges)).toBe(false);
   });
 });
