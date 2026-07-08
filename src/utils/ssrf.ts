@@ -1,3 +1,5 @@
+import net from "node:net";
+
 export class SSRFError extends Error {
   constructor(message: string) {
     super(message);
@@ -102,4 +104,47 @@ export function validateUrl(url: string, opts?: ValidateUrlOptions): URL {
   }
 
   return parsed;
+}
+
+// --- CIDR Parsing & Matching ---
+
+/** Parsed CIDR: a network address (4 or 16 bytes) + prefix length. */
+export interface ParsedCidr {
+  bytes: Uint8Array;
+  prefix: number;
+}
+
+/**
+ * Parse an IPv6 address string into 8 16-bit groups.
+ * Handles `::` expansion and IPv4-mapped suffixes (e.g., `::ffff:192.168.1.1`).
+ * Returns null if the address is malformed.
+ */
+export function parseIPv6(address: string): number[] | null {
+  // Handle IPv4-mapped suffix (e.g., ::ffff:1.2.3.4)
+  if (address.includes(".")) {
+    const lastColon = address.lastIndexOf(":");
+    const ipv4Part = address.slice(lastColon + 1);
+    if (net.isIP(ipv4Part) !== 4) return null;
+    const octets = ipv4Part.split(".").map((p) => Number(p));
+    address = `${address.slice(0, lastColon)}:${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`;
+  }
+
+  const pieces = address.split("::");
+  if (pieces.length > 2) return null;
+
+  const left = pieces[0] ? pieces[0].split(":") : [];
+  const right = pieces.length === 2 && pieces[1] ? pieces[1].split(":") : [];
+  const missing = 8 - left.length - right.length;
+  if (pieces.length === 1 && missing !== 0) return null;
+  if (pieces.length === 2 && missing < 0) return null;
+
+  const groups = [...left, ...Array(missing).fill("0"), ...right].map(
+    (part) => {
+      if (!/^[0-9a-f]{1,4}$/i.test(part)) return -1;
+      return parseInt(part, 16);
+    },
+  );
+  return groups.length === 8 && groups.every((g) => g >= 0 && g <= 0xffff)
+    ? groups
+    : null;
 }
