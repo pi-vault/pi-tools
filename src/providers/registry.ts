@@ -79,6 +79,14 @@ export class ProviderRegistry {
     return fresh;
   }
 
+  /** Returns metrics only if within the active window, undefined otherwise. */
+  private getActiveMetrics(providerName: string): ProviderMetrics | undefined {
+    const m = this.metrics.get(providerName);
+    if (!m) return undefined;
+    if (Date.now() - m.windowStart > METRICS_WINDOW_MS) return undefined;
+    return m;
+  }
+
   private loadUsage(): void {
     const data = this.persistence.load();
     for (const [name, record] of Object.entries(data)) {
@@ -134,6 +142,14 @@ export class ProviderRegistry {
     }
   }
 
+  recordResultQuality(providerName: string, resultCount: number, requestedCount: number): void {
+    if (requestedCount <= 0 || resultCount < 0) return;
+    const m = this.getOrCreateMetrics(providerName);
+    m.resultSamples += 1;
+    const ratio = Math.min(1.0, resultCount / requestedCount);
+    m.avgResultRatio += (ratio - m.avgResultRatio) / m.resultSamples;
+  }
+
   getRemaining(providerName: string): number {
     const reg = this.searchProviders.get(providerName);
     if (!reg) return 0;
@@ -164,21 +180,20 @@ export class ProviderRegistry {
   /**
    * Select the best search provider based on session performance metrics.
    *
-   * Score = (success_rate * 0.5) + (speed_score * 0.3) + (tier_score * 0.2)
+   * Score = (success_rate * 0.5) + (speed_score * 0.3) + (quality_score * 0.2)
    *
    * Where:
-   *   success_rate = successes / (successes + failures)
-   *   speed_score  = 1 - (avg_latency / max_avg_latency)
-   *   tier_score   = { 1: 1.0, 2: 0.6, 3: 0.3 }
+   *   success_rate  = successes / (successes + failures)  (within rolling window)
+   *   speed_score   = max(0, 1 - avg_latency / max_avg_latency)
+   *   quality_score = avg_result_ratio  (results received / results requested)
    *
-   * Providers with no metrics are scored using tier_score only (conservative default).
+   * Providers with no active metrics get a neutral score of 0.5.
    */
   selectSearchByPerformance(name?: string): SearchProvider | undefined {
     if (name && name !== "auto") {
       return this.searchProviders.get(name)?.provider;
     }
 
-    // Build list of eligible (non-exhausted) providers
     const eligible = [...this.searchProviders.values()].filter((r) => {
       if (r.monthlyQuota === null) return true;
       return (this.counts[r.provider.name] ?? 0) < r.monthlyQuota;
@@ -186,34 +201,30 @@ export class ProviderRegistry {
 
     if (eligible.length === 0) return undefined;
 
-    const TIER_SCORES: Record<number, number> = { 1: 1.0, 2: 0.6, 3: 0.3 };
-
     const scored = eligible.map((r) => {
-      const m = this.metrics.get(r.provider.name);
-      const tierScore = TIER_SCORES[r.tier] ?? 0.3;
+      const m = this.getActiveMetrics(r.provider.name);
 
       if (!m || (m.successes + m.failures) === 0) {
-        return { provider: r.provider, score: tierScore * 0.2 };
+        return { provider: r.provider, score: 0.5 };
       }
 
       const total = m.successes + m.failures;
       const successRate = m.successes / total;
       const avgLatency = m.latencySamples > 0 ? m.avgLatency : Infinity;
+      const qualityScore = m.resultSamples > 0 ? m.avgResultRatio : 0.5;
 
-      return { provider: r.provider, score: 0, avgLatency, successRate, tierScore };
+      return { provider: r.provider, score: 0, avgLatency, successRate, qualityScore };
     });
 
-    // Find max average latency among providers that have data
     const latencies = scored
       .filter((s) => "avgLatency" in s && s.avgLatency !== Infinity)
       .map((s) => (s as { avgLatency: number }).avgLatency);
     const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 1;
 
-    // Compute final scores
     for (const s of scored) {
       if ("successRate" in s && s.successRate !== undefined) {
-        const speedScore = s.avgLatency === Infinity ? 0 : 1 - (s.avgLatency / (maxLatency || 1));
-        s.score = (s.successRate * 0.5) + (speedScore * 0.3) + (s.tierScore! * 0.2);
+        const speedScore = s.avgLatency === Infinity ? 0 : Math.max(0, 1 - s.avgLatency / (maxLatency || 1));
+        s.score = s.successRate * 0.5 + speedScore * 0.3 + s.qualityScore! * 0.2;
       }
     }
 

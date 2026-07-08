@@ -227,7 +227,7 @@ describe("ProviderRegistry", () => {
       expect(selected?.name).toBe("brave");
     });
 
-    it("selectSearchByPerformance scores providers by success rate, speed, and tier", () => {
+    it("selectSearchByPerformance scores providers by success rate, speed, and quality", () => {
       const registry = mem();
       const brave = mockProvider("brave", "Brave");
       const exa = mockProvider("exa", "Exa");
@@ -245,15 +245,15 @@ describe("ProviderRegistry", () => {
       registry.recordOutcome("exa", { success: true, latencyMs: 600 });
       registry.recordOutcome("exa", { success: false });
 
-      // ddg: 100% success, very slow, low tier
+      // ddg: 100% success, very slow
       registry.recordOutcome("duckduckgo", { success: true, latencyMs: 1000 });
 
       const selected = registry.selectSearchByPerformance();
-      // brave should win: perfect success rate, fast, tier 1
+      // brave should win: perfect success rate, fast, default quality
       expect(selected?.name).toBe("brave");
     });
 
-    it("selectSearchByPerformance falls back to tier-based when no metrics exist", () => {
+    it("selectSearchByPerformance assigns neutral score when no metrics exist", () => {
       const registry = mem();
       const brave = mockProvider("brave", "Brave");
       const ddg = mockProvider("duckduckgo", "DuckDuckGo");
@@ -261,9 +261,9 @@ describe("ProviderRegistry", () => {
       registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
       registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
-      // No metrics recorded — should fall back to tier-based (like selectSearchCandidates)
+      // No metrics — all providers get score 0.5 (neutral)
       const selected = registry.selectSearchByPerformance();
-      expect(selected?.name).toBe("brave");
+      expect(selected).toBeDefined();
     });
 
     it("selectSearchByPerformance excludes exhausted providers", () => {
@@ -318,6 +318,27 @@ describe("ProviderRegistry", () => {
 
       const selected = registry.selectSearchByPerformance("duckduckgo");
       expect(selected?.name).toBe("duckduckgo");
+    });
+
+    it("selectSearchByPerformance prefers provider with better result quality", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      const exa = mockProvider("exa", "Exa");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
+
+      // Both: 100% success, same latency
+      registry.recordOutcome("brave", { success: true, latencyMs: 300 });
+      registry.recordOutcome("exa", { success: true, latencyMs: 300 });
+
+      // brave: poor result quality (1/5 = 0.2)
+      registry.recordResultQuality("brave", 1, 5);
+      // exa: excellent result quality (5/5 = 1.0)
+      registry.recordResultQuality("exa", 5, 5);
+
+      const selected = registry.selectSearchByPerformance();
+      expect(selected?.name).toBe("exa");
     });
   });
 
@@ -475,6 +496,85 @@ describe("ProviderRegistry", () => {
       expect(metrics!.successes).toBe(1);
       expect(metrics!.avgLatency).toBe(0);
       expect(metrics!.latencySamples).toBe(0);
+    });
+  });
+
+  describe("result quality tracking", () => {
+    it("recordResultQuality updates avgResultRatio", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 });
+      registry.recordResultQuality("brave", 5, 5);
+
+      const metrics = registry.getMetrics("brave");
+      expect(metrics!.avgResultRatio).toBe(1.0);
+      expect(metrics!.resultSamples).toBe(1);
+    });
+
+    it("avgResultRatio converges to running average", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 });
+      registry.recordResultQuality("brave", 5, 5);
+      registry.recordResultQuality("brave", 2, 5);
+
+      const metrics = registry.getMetrics("brave");
+      expect(metrics!.avgResultRatio).toBeCloseTo(0.7);
+      expect(metrics!.resultSamples).toBe(2);
+    });
+
+    it("recordResultQuality does nothing when requestedCount is 0", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 });
+      registry.recordResultQuality("brave", 0, 0);
+
+      const metrics = registry.getMetrics("brave");
+      expect(metrics!.resultSamples).toBe(0);
+      expect(metrics!.avgResultRatio).toBe(0);
+    });
+
+    it("does not increment successes or failures", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 });
+      registry.recordResultQuality("brave", 3, 5);
+
+      const metrics = registry.getMetrics("brave");
+      expect(metrics!.successes).toBe(1);
+      expect(metrics!.failures).toBe(0);
+    });
+
+    it("clamps ratio to 1.0 when resultCount exceeds requestedCount", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 });
+      registry.recordResultQuality("brave", 10, 5);
+
+      const metrics = registry.getMetrics("brave");
+      expect(metrics!.avgResultRatio).toBe(1.0);
+    });
+
+    it("ignores negative resultCount", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 });
+      registry.recordResultQuality("brave", -1, 5);
+
+      const metrics = registry.getMetrics("brave");
+      expect(metrics!.resultSamples).toBe(0);
     });
   });
 });
