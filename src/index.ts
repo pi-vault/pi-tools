@@ -10,6 +10,7 @@ import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
 import { createCodeSearchTool } from "./tools/code-search.ts";
 import { createWebDocsSearchTool } from "./tools/web-docs-search.ts";
+import { createWebDocsFetchTool } from "./tools/web-docs-fetch.ts";
 import { createToolsCommand } from "./commands/tools.ts";
 import { ContentCache } from "./cache.ts";
 
@@ -22,7 +23,7 @@ function isStoredContent(data: unknown): data is StoredContent {
     typeof d.text === "string" &&
     typeof d.chars === "number" &&
     typeof d.storedAt === "string" &&
-    (d.source === "web_fetch" || d.source === "web_search")
+    (d.source === "web_fetch" || d.source === "web_docs_fetch")
   );
 }
 
@@ -116,6 +117,13 @@ export default function createExtension(pi: ExtensionAPI): void {
       createWebDocsSearchTool(
         () => docsProvider,
         config.guidance?.web_docs_search,
+      ),
+    );
+    pi.registerTool(
+      createWebDocsFetchTool(
+        () => docsProvider,
+        store,
+        config.guidance?.web_docs_fetch,
       ),
     );
   }

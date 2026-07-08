@@ -10,7 +10,6 @@ export interface CodeSearchResult {
   title: string;
   url: string;
   snippet: string;
-  language?: string;
 }
 
 export interface FetchResult {

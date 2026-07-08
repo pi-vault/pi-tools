@@ -20,21 +20,15 @@ describe("provider types", () => {
     expect(result.snippet).toBe("A snippet");
   });
 
-  it("CodeSearchResult includes optional language", () => {
+  it("CodeSearchResult satisfies the interface shape", () => {
     const result: CodeSearchResult = {
       title: "Code Example",
       url: "https://github.com/example",
       snippet: "const x = 1;",
-      language: "typescript",
     };
-    expect(result.language).toBe("typescript");
-
-    const noLang: CodeSearchResult = {
-      title: "Code",
-      url: "https://example.com",
-      snippet: "code",
-    };
-    expect(noLang.language).toBeUndefined();
+    expect(result.title).toBe("Code Example");
+    expect(result.url).toBe("https://github.com/example");
+    expect(result.snippet).toBe("const x = 1;");
   });
 
   it("FetchResult includes optional fields", () => {
