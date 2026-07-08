@@ -22,7 +22,7 @@ function formatCodeResults(results: CodeSearchResult[]): string {
   return results
     .map(
       (r, i) =>
-        `${i + 1}. [${r.title}](${r.url})${r.language ? ` (${r.language})` : ""}\n   ${r.snippet}`,
+        `${i + 1}. [${r.title}](${r.url})\n   ${r.snippet}`,
     )
     .join("\n\n");
 }

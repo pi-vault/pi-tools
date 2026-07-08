@@ -11,13 +11,11 @@ function mockCodeSearch(): CodeSearchProvider {
         title: "React useState",
         url: "https://github.com/facebook/react",
         snippet: "const [state, setState] = useState(0);",
-        language: "typescript",
       },
       {
         title: "Express Router",
         url: "https://github.com/expressjs/express",
         snippet: "const router = express.Router();",
-        language: "javascript",
       },
     ]),
   };
@@ -36,7 +34,7 @@ describe("code_search tool", () => {
     const result = await tool.execute("call-1", { query: "react hooks" }, undefined, undefined, ctx);
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toContain("React useState");
-    expect(text).toContain("typescript");
+    expect(text).toContain("useState(0)");
   });
 
   it("returns error when no code search provider available", async () => {

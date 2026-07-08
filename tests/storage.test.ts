@@ -37,7 +37,7 @@ describe("ContentStore", () => {
     store.store({
       url: "https://example.com",
       text: "content",
-      source: "web_search",
+      source: "web_fetch",
     });
     expect(mockAppendEntry).toHaveBeenCalledWith(
       "pi-tools-content",

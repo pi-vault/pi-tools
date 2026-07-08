@@ -24,7 +24,7 @@ describe("ProviderRegistry", () => {
     registry.registerSearch(serper, { tier: 1, monthlyQuota: 2500 });
 
     // Serper has higher remaining (2500 vs 2000)
-    const selected = registry.selectSearch();
+    const selected = registry.selectSearchCandidates()[0];
     expect(selected).toBeDefined();
     expect(selected?.name).toBe("serper");
   });
@@ -35,7 +35,7 @@ describe("ProviderRegistry", () => {
 
     registry.registerSearch(perplexity, { tier: 2, monthlyQuota: null });
 
-    const selected = registry.selectSearch();
+    const selected = registry.selectSearchCandidates()[0];
     expect(selected).toBeDefined();
     expect(selected?.name).toBe("perplexity");
   });
@@ -46,7 +46,7 @@ describe("ProviderRegistry", () => {
 
     registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
-    const selected = registry.selectSearch();
+    const selected = registry.selectSearchCandidates()[0];
     expect(selected?.name).toBe("duckduckgo");
   });
 
@@ -58,13 +58,13 @@ describe("ProviderRegistry", () => {
     registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
     registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
-    const selected = registry.selectSearch("duckduckgo");
+    const selected = registry.selectSearchCandidates("duckduckgo")[0];
     expect(selected?.name).toBe("duckduckgo");
   });
 
   it("returns undefined when no providers registered", () => {
     const registry = mem();
-    expect(registry.selectSearch()).toBeUndefined();
+    expect(registry.selectSearchCandidates()[0]).toBeUndefined();
   });
 
   it("records usage via tracker and reflects in remaining quota", () => {
@@ -85,7 +85,7 @@ describe("ProviderRegistry", () => {
     registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
     registry.recordOutcome("brave", { success: true }); // Now at 100%
-    const selected = registry.selectSearch();
+    const selected = registry.selectSearchCandidates()[0];
     expect(selected?.name).toBe("duckduckgo");
   });
 
@@ -176,12 +176,12 @@ describe("ProviderRegistry", () => {
 
     // Only 2 remaining for brave
     expect(registry.getRemaining("brave")).toBe(2);
-    const selected = registry.selectSearch();
+    const selected = registry.selectSearchCandidates()[0];
     expect(selected?.name).toBe("brave"); // still has quota
 
     registry.recordOutcome("brave", { success: true }); // 1999 used, 1 remaining
     registry.recordOutcome("brave", { success: true }); // 2000 used, 0 remaining
-    const afterExhaust = registry.selectSearch();
+    const afterExhaust = registry.selectSearchCandidates()[0];
     expect(afterExhaust?.name).toBe("duckduckgo");
   });
 
@@ -211,7 +211,7 @@ describe("ProviderRegistry", () => {
   });
 
   describe("best-performing selection strategy", () => {
-    it("selectSearch uses tier-based selection when strategy is auto", () => {
+    it("selectSearchCandidates uses tier-based selection when strategy is auto", () => {
       const registry = mem();
       const brave = mockProvider("brave", "Brave");
       const ddg = mockProvider("duckduckgo", "DuckDuckGo");
@@ -223,7 +223,7 @@ describe("ProviderRegistry", () => {
       registry.recordOutcome("duckduckgo", { success: true, latencyMs: 100 });
       registry.recordOutcome("brave", { success: false });
 
-      const selected = registry.selectSearch();
+      const selected = registry.selectSearchCandidates()[0];
       expect(selected?.name).toBe("brave");
     });
 
@@ -261,7 +261,7 @@ describe("ProviderRegistry", () => {
       registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
       registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
 
-      // No metrics recorded — should fall back to tier-based (like selectSearch)
+      // No metrics recorded — should fall back to tier-based (like selectSearchCandidates)
       const selected = registry.selectSearchByPerformance();
       expect(selected?.name).toBe("brave");
     });

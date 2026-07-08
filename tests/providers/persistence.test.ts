@@ -27,32 +27,7 @@ describe("createFilePersistence", () => {
       expect(data).toEqual({ brave: { count: 42, month: "2026-07" } });
     });
 
-    it("migrates old format { resetAt, counts } to new format", () => {
-      vi.mocked(fs.readFileSync).mockReturnValue(
-        JSON.stringify({ resetAt: "2026-07", counts: { brave: 150, exa: 50 } }),
-      );
-      const adapter = createFilePersistence("/tmp/test-usage.json");
-      const data = adapter.load();
-      expect(data).toEqual({
-        brave: { count: 150, month: "2026-07" },
-        exa: { count: 50, month: "2026-07" },
-      });
-    });
-
-    it("falls back to legacy pi-tools-usage.json when primary is missing", () => {
-      vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
-        const p = typeof filePath === "string" ? filePath : filePath.toString();
-        if (p.endsWith("pi-tools-usage.json")) {
-          return JSON.stringify({ resetAt: "2026-07", counts: { exa: 75 } });
-        }
-        throw new Error("ENOENT");
-      });
-      const adapter = createFilePersistence();
-      const data = adapter.load();
-      expect(data).toEqual({ exa: { count: 75, month: "2026-07" } });
-    });
-
-    it("returns empty object when both files are missing", () => {
+    it("returns empty object when file is missing", () => {
       vi.mocked(fs.readFileSync).mockImplementation(() => {
         throw new Error("ENOENT");
       });

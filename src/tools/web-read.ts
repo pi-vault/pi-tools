@@ -5,7 +5,7 @@ import type { ContentStore } from "../storage.ts";
 import type { GuidanceOverride } from "../config.ts";
 
 const WebReadParams = Type.Object({
-  contentId: Type.String({ description: "Content ID from a previous web_fetch, web_docs_fetch, or web_search result" }),
+  contentId: Type.String({ description: "Content ID from a previous web_fetch or web_docs_fetch result" }),
 });
 
 export function createWebReadTool(

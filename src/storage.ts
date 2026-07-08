@@ -5,7 +5,7 @@ export interface StoredContent {
   text: string;
   chars: number;
   storedAt: string;
-  source: "web_fetch" | "web_search" | "web_docs_fetch";
+  source: "web_fetch" | "web_docs_fetch";
 }
 
 export type AppendEntryFn = (customType: string, data: unknown) => void;
@@ -22,7 +22,7 @@ export class ContentStore {
     url: string;
     title?: string;
     text: string;
-    source: "web_fetch" | "web_search" | "web_docs_fetch";
+    source: "web_fetch" | "web_docs_fetch";
   }): string {
     const id = `wc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const stored: StoredContent = {

@@ -114,10 +114,6 @@ export class ProviderRegistry {
     return Math.max(0, reg.monthlyQuota - (this.counts[providerName] ?? 0));
   }
 
-  selectSearch(name?: string): SearchProvider | undefined {
-    return this.selectSearchCandidates(name)[0];
-  }
-
   selectSearchCandidates(name?: string): SearchProvider[] {
     if (name && name !== "auto") {
       const provider = this.searchProviders.get(name)?.provider;
@@ -228,26 +224,12 @@ export class ProviderRegistry {
 
 export function createFilePersistence(filePath?: string): PersistenceAdapter {
   const usagePath = filePath ?? path.join(os.homedir(), ".pi", "agent", "tools-usage.json");
-  const legacyPath = path.join(os.homedir(), ".pi", "agent", "pi-tools-usage.json");
 
   return {
     load(): Record<string, UsageRecord> {
-      // Try primary path first, then legacy fallback (matches old UsageTracker behavior)
-      for (const candidate of [usagePath, legacyPath]) {
-        try {
-          const raw = fs.readFileSync(candidate, "utf-8");
-          const data = JSON.parse(raw);
-          // Migrate from old format { resetAt, counts } to new { [name]: { count, month } }
-          if (data.resetAt && data.counts) {
-            const result: Record<string, UsageRecord> = {};
-            for (const [name, count] of Object.entries(data.counts)) {
-              result[name] = { count: count as number, month: data.resetAt };
-            }
-            return result;
-          }
-          return data as Record<string, UsageRecord>;
-        } catch {}
-      }
+      try {
+        return JSON.parse(fs.readFileSync(usagePath, "utf-8")) as Record<string, UsageRecord>;
+      } catch {}
       return {};
     },
     save(data: Record<string, UsageRecord>): void {
