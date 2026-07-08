@@ -5,6 +5,7 @@ import {
   ipv6GroupsToBytes,
   ipToBytes,
   parseCidr,
+  parseAllowRanges,
 } from "../../src/utils/ssrf.ts";
 
 describe("parseIPv6", () => {
@@ -175,5 +176,46 @@ describe("parseCidr", () => {
       bytes: new Uint8Array([198, 18, 0, 0]),
       prefix: 15,
     });
+  });
+});
+
+describe("parseAllowRanges", () => {
+  it("returns empty array for undefined", () => {
+    expect(parseAllowRanges(undefined)).toEqual([]);
+  });
+
+  it("returns empty array for null", () => {
+    expect(parseAllowRanges(null)).toEqual([]);
+  });
+
+  it("returns empty array for empty array", () => {
+    expect(parseAllowRanges([])).toEqual([]);
+  });
+
+  it("parses valid CIDR entries", () => {
+    const result = parseAllowRanges(["198.18.0.0/15", "fd00::/8"]);
+    expect(result).toHaveLength(2);
+    expect(result[0].prefix).toBe(15);
+    expect(result[1].prefix).toBe(8);
+  });
+
+  it("throws for non-array input", () => {
+    expect(() => parseAllowRanges("198.18.0.0/15")).toThrow("must be an array");
+    expect(() => parseAllowRanges(42)).toThrow("must be an array");
+    expect(() => parseAllowRanges({})).toThrow("must be an array");
+  });
+
+  it("throws for non-string entry", () => {
+    expect(() => parseAllowRanges([123])).toThrow("must be strings");
+    expect(() => parseAllowRanges([null])).toThrow("must be strings");
+  });
+
+  it("throws for malformed CIDR entry", () => {
+    expect(() => parseAllowRanges(["not-a-cidr"])).toThrow(
+      "Invalid CIDR notation",
+    );
+    expect(() => parseAllowRanges(["10.0.0.0/0"])).toThrow(
+      "Invalid CIDR notation",
+    );
   });
 });

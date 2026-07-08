@@ -213,3 +213,28 @@ export function parseCidr(raw: string): ParsedCidr | null {
   }
   return null;
 }
+
+/**
+ * Parse and validate an `allowRanges` config value.
+ * Returns validated CIDR rules. Throws on malformed entries (fail-loud).
+ */
+export function parseAllowRanges(input: unknown): ParsedCidr[] {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input)) {
+    throw new Error("ssrf.allowRanges must be an array of CIDR strings");
+  }
+  const rules: ParsedCidr[] = [];
+  for (const entry of input) {
+    if (typeof entry !== "string") {
+      throw new Error(
+        `ssrf.allowRanges entries must be strings, got ${typeof entry}`,
+      );
+    }
+    const rule = parseCidr(entry.trim());
+    if (!rule) {
+      throw new Error(`Invalid CIDR notation in ssrf.allowRanges: "${entry}"`);
+    }
+    rules.push(rule);
+  }
+  return rules;
+}
