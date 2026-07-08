@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   Context7DocsProvider,
   Context7Error,
+  providerMeta,
 } from "../../src/providers/context7.ts";
 import { stubFetch } from "../helpers.ts";
 
@@ -212,6 +213,50 @@ describe("Context7DocsProvider", () => {
       const provider = new Context7DocsProvider("ctx7sk_test");
       const result = await provider.getContext("/old/library", "anything");
       expect(result).toContain("redirected docs");
+    });
+
+    it("throws on redirect loop instead of infinite recursion", async () => {
+      // Both /lib-a and /lib-b redirect to each other
+      fetchStub.addResponse(/libraryId=%2Flib-a/, {
+        status: 301,
+        body: { error: "library_redirected", redirectUrl: "/lib-b" },
+      });
+      fetchStub.addResponse(/libraryId=%2Flib-b/, {
+        status: 301,
+        body: { error: "library_redirected", redirectUrl: "/lib-a" },
+      });
+
+      const provider = new Context7DocsProvider("ctx7sk_test");
+      await expect(
+        provider.getContext("/lib-a", "anything"),
+      ).rejects.toThrow(Context7Error);
+      await expect(
+        provider.getContext("/lib-a", "anything"),
+      ).rejects.toThrow(/too many redirects/i);
+    });
+
+    it("throws Context7Error on 500 (generic fallback)", async () => {
+      fetchStub.addResponse("context7.com/api/v2/context", {
+        status: 500,
+        body: { error: "internal_error", message: "An error occurred while processing your request" },
+      });
+
+      const provider = new Context7DocsProvider("ctx7sk_test");
+      await expect(
+        provider.getContext("/facebook/react", "hooks"),
+      ).rejects.toThrow(Context7Error);
+    });
+  });
+
+  describe("providerMeta", () => {
+    it("creates docs provider with key", () => {
+      const { docs } = providerMeta.create("ctx7sk_test");
+      expect(docs).toBeInstanceOf(Context7DocsProvider);
+    });
+
+    it("returns undefined docs without key", () => {
+      const { docs } = providerMeta.create();
+      expect(docs).toBeUndefined();
     });
   });
 });

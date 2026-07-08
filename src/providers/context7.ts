@@ -2,6 +2,7 @@ import type { ProviderConfigEntry } from "../config.ts";
 import type { DocsProvider, DocsSearchResult, ProviderMeta } from "./types.ts";
 
 const BASE_URL = "https://context7.com/api";
+const MAX_REDIRECTS = 3;
 
 export class Context7Error extends Error {
   constructor(message: string) {
@@ -50,7 +51,7 @@ async function parseErrorMessage(response: Response): Promise<string> {
 export class Context7DocsProvider implements DocsProvider {
   readonly name = "context7";
   readonly label = "Context7";
-  private apiKey: string;
+  private readonly apiKey: string;
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
@@ -91,6 +92,15 @@ export class Context7DocsProvider implements DocsProvider {
     query: string,
     signal?: AbortSignal,
   ): Promise<string> {
+    return this.fetchContext(libraryId, query, signal, 0);
+  }
+
+  private async fetchContext(
+    libraryId: string,
+    query: string,
+    signal: AbortSignal | undefined,
+    depth: number,
+  ): Promise<string> {
     const url = new URL(`${BASE_URL}/v2/context`);
     url.searchParams.set("libraryId", libraryId);
     url.searchParams.set("query", query);
@@ -107,10 +117,13 @@ export class Context7DocsProvider implements DocsProvider {
 
     // 301: library redirected — application-level redirect (JSON body, no Location header)
     if (response.status === 301) {
+      if (depth >= MAX_REDIRECTS) {
+        throw new Context7Error("Too many redirects.");
+      }
       try {
         const body = (await response.json()) as { redirectUrl?: string };
         if (body.redirectUrl) {
-          return this.getContext(body.redirectUrl, query, signal);
+          return this.fetchContext(body.redirectUrl, query, signal, depth + 1);
         }
       } catch {
         // Fall through to error
