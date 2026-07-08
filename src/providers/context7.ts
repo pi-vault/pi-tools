@@ -91,15 +91,7 @@ export class Context7DocsProvider implements DocsProvider {
     libraryId: string,
     query: string,
     signal?: AbortSignal,
-  ): Promise<string> {
-    return this.fetchContext(libraryId, query, signal, 0);
-  }
-
-  private async fetchContext(
-    libraryId: string,
-    query: string,
-    signal: AbortSignal | undefined,
-    depth: number,
+    depth = 0,
   ): Promise<string> {
     const url = new URL(`${BASE_URL}/v2/context`);
     url.searchParams.set("libraryId", libraryId);
@@ -123,7 +115,7 @@ export class Context7DocsProvider implements DocsProvider {
       try {
         const body = (await response.json()) as { redirectUrl?: string };
         if (body.redirectUrl) {
-          return this.fetchContext(body.redirectUrl, query, signal, depth + 1);
+          return this.getContext(body.redirectUrl, query, signal, depth + 1);
         }
       } catch {
         // Fall through to error
