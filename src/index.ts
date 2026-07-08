@@ -22,7 +22,9 @@ function isStoredContent(data: unknown): data is StoredContent {
     typeof d.text === "string" &&
     typeof d.chars === "number" &&
     typeof d.storedAt === "string" &&
-    (d.source === "web_fetch" || d.source === "web_search")
+    (d.source === "web_fetch" ||
+      d.source === "web_search" ||
+      d.source === "web_docs_fetch")
   );
 }
 
