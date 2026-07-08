@@ -37,7 +37,6 @@ describe("diffConfig", () => {
     expect(result.added).toEqual([]);
     expect(result.removed).toEqual([]);
     expect(result.keyChanged).toEqual([]);
-    expect(result.configChanged).toBe(false);
   });
 
   it("detects added provider (disabled → enabled)", () => {
@@ -96,29 +95,6 @@ describe("diffConfig", () => {
     const resolveKey = () => "same-value";
     const result = diffConfig(prev, next, resolveKey);
     expect(result.keyChanged).toEqual([]);
-  });
-
-  it("detects configChanged when selectionStrategy differs", () => {
-    const prev = makeConfig();
-    const next = makeConfig({ selectionStrategy: "best-performing" });
-    const result = diffConfig(prev, next, (key) => key);
-    expect(result.configChanged).toBe(true);
-  });
-
-  it("detects configChanged when defaultProvider differs", () => {
-    const prev = makeConfig();
-    const next = makeConfig({ defaultProvider: "brave" });
-    const result = diffConfig(prev, next, (key) => key);
-    expect(result.configChanged).toBe(true);
-  });
-
-  it("detects configChanged when guidance differs", () => {
-    const prev = makeConfig();
-    const next = makeConfig({
-      guidance: { web_search: { promptSnippet: "Be concise" } },
-    });
-    const result = diffConfig(prev, next, (key) => key);
-    expect(result.configChanged).toBe(true);
   });
 
   it("does not flag disabled providers as key-changed", () => {
@@ -449,47 +425,5 @@ describe("ConfigManager", () => {
 
     // exa's create throws — brave still registered, no crash
     expect(registry.getSearchProviderNames()).toEqual(["brave"]);
-  });
-
-  it("updates current config when defaultProvider changes", () => {
-    const initialConfig = makeConfig({ defaultProvider: "auto" });
-    const updatedConfig = makeConfig({ defaultProvider: "brave" });
-
-    vi.mocked(loadMergedConfig)
-      .mockReturnValueOnce(initialConfig)
-      .mockReturnValueOnce(updatedConfig);
-    vi.mocked(resolveApiKey).mockReturnValue(undefined);
-
-    const registry = mem();
-    const manager = new ConfigManager("/test/cwd", registry, [makeMeta("brave")]);
-
-    expect(manager.current.defaultProvider).toBe("auto");
-
-    manager.expireTtlForTest();
-    manager.refresh();
-
-    expect(manager.current.defaultProvider).toBe("brave");
-  });
-
-  it("updates current config when guidance changes", () => {
-    const initialConfig = makeConfig();
-    const updatedConfig = makeConfig({
-      guidance: { web_search: { promptSnippet: "Be concise" } },
-    });
-
-    vi.mocked(loadMergedConfig)
-      .mockReturnValueOnce(initialConfig)
-      .mockReturnValueOnce(updatedConfig);
-    vi.mocked(resolveApiKey).mockReturnValue(undefined);
-
-    const registry = mem();
-    const manager = new ConfigManager("/test/cwd", registry, [makeMeta("brave")]);
-
-    expect(manager.current.guidance).toBeUndefined();
-
-    manager.expireTtlForTest();
-    manager.refresh();
-
-    expect(manager.current.guidance?.web_search?.promptSnippet).toBe("Be concise");
   });
 });

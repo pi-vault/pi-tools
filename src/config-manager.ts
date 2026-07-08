@@ -3,11 +3,10 @@ import { loadMergedConfig, resolveApiKey } from "./config.ts";
 import type { ProviderRegistry } from "./providers/registry.ts";
 import type { ProviderMeta } from "./providers/types.ts";
 
-export interface ConfigChangeSet {
+interface ConfigChangeSet {
   added: string[];
   removed: string[];
   keyChanged: string[];
-  configChanged: boolean;
 }
 
 function isEnabled(entry: ProviderConfigEntry | undefined): boolean {
@@ -49,12 +48,7 @@ export function diffConfig(
     }
   }
 
-  const configChanged =
-    prev.selectionStrategy !== next.selectionStrategy ||
-    prev.defaultProvider !== next.defaultProvider ||
-    JSON.stringify(prev.guidance) !== JSON.stringify(next.guidance);
-
-  return { added, removed, keyChanged, configChanged };
+  return { added, removed, keyChanged };
 }
 
 const CONFIG_TTL_MS = 30_000;
