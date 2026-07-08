@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
-import type { FetchProvider, SearchProvider } from "../../src/providers/types.ts";
+import type { DocsProvider, FetchProvider, SearchProvider } from "../../src/providers/types.ts";
 
 function mockProvider(name: string, label: string): SearchProvider {
   return {
@@ -423,5 +423,24 @@ describe("ProviderRegistry", () => {
       expect(exaMetrics.failures).toBe(1);
       expect(exaMetrics.totalLatencyMs).toBe(600);
     });
+  });
+});
+
+describe("docs provider registration", () => {
+  it("selectDocs returns undefined when no docs provider registered", () => {
+    const registry = mem();
+    expect(registry.selectDocs()).toBeUndefined();
+  });
+
+  it("registerDocs and selectDocs round-trip", () => {
+    const registry = mem();
+    const docsProvider: DocsProvider = {
+      name: "context7",
+      label: "Context7",
+      searchLibrary: vi.fn(),
+      getContext: vi.fn(),
+    };
+    registry.registerDocs(docsProvider);
+    expect(registry.selectDocs()).toBe(docsProvider);
   });
 });
