@@ -25,7 +25,11 @@ interface WebDocsSearchDetails {
 }
 
 function escapeMd(text: string): string {
-  return text.replace(/\|/g, "\\|").replace(/\n/g, " ");
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/`/g, "\\`")
+    .replace(/\|/g, "\\|")
+    .replace(/\n/g, " ");
 }
 
 function truncateCell(text: string, maxChars: number): string {
@@ -132,6 +136,8 @@ export function createWebDocsSearchTool(
         details: { provider: provider.name, resultCount: 0, libraryName },
       });
 
+      // API errors propagate as throws — Pi marks the tool result as failed.
+      // This differs from code-search which catches and returns errors as text.
       const results = await provider.searchLibrary(
         libraryName,
         query,
