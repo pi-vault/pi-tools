@@ -20,8 +20,14 @@ interface RegisteredCodeSearch {
 export interface ProviderMetrics {
   successes: number;
   failures: number;
-  totalLatencyMs: number;
+  avgLatency: number;
+  latencySamples: number;
+  avgResultRatio: number;
+  resultSamples: number;
+  windowStart: number;
 }
+
+const METRICS_WINDOW_MS = 60_000;
 
 interface UsageRecord {
   count: number;
@@ -52,6 +58,25 @@ export class ProviderRegistry {
     this.persistence = persistence;
     this.currentMonth = getCurrentMonth();
     this.loadUsage();
+  }
+
+  private getOrCreateMetrics(providerName: string): ProviderMetrics {
+    const now = Date.now();
+    const existing = this.metrics.get(providerName);
+    if (existing && now - existing.windowStart <= METRICS_WINDOW_MS) {
+      return existing;
+    }
+    const fresh: ProviderMetrics = {
+      successes: 0,
+      failures: 0,
+      avgLatency: 0,
+      latencySamples: 0,
+      avgResultRatio: 0,
+      resultSamples: 0,
+      windowStart: now,
+    };
+    this.metrics.set(providerName, fresh);
+    return fresh;
   }
 
   private loadUsage(): void {
@@ -96,15 +121,17 @@ export class ProviderRegistry {
     this.counts[providerName] = (this.counts[providerName] ?? 0) + 1;
     this.saveUsage();
 
-    // Update performance metrics
-    const m = this.metrics.get(providerName) ?? { successes: 0, failures: 0, totalLatencyMs: 0 };
+    // Update performance metrics (with rolling window)
+    const m = this.getOrCreateMetrics(providerName);
     if (result.success) {
       m.successes += 1;
-      m.totalLatencyMs += result.latencyMs ?? 0;
+      if (result.latencyMs !== undefined) {
+        m.latencySamples += 1;
+        m.avgLatency += (result.latencyMs - m.avgLatency) / m.latencySamples;
+      }
     } else {
       m.failures += 1;
     }
-    this.metrics.set(providerName, m);
   }
 
   getRemaining(providerName: string): number {
@@ -171,7 +198,7 @@ export class ProviderRegistry {
 
       const total = m.successes + m.failures;
       const successRate = m.successes / total;
-      const avgLatency = m.successes > 0 ? m.totalLatencyMs / m.successes : Infinity;
+      const avgLatency = m.latencySamples > 0 ? m.avgLatency : Infinity;
 
       return { provider: r.provider, score: 0, avgLatency, successRate, tierScore };
     });
@@ -219,6 +246,14 @@ export class ProviderRegistry {
 
   getMetrics(providerName: string): ProviderMetrics | undefined {
     return this.metrics.get(providerName);
+  }
+
+  /** @internal Exposed for tests to simulate window expiry without time mocking. */
+  expireMetricsWindow(providerName: string): void {
+    const m = this.metrics.get(providerName);
+    if (m) {
+      m.windowStart = 0;
+    }
   }
 }
 

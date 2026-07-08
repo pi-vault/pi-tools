@@ -352,7 +352,8 @@ describe("ProviderRegistry", () => {
 
       const metrics = registry.getMetrics("brave");
       expect(metrics?.successes).toBe(1);
-      expect(metrics?.totalLatencyMs).toBe(300);
+      expect(metrics?.avgLatency).toBe(300);
+      expect(metrics?.latencySamples).toBe(1);
     });
 
     it("records failure for performance scoring", () => {
@@ -380,7 +381,8 @@ describe("ProviderRegistry", () => {
       expect(metrics).toBeDefined();
       expect(metrics!.successes).toBe(2);
       expect(metrics!.failures).toBe(0);
-      expect(metrics!.totalLatencyMs).toBe(840);
+      expect(metrics!.avgLatency).toBe(420);
+      expect(metrics!.latencySamples).toBe(2);
     });
 
     it("records failure", () => {
@@ -395,7 +397,8 @@ describe("ProviderRegistry", () => {
       expect(metrics).toBeDefined();
       expect(metrics!.successes).toBe(0);
       expect(metrics!.failures).toBe(2);
-      expect(metrics!.totalLatencyMs).toBe(0);
+      expect(metrics!.avgLatency).toBe(0);
+      expect(metrics!.latencySamples).toBe(0);
     });
 
     it("returns undefined metrics for unknown provider", () => {
@@ -421,7 +424,57 @@ describe("ProviderRegistry", () => {
       const exaMetrics = registry.getMetrics("exa")!;
       expect(exaMetrics.successes).toBe(1);
       expect(exaMetrics.failures).toBe(1);
-      expect(exaMetrics.totalLatencyMs).toBe(600);
+      expect(exaMetrics.avgLatency).toBe(600);
+      expect(exaMetrics.latencySamples).toBe(1);
+    });
+
+    it("resets metrics after the rolling window expires", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 });
+      registry.recordOutcome("brave", { success: false });
+
+      const before = registry.getMetrics("brave");
+      expect(before!.successes).toBe(1);
+      expect(before!.failures).toBe(1);
+
+      // Simulate window expiry
+      registry.expireMetricsWindow("brave");
+      registry.recordOutcome("brave", { success: true, latencyMs: 100 });
+
+      const after = registry.getMetrics("brave");
+      expect(after!.successes).toBe(1); // Reset: only the new call
+      expect(after!.failures).toBe(0); // Reset: old failure gone
+      expect(after!.avgLatency).toBe(100); // Reset: only the new latency
+      expect(after!.latencySamples).toBe(1);
+    });
+
+    it("computes running average for latency", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 });
+      registry.recordOutcome("brave", { success: true, latencyMs: 400 });
+
+      const metrics = registry.getMetrics("brave");
+      expect(metrics!.avgLatency).toBe(300);
+      expect(metrics!.latencySamples).toBe(2);
+    });
+
+    it("does not update latency when latencyMs is omitted", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: true });
+
+      const metrics = registry.getMetrics("brave");
+      expect(metrics!.successes).toBe(1);
+      expect(metrics!.avgLatency).toBe(0);
+      expect(metrics!.latencySamples).toBe(0);
     });
   });
 });
