@@ -92,6 +92,7 @@ export function createWebSearchTool(
   onSuccess?: (providerName: string, latencyMs: number) => void,
   guidance?: GuidanceOverride,
   onFailure?: (providerName: string) => void,
+  onResult?: (providerName: string, resultCount: number, requestedCount: number) => void,
 ): ToolDefinition<typeof WebSearchParams, WebSearchDetails> {
   return {
     name: "web_search",
@@ -127,6 +128,8 @@ export function createWebSearchTool(
           onSuccess,
           onFailure,
         });
+
+        onResult?.(providerName, results.length, maxResults);
 
         const text = params.compact
           ? formatResultsCompact(results)

@@ -434,4 +434,71 @@ describe("web_search metrics callbacks", () => {
     expect(onSuccess).toHaveBeenCalledOnce();
     expect(onFailure).not.toHaveBeenCalled();
   });
+
+  it("calls onResult with provider name, result count, and requested count", async () => {
+    const onResult = vi.fn();
+    const tool = createWebSearchTool(
+      () => [makeProvider("brave", sampleResults)],
+      vi.fn(),
+      undefined,
+      undefined,
+      onResult,
+    );
+    const ctx = makeCtx();
+    await tool.execute(
+      "id",
+      { query: "test", numResults: 10 },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(onResult).toHaveBeenCalledOnce();
+    expect(onResult).toHaveBeenCalledWith("brave", 1, 10);
+  });
+
+  it("does not call onResult when all providers fail", async () => {
+    const onResult = vi.fn();
+    const tool = createWebSearchTool(
+      () => [makeFailingProvider("brave", "API error")],
+      undefined,
+      undefined,
+      undefined,
+      onResult,
+    );
+    const ctx = makeCtx();
+    await tool.execute("id", { query: "test" }, undefined, undefined, ctx);
+
+    expect(onResult).not.toHaveBeenCalled();
+  });
+
+  it("calls onResult with default numResults when not specified", async () => {
+    const onResult = vi.fn();
+    const tool = createWebSearchTool(
+      () => [makeProvider("brave", sampleResults)],
+      vi.fn(),
+      undefined,
+      undefined,
+      onResult,
+    );
+    const ctx = makeCtx();
+    await tool.execute("id", { query: "test" }, undefined, undefined, ctx);
+
+    expect(onResult).toHaveBeenCalledWith("brave", 1, 5);
+  });
+
+  it("calls onResult with zero result count when provider returns empty", async () => {
+    const onResult = vi.fn();
+    const tool = createWebSearchTool(
+      () => [makeProvider("brave", [])],
+      vi.fn(),
+      undefined,
+      undefined,
+      onResult,
+    );
+    const ctx = makeCtx();
+    await tool.execute("id", { query: "test" }, undefined, undefined, ctx);
+
+    expect(onResult).toHaveBeenCalledWith("brave", 0, 5);
+  });
 });
