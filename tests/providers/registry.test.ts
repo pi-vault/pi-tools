@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
-import type { DocsProvider, FetchProvider, SearchProvider } from "../../src/providers/types.ts";
+import type {
+  CodeSearchProvider,
+  DocsProvider,
+  FetchProvider,
+  SearchProvider,
+} from "../../src/providers/types.ts";
 
 function mockProvider(name: string, label: string): SearchProvider {
   return {
@@ -575,6 +580,75 @@ describe("ProviderRegistry", () => {
 
       const metrics = registry.getMetrics("brave");
       expect(metrics!.resultSamples).toBe(0);
+    });
+  });
+
+  describe("unregisterAll", () => {
+    it("removes provider from all capability maps", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      const braveFetch: FetchProvider = {
+        name: "brave",
+        fetch: vi.fn().mockResolvedValue({ text: "content", title: "Title" }),
+      };
+      const braveCodeSearch: CodeSearchProvider = {
+        name: "brave",
+        codeSearch: vi.fn().mockResolvedValue([]),
+      };
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerFetch(braveFetch);
+      registry.registerCodeSearch(braveCodeSearch);
+
+      registry.unregisterAll("brave");
+
+      expect(registry.selectSearchCandidates().map((c) => c.name)).toEqual([]);
+      expect(registry.selectFetchCandidates().map((c) => c.name)).toEqual([]);
+      expect(registry.selectCodeSearch()).toBeUndefined();
+    });
+
+    it("metrics survive unregister + re-register cycle", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+
+      registry.recordOutcome("brave", { success: true, latencyMs: 300 });
+      registry.recordOutcome("brave", { success: true, latencyMs: 500 });
+
+      registry.unregisterAll("brave");
+      expect(registry.selectSearchCandidates().map((c) => c.name)).toEqual([]);
+
+      // Metrics still accessible after unregister
+      const metricsAfterUnregister = registry.getMetrics("brave");
+      expect(metricsAfterUnregister).toBeDefined();
+      expect(metricsAfterUnregister!.successes).toBe(2);
+      expect(metricsAfterUnregister!.avgLatency).toBe(400);
+
+      // Re-register — provider is back, metrics survived
+      const brave2 = mockProvider("brave", "Brave");
+      registry.registerSearch(brave2, { tier: 1, monthlyQuota: 2000 });
+      expect(registry.selectSearchCandidates().map((c) => c.name)).toEqual([
+        "brave",
+      ]);
+      expect(registry.getMetrics("brave")!.successes).toBe(2);
+    });
+
+    it("clears docs only when name matches", () => {
+      const registry = mem();
+      const docsProvider: DocsProvider = {
+        name: "context7",
+        label: "Context7",
+        searchLibrary: vi.fn(),
+        getContext: vi.fn(),
+      };
+
+      registry.registerDocs(docsProvider);
+
+      registry.unregisterAll("brave"); // different name — no effect
+      expect(registry.selectDocs()).toBe(docsProvider);
+
+      registry.unregisterAll("context7"); // matching name — clears
+      expect(registry.selectDocs()).toBeUndefined();
     });
   });
 });
