@@ -10,6 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-07-context7-docs-lookup-design.md`
 **Main plan:** `docs/superpowers/plans/2026-07-07-context7-docs-lookup.md`
+**Reference:** `@mrclrchtr/supi-web` (`packages/supi-web/src/docs.ts`) — same Context7 tools, different codebase conventions
 
 **Depends on:** Phase 3 (web_docs_search registered, docs provider wired)
 **Produces:** Complete Context7 docs lookup feature — both tools registered and working.
@@ -43,6 +44,8 @@ export function truncateContent(text: string, limit: number): string {
 The `web_fetch` tool uses `INLINE_LIMIT = 15_000` — we match this for consistency.
 
 The `isStoredContent` type guard in `src/index.ts` validates the `source` field on session restore.
+
+Parameter naming uses camelCase (`libraryId`, `query`) to match pi-tools conventions and the Context7 API.
 
 ---
 
@@ -90,7 +93,7 @@ In `src/index.ts`, find the `isStoredContent` function (around line 15-26). Upda
 From:
 
 ```typescript
-d.source === "web_fetch" || d.source === "web_search";
+d.source === "web_fetch" || d.source === "web_search"
 ```
 
 To:
@@ -98,7 +101,7 @@ To:
 ```typescript
 d.source === "web_fetch" ||
   d.source === "web_search" ||
-  d.source === "web_docs_fetch";
+  d.source === "web_docs_fetch"
 ```
 
 - [ ] **Step 3: Run typecheck**
@@ -159,9 +162,26 @@ describe("web_docs_fetch tool", () => {
     expect(tool.label).toBe("Docs Fetch");
   });
 
+  it("rejects empty libraryId", async () => {
+    const tool = createWebDocsFetchTool(() => mockDocsProvider(), createStore());
+    const ctx = makeCtx();
+    await expect(
+      tool.execute("call-1", { libraryId: "  ", query: "hooks" }, undefined, undefined, ctx),
+    ).rejects.toThrow("libraryId");
+  });
+
+  it("rejects empty query", async () => {
+    const tool = createWebDocsFetchTool(() => mockDocsProvider(), createStore());
+    const ctx = makeCtx();
+    await expect(
+      tool.execute("call-1", { libraryId: "/facebook/react", query: "" }, undefined, undefined, ctx),
+    ).rejects.toThrow("query");
+  });
+
   it("returns documentation content on success", async () => {
     const content =
       "### useState\n\n```typescript\nconst [s, setS] = useState(0);\n```";
+    const onUpdate = vi.fn();
     const tool = createWebDocsFetchTool(
       () => mockDocsProvider(content),
       createStore(),
@@ -171,13 +191,30 @@ describe("web_docs_fetch tool", () => {
       "call-1",
       { libraryId: "/facebook/react", query: "How to use useState" },
       undefined,
-      undefined,
+      onUpdate,
       ctx,
     );
     const text = (result.content[0] as { type: "text"; text: string }).text;
 
     expect(text).toContain("useState");
     expect(text).toContain("```typescript");
+
+    // Verify onUpdate was called for progress
+    expect(onUpdate).toHaveBeenCalled();
+  });
+
+  it("trims libraryId before calling provider", async () => {
+    const provider = mockDocsProvider("docs");
+    const tool = createWebDocsFetchTool(() => provider, createStore());
+    const ctx = makeCtx();
+    await tool.execute(
+      "call-1",
+      { libraryId: "  /facebook/react  ", query: "hooks" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect(provider.getContext).toHaveBeenCalledWith("/facebook/react", "hooks", undefined);
   });
 
   it("truncates and stores large content", async () => {
@@ -209,6 +246,26 @@ describe("web_docs_fetch tool", () => {
     expect(stored).toBeDefined();
     expect(stored!.text).toBe(largeContent);
     expect(stored!.source).toBe("web_docs_fetch");
+  });
+
+  it("does not store small content", async () => {
+    const smallContent = "Short docs";
+    const store = createStore();
+    const tool = createWebDocsFetchTool(
+      () => mockDocsProvider(smallContent),
+      store,
+    );
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-2b",
+      { libraryId: "/facebook/react", query: "hooks" },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(result.details?.contentId).toBeUndefined();
+    expect(result.details?.truncated).toBe(false);
   });
 
   it("returns setup message when provider unavailable", async () => {
@@ -251,7 +308,7 @@ describe("web_docs_fetch tool", () => {
     expect(text).toContain("being processed");
   });
 
-  it("throws on 404 errors", async () => {
+  it("throws on API errors", async () => {
     const failing: DocsProvider = {
       name: "context7",
       label: "Context7",
@@ -355,7 +412,13 @@ export function createWebDocsFetchTool(
       "Pin a version with /owner/repo@version for consistent results.",
     ],
     parameters: WebDocsFetchParams,
-    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, signal, onUpdate, _ctx) {
+      const libraryId = params.libraryId?.trim();
+      const query = params.query?.trim();
+
+      if (!libraryId) throw new Error("'libraryId' parameter is required");
+      if (!query) throw new Error("'query' parameter is required");
+
       const provider = resolveProvider();
       if (!provider) {
         return {
@@ -367,16 +430,21 @@ export function createWebDocsFetchTool(
           ],
           details: {
             provider: "none",
-            libraryId: params.libraryId,
+            libraryId,
             chars: 0,
             truncated: false,
           },
         };
       }
 
+      onUpdate?.({
+        content: [{ type: "text" as const, text: `Fetching Context7 docs for ${libraryId}...` }],
+        details: { provider: provider.name, libraryId, chars: 0, truncated: false },
+      });
+
       const text = await provider.getContext(
-        params.libraryId,
-        params.query,
+        libraryId,
+        query,
         signal ?? undefined,
       );
       const chars = text.length;
@@ -386,8 +454,8 @@ export function createWebDocsFetchTool(
 
       if (chars > INLINE_LIMIT) {
         contentId = store.store({
-          url: `context7://${params.libraryId}`,
-          title: `Docs: ${params.libraryId}`,
+          url: `context7://${libraryId}`,
+          title: `Docs: ${libraryId}`,
           text,
           source: "web_docs_fetch",
         });
@@ -398,14 +466,14 @@ export function createWebDocsFetchTool(
       }
 
       const header = truncated
-        ? `Docs: ${params.libraryId} (${chars} chars, truncated — use web_read with contentId "${contentId}" for full text)\n\n`
+        ? `Docs: ${libraryId} (${chars} chars, truncated — use web_read with contentId "${contentId}" for full text)\n\n`
         : "";
 
       return {
         content: [{ type: "text" as const, text: header + outputText }],
         details: {
           provider: provider.name,
-          libraryId: params.libraryId,
+          libraryId,
           chars,
           truncated,
           contentId,
@@ -462,7 +530,7 @@ export function createWebDocsFetchTool(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `pnpm test -- tests/tools/web-docs-fetch.test.ts`
-Expected: PASS (all 6 tests green)
+Expected: PASS (all 10 tests green)
 
 - [ ] **Step 5: Commit**
 
@@ -569,4 +637,6 @@ At this point the full Context7 docs lookup feature is complete:
 - `web_docs_fetch` retrieves documentation for a specific library
 - Both tools are conditionally registered when `CONTEXT7_API_KEY` is configured
 - Large responses are truncated with `contentId` for retrieval via `web_read`
+- Input validation: empty/whitespace params throw clear errors
+- Streaming progress: `onUpdate` is called before network requests
 - All new code has test coverage
