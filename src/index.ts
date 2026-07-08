@@ -52,6 +52,9 @@ export default function createExtension(pi: ExtensionAPI): void {
     if (instances.codeSearch) {
       registry.registerCodeSearch(instances.codeSearch);
     }
+    if (instances.docs) {
+      registry.registerDocs(instances.docs);
+    }
   }
 
   // Restore stored content from previous session

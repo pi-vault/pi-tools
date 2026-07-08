@@ -745,7 +745,7 @@ describe("web_docs_search tool", () => {
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-1",
-      { library: "react", query: "state management" },
+      { libraryName: "react", query: "state management" },
       undefined,
       undefined,
       ctx,
@@ -764,7 +764,7 @@ describe("web_docs_search tool", () => {
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-2",
-      { library: "nonexistent", query: "anything" },
+      { libraryName: "nonexistent", query: "anything" },
       undefined,
       undefined,
       ctx,
@@ -779,7 +779,7 @@ describe("web_docs_search tool", () => {
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-3",
-      { library: "react", query: "hooks" },
+      { libraryName: "react", query: "hooks" },
       undefined,
       undefined,
       ctx,
@@ -804,7 +804,7 @@ describe("web_docs_search tool", () => {
     await expect(
       tool.execute(
         "call-4",
-        { library: "react", query: "hooks" },
+        { libraryName: "react", query: "hooks" },
         undefined,
         undefined,
         ctx,
@@ -820,7 +820,7 @@ describe("web_docs_search tool", () => {
 
     await tool.execute(
       "call-5",
-      { library: "react", query: "hooks" },
+      { libraryName: "react", query: "hooks" },
       controller.signal,
       undefined,
       ctx,
@@ -852,7 +852,7 @@ import type { DocsProvider, DocsSearchResult } from "../providers/types.ts";
 import type { GuidanceOverride } from "../config.ts";
 
 const WebDocsSearchParams = Type.Object({
-  library: Type.String({
+  libraryName: Type.String({
     description:
       "Library name to search for (e.g. 'react', 'next.js', 'express')",
   }),
@@ -866,23 +866,40 @@ interface WebDocsSearchDetails {
   resultCount: number;
 }
 
-function formatResultsTable(results: DocsSearchResult[]): string {
-  if (results.length === 0) return "No libraries found.";
+// See separate phase plan for full implementation with escapeMd, truncateCell, formatVersions helpers
+function formatResultsTable(
+  libraryName: string,
+  results: DocsSearchResult[],
+): string {
+  if (results.length === 0) {
+    return `No libraries found for "${libraryName}". Try a different search term.`;
+  }
 
-  const header = "| ID | Name | Trust | Snippets | Description |";
-  const separator = "|----|------|-------|----------|-------------|";
-  const rows = results.slice(0, 10).map((r) => {
+  const visible = results.slice(0, 10);
+  const hidden = results.length - visible.length;
+  const noun = results.length === 1 ? "library" : "libraries";
+
+  const headerLine =
+    `Found ${results.length} Context7 ${noun} for "${libraryName}"` +
+    (hidden > 0 ? `; showing top ${visible.length}` : "") +
+    ":";
+
+  const header = "| ID | Name | Trust | Bench | Snippets | Versions | Description |";
+  const separator = "|---|---|---|---|---|---|---|";
+  const rows = visible.map((r) => {
     const desc =
-      r.description.length > 60
-        ? `${r.description.slice(0, 57)}...`
+      r.description.length > 120
+        ? `${r.description.slice(0, 119).trimEnd()}…`
         : r.description;
-    return `| ${r.id} | ${r.name} | ${r.trustScore} | ${r.totalSnippets} | ${desc} |`;
+    return `| \`${r.id}\` | ${r.name} | ${r.trustScore} | ${r.benchmarkScore} | ${r.totalSnippets} | ${(r.versions ?? []).slice(0, 5).join(", ")} | ${desc} |`;
   });
 
-  const table = [header, separator, ...rows].join("\n");
-  const suffix =
-    results.length > 10 ? `\n\n(${results.length - 10} more omitted)` : "";
-  return table + suffix;
+  const hiddenNote =
+    hidden > 0
+      ? [`_${hidden} more omitted; refine \`libraryName\` or \`query\` if needed._`, ""]
+      : [];
+
+  return [headerLine, "", header, separator, ...rows, "", ...hiddenNote, "> Use `web_docs_fetch` with the chosen ID."].join("\n");
 }
 
 export function createWebDocsSearchTool(
@@ -917,11 +934,11 @@ export function createWebDocsSearchTool(
       }
 
       const results = await provider.searchLibrary(
-        params.library,
+        params.libraryName,
         params.query,
         signal ?? undefined,
       );
-      const text = formatResultsTable(results);
+      const text = formatResultsTable(params.libraryName, results);
 
       return {
         content: [{ type: "text" as const, text }],
@@ -938,9 +955,9 @@ export function createWebDocsSearchTool(
         return text;
       }
       const lib =
-        args.library.length > 40
-          ? `${args.library.slice(0, 37)}...`
-          : args.library;
+        args.libraryName.length > 40
+          ? `${args.libraryName.slice(0, 37)}...`
+          : args.libraryName;
       text.setText(
         `${theme.fg("toolTitle", theme.bold("web_docs_search"))} ${theme.fg("accent", `"${lib}"`)}`,
       );

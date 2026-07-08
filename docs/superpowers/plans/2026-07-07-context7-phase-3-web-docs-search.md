@@ -112,7 +112,7 @@ describe("web_docs_search tool", () => {
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-1",
-      { library: "react", query: "state management" },
+      { libraryName: "react", query: "state management" },
       undefined,
       undefined,
       ctx,
@@ -121,9 +121,12 @@ describe("web_docs_search tool", () => {
 
     expect(text).toContain("/facebook/react");
     expect(text).toContain("React");
-    expect(text).toContain("10");
-    expect(text).toContain("2500");
+    expect(text).toContain("10");      // trustScore
+    expect(text).toContain("95.5");    // benchmarkScore
+    expect(text).toContain("2500");    // totalSnippets
+    expect(text).toContain("v18.2.0"); // versions
     expect(text).toContain("/preactjs/preact");
+    expect(text).toContain("web_docs_fetch"); // footer guidance
   });
 
   it("returns 'no libraries found' for empty results", async () => {
@@ -131,7 +134,7 @@ describe("web_docs_search tool", () => {
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-2",
-      { library: "nonexistent", query: "anything" },
+      { libraryName: "nonexistent", query: "anything" },
       undefined,
       undefined,
       ctx,
@@ -146,7 +149,7 @@ describe("web_docs_search tool", () => {
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-3",
-      { library: "react", query: "hooks" },
+      { libraryName: "react", query: "hooks" },
       undefined,
       undefined,
       ctx,
@@ -171,7 +174,7 @@ describe("web_docs_search tool", () => {
     await expect(
       tool.execute(
         "call-4",
-        { library: "react", query: "hooks" },
+        { libraryName: "react", query: "hooks" },
         undefined,
         undefined,
         ctx,
@@ -187,7 +190,7 @@ describe("web_docs_search tool", () => {
 
     await tool.execute(
       "call-5",
-      { library: "react", query: "hooks" },
+      { libraryName: "react", query: "hooks" },
       controller.signal,
       undefined,
       ctx,
@@ -218,8 +221,12 @@ import { Text } from "@earendil-works/pi-tui";
 import type { DocsProvider, DocsSearchResult } from "../providers/types.ts";
 import type { GuidanceOverride } from "../config.ts";
 
+const MAX_SEARCH_RESULTS = 10;
+const MAX_DESCRIPTION_CHARS = 120;
+const MAX_VERSION_COUNT = 5;
+
 const WebDocsSearchParams = Type.Object({
-  library: Type.String({
+  libraryName: Type.String({
     description:
       "Library name to search for (e.g. 'react', 'next.js', 'express')",
   }),
@@ -233,23 +240,70 @@ interface WebDocsSearchDetails {
   resultCount: number;
 }
 
-function formatResultsTable(results: DocsSearchResult[]): string {
-  if (results.length === 0) return "No libraries found.";
+function escapeMd(text: string): string {
+  return text.replace(/\|/g, "\\|").replace(/\n/g, " ");
+}
 
-  const header = "| ID | Name | Trust | Snippets | Description |";
-  const separator = "|----|------|-------|----------|-------------|";
-  const rows = results.slice(0, 10).map((r) => {
-    const desc =
-      r.description.length > 60
-        ? `${r.description.slice(0, 57)}...`
-        : r.description;
-    return `| ${r.id} | ${r.name} | ${r.trustScore} | ${r.totalSnippets} | ${desc} |`;
+function truncateCell(text: string, maxChars: number): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxChars) return compact;
+  return `${compact.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+function formatVersions(versions?: string[]): string {
+  if (!versions?.length) return "";
+  const visible = versions.slice(0, MAX_VERSION_COUNT);
+  const hidden = versions.length - visible.length;
+  return `${visible.join(", ")}${hidden > 0 ? `, +${hidden}` : ""}`;
+}
+
+function formatResultsTable(
+  libraryName: string,
+  results: DocsSearchResult[],
+): string {
+  if (results.length === 0) {
+    return `No libraries found for "${libraryName}". Try a different search term.`;
+  }
+
+  const visible = results.slice(0, MAX_SEARCH_RESULTS);
+  const hidden = results.length - visible.length;
+  const noun = results.length === 1 ? "library" : "libraries";
+
+  const headerLine =
+    `Found ${results.length} Context7 ${noun} for "${libraryName}"` +
+    (hidden > 0 ? `; showing top ${visible.length}` : "") +
+    ":";
+
+  const header = "| ID | Name | Trust | Bench | Snippets | Versions | Description |";
+  const separator = "|---|---|---|---|---|---|---|";
+  const rows = visible.map((r) => {
+    const cells = [
+      `\`${escapeMd(r.id)}\``,
+      escapeMd(r.name),
+      String(r.trustScore ?? ""),
+      String(r.benchmarkScore ?? ""),
+      String(r.totalSnippets ?? ""),
+      escapeMd(formatVersions(r.versions)),
+      escapeMd(truncateCell(r.description ?? "", MAX_DESCRIPTION_CHARS)),
+    ];
+    return `| ${cells.join(" | ")} |`;
   });
 
-  const table = [header, separator, ...rows].join("\n");
-  const suffix =
-    results.length > 10 ? `\n\n(${results.length - 10} more omitted)` : "";
-  return table + suffix;
+  const hiddenNote =
+    hidden > 0
+      ? [`_${hidden} more omitted; refine \`libraryName\` or \`query\` if needed._`, ""]
+      : [];
+
+  return [
+    headerLine,
+    "",
+    header,
+    separator,
+    ...rows,
+    "",
+    ...hiddenNote,
+    "> Use `web_docs_fetch` with the chosen ID.",
+  ].join("\n");
 }
 
 export function createWebDocsSearchTool(
@@ -284,11 +338,11 @@ export function createWebDocsSearchTool(
       }
 
       const results = await provider.searchLibrary(
-        params.library,
+        params.libraryName,
         params.query,
         signal ?? undefined,
       );
-      const text = formatResultsTable(results);
+      const text = formatResultsTable(params.libraryName, results);
 
       return {
         content: [{ type: "text" as const, text }],
@@ -305,9 +359,9 @@ export function createWebDocsSearchTool(
         return text;
       }
       const lib =
-        args.library.length > 40
-          ? `${args.library.slice(0, 37)}...`
-          : args.library;
+        args.libraryName.length > 40
+          ? `${args.libraryName.slice(0, 37)}...`
+          : args.libraryName;
       text.setText(
         `${theme.fg("toolTitle", theme.bold("web_docs_search"))} ${theme.fg("accent", `"${lib}"`)}`,
       );

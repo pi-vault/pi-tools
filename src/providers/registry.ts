@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import type { SearchProvider, FetchProvider, CodeSearchProvider, ProviderTier } from "./types.ts";
+import type { SearchProvider, FetchProvider, CodeSearchProvider, DocsProvider, ProviderTier } from "./types.ts";
 
 interface RegisteredSearch {
   provider: SearchProvider;
@@ -42,6 +42,7 @@ export class ProviderRegistry {
   private searchProviders = new Map<string, RegisteredSearch>();
   private fetchProviders = new Map<string, RegisteredFetch>();
   private codeSearchProviders = new Map<string, RegisteredCodeSearch>();
+  private docsProvider: DocsProvider | undefined;
   private metrics = new Map<string, ProviderMetrics>();
   private counts: Record<string, number> = {};
   private currentMonth: string;
@@ -206,6 +207,14 @@ export class ProviderRegistry {
   selectCodeSearch(): CodeSearchProvider | undefined {
     const first = this.codeSearchProviders.values().next();
     return first.done ? undefined : first.value.provider;
+  }
+
+  registerDocs(provider: DocsProvider): void {
+    this.docsProvider = provider;
+  }
+
+  selectDocs(): DocsProvider | undefined {
+    return this.docsProvider;
   }
 
   getSearchProviderNames(): string[] {

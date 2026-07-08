@@ -14,21 +14,21 @@ Search Context7 for libraries by name. Returns a ranked table of matching librar
 
 **Parameters:**
 
-| Param     | Type   | Required | Description                                                          |
-| --------- | ------ | -------- | -------------------------------------------------------------------- |
-| `library` | string | yes      | Library name to search for (e.g. "react", "next.js", "express")      |
-| `query`   | string | yes      | What the agent is trying to do — drives Context7's relevance ranking |
+| Param          | Type   | Required | Description                                                          |
+| -------------- | ------ | -------- | -------------------------------------------------------------------- |
+| `libraryName`  | string | yes      | Library name to search for (e.g. "react", "next.js", "express")      |
+| `query`        | string | yes      | What the agent is trying to do — drives Context7's relevance ranking |
 
 **Output:** Compact markdown table with top 10 results:
 
 ```
-| ID | Name | Trust | Snippets | Description |
-|----|------|-------|----------|-------------|
-| /facebook/react | React | 10 | 2500 | A JavaScript library for... |
-| /preactjs/preact | Preact | 8 | 450 | Fast 3kB alternative... |
+| ID | Name | Trust | Bench | Snippets | Versions | Description |
+|---|---|---|---|---|---|---|
+| `/facebook/react` | React | 10 | 95.5 | 2500 | v18.2.0, v17.0.2 | A JavaScript library for... |
+| `/preactjs/preact` | Preact | 8 | 78.0 | 450 | | Fast 3kB alternative... |
 ```
 
-If more than 10 results exist, appends "(N more omitted)".
+Header shows count: `Found N Context7 libraries for "react":`. If >10, shows `; showing top 10` and appends omission note. Footer guidance: `> Use web_docs_fetch with the chosen ID.` Pipe chars in values are escaped.
 
 **Prompt guidelines:**
 
@@ -37,7 +37,7 @@ If more than 10 results exist, appends "(N more omitted)".
 
 **Error handling:**
 
-- Zero results: returns "No libraries found matching '{library}'." (valid result, not a throw)
+- Zero results: returns "No libraries found for '{libraryName}'. Try a different search term." (valid result, not a throw)
 - API failures (network, 401, 429): throws from execute() so Pi marks the tool call as failed
 
 ### web_docs_fetch

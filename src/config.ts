@@ -59,6 +59,7 @@ const DEFAULT_CONFIG: PiToolsConfig = {
     parallel: { enabled: false, apiKey: "PARALLEL_API_KEY" },
     searxng: { enabled: false, instanceUrl: "http://localhost:8080" },
     websearchapi: { enabled: false, apiKey: "WEBSEARCHAPI_API_KEY" },
+    context7: { enabled: true, apiKey: "CONTEXT7_API_KEY" },
   },
   github: DEFAULT_GITHUB_CONFIG,
 };
