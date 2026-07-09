@@ -164,6 +164,9 @@ async function executeAll(
   }
 
   if (providerResults.length === 0) {
+    if (errors.length === 0) {
+      errors.push({ provider: "all", error: "All providers returned empty results" });
+    }
     throw new AggregateProviderError("search", errors);
   }
 
@@ -240,6 +243,9 @@ async function executeTargeted(
   }
 
   if (usableResults.length === 0) {
+    if (errors.length === 0) {
+      errors.push({ provider: "all", error: "All providers returned empty results" });
+    }
     throw new AggregateProviderError("search", errors);
   }
 
@@ -256,6 +262,6 @@ async function executeTargeted(
     results: fused,
     providersUsed,
     providersFailed,
-    degraded: usableResults.length < targetBackends,
+    degraded: usableResults.length < Math.min(targetBackends, candidates.length),
   };
 }

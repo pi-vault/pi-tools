@@ -484,6 +484,104 @@ describe("executeWithFusion", () => {
         }),
       ).rejects.toThrow("All search providers failed");
     });
+
+    it("throws when candidates array is empty", async () => {
+      await expect(
+        executeWithFusion({
+          candidates: [],
+          maxResults: 10,
+          mode: "all",
+          targetBackends: 3,
+          k: 60,
+        }),
+      ).rejects.toThrow("No search providers available");
+    });
+
+    it("skips RRF and sets rrfScore 0 when single provider succeeds", async () => {
+      const candidates = [
+        {
+          name: "brave",
+          execute: async (_n: number) =>
+            [
+              { title: "A", url: "https://a.com", snippet: "a" },
+              { title: "B", url: "https://b.com", snippet: "b" },
+            ] as SearchResult[],
+        },
+        {
+          name: "failing",
+          execute: async (_n: number): Promise<SearchResult[]> => {
+            throw new Error("down");
+          },
+        },
+      ];
+
+      const result = await executeWithFusion({
+        candidates,
+        maxResults: 10,
+        mode: "all",
+        targetBackends: 3,
+        k: 60,
+      });
+
+      expect(result.providersUsed).toEqual(["brave"]);
+      expect(result.results).toHaveLength(2);
+      for (const r of result.results) {
+        expect(r.rrfScore).toBe(0);
+        expect(r.providers).toEqual(["brave"]);
+      }
+    });
+
+    it("calls onSuccess for providers that return empty results", async () => {
+      const onSuccess = vi.fn();
+      const candidates = [
+        {
+          name: "empty-provider",
+          execute: async (_n: number) => [] as SearchResult[],
+        },
+        {
+          name: "good",
+          execute: async (_n: number) =>
+            [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
+        },
+      ];
+
+      await executeWithFusion({
+        candidates,
+        maxResults: 10,
+        mode: "all",
+        targetBackends: 3,
+        k: 60,
+        onSuccess,
+      });
+
+      // onSuccess fires for both — empty is still a successful call
+      expect(onSuccess).toHaveBeenCalledTimes(2);
+      expect(onSuccess).toHaveBeenCalledWith("empty-provider", expect.any(Number));
+      expect(onSuccess).toHaveBeenCalledWith("good", expect.any(Number));
+    });
+
+    it("throws descriptive error when all providers return empty results", async () => {
+      const candidates = [
+        {
+          name: "brave",
+          execute: async (_n: number) => [] as SearchResult[],
+        },
+        {
+          name: "exa",
+          execute: async (_n: number) => [] as SearchResult[],
+        },
+      ];
+
+      await expect(
+        executeWithFusion({
+          candidates,
+          maxResults: 10,
+          mode: "all",
+          targetBackends: 3,
+          k: 60,
+        }),
+      ).rejects.toThrow("returned empty results");
+    });
   });
 
   describe("targeted mode", () => {
@@ -725,6 +823,32 @@ describe("executeWithFusion", () => {
           k: 60,
         }),
       ).rejects.toThrow("All search providers failed");
+    });
+
+    it("not degraded when all candidates succeed but fewer than targetBackends", async () => {
+      const candidates = [
+        {
+          name: "a",
+          execute: async (_n: number) =>
+            [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
+        },
+        {
+          name: "b",
+          execute: async (_n: number) =>
+            [{ title: "B", url: "https://b.com", snippet: "b" }] as SearchResult[],
+        },
+      ];
+
+      const result = await executeWithFusion({
+        candidates,
+        maxResults: 10,
+        mode: "targeted",
+        targetBackends: 3,
+        k: 60,
+      });
+
+      expect(result.providersUsed).toHaveLength(2);
+      expect(result.degraded).toBe(false);
     });
   });
 });
