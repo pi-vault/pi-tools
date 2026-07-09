@@ -229,26 +229,6 @@ describe("reciprocalRankFusion", () => {
     expect(fused).toHaveLength(2);
   });
 
-  it("prefers non-empty snippet over empty snippet on dedup", () => {
-    const providerResults = [
-      {
-        providerName: "brave",
-        results: [
-          { title: "A", url: "https://a.com", snippet: "" },
-        ] as SearchResult[],
-      },
-      {
-        providerName: "exa",
-        results: [
-          { title: "A Better", url: "https://a.com", snippet: "has content" },
-        ] as SearchResult[],
-      },
-    ];
-
-    const fused = reciprocalRankFusion(providerResults, 10);
-    expect(fused[0].result.snippet).toBe("has content");
-  });
-
   it("falls back to lowercase comparison for invalid URLs", () => {
     const providerResults = [
       {

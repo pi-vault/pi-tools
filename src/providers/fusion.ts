@@ -65,10 +65,5 @@ export function reciprocalRankFusion(
       if (b.rrfScore !== a.rrfScore) return b.rrfScore - a.rrfScore;
       return b.providers.length - a.providers.length;
     })
-    .slice(0, maxResults)
-    .map((entry) => ({
-      result: entry.result,
-      rrfScore: entry.rrfScore,
-      providers: entry.providers,
-    }));
+    .slice(0, maxResults);
 }
