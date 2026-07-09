@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { reciprocalRankFusion } from "../../src/providers/fusion.ts";
+import { describe, expect, it, vi } from "vitest";
+import { reciprocalRankFusion, executeWithFusion } from "../../src/providers/fusion.ts";
 import type { SearchResult } from "../../src/providers/types.ts";
 
 describe("reciprocalRankFusion", () => {
@@ -275,5 +275,214 @@ describe("reciprocalRankFusion", () => {
     // Z appears at rank 1 in exa -> score = 1/(60+1+1) = 1/62
     expect(fused[0].result.url).toBe("https://x.com");
     expect(fused[0].rrfScore).toBeCloseTo(2 / 61);
+  });
+});
+
+describe("executeWithFusion", () => {
+  describe("all mode", () => {
+    it("runs all candidates in parallel and fuses results", async () => {
+      const candidates = [
+        {
+          name: "brave",
+          execute: async (_n: number) =>
+            [
+              { title: "A", url: "https://a.com", snippet: "a" },
+            ] as SearchResult[],
+        },
+        {
+          name: "exa",
+          execute: async (_n: number) =>
+            [
+              { title: "B", url: "https://b.com", snippet: "b" },
+            ] as SearchResult[],
+        },
+      ];
+
+      const result = await executeWithFusion({
+        candidates,
+        maxResults: 10,
+        mode: "all",
+        targetBackends: 3,
+        k: 60,
+      });
+
+      expect(result.providersUsed).toContain("brave");
+      expect(result.providersUsed).toContain("exa");
+      expect(result.providersFailed).toEqual([]);
+      expect(result.degraded).toBe(false);
+      expect(result.results).toHaveLength(2);
+    });
+
+    it("records failures and fuses only successes", async () => {
+      const candidates = [
+        {
+          name: "brave",
+          execute: async (_n: number) =>
+            [
+              { title: "A", url: "https://a.com", snippet: "a" },
+            ] as SearchResult[],
+        },
+        {
+          name: "failing",
+          execute: async (_n: number): Promise<SearchResult[]> => {
+            throw new Error("timeout");
+          },
+        },
+        {
+          name: "exa",
+          execute: async (_n: number) =>
+            [
+              { title: "B", url: "https://b.com", snippet: "b" },
+            ] as SearchResult[],
+        },
+      ];
+
+      const result = await executeWithFusion({
+        candidates,
+        maxResults: 10,
+        mode: "all",
+        targetBackends: 3,
+        k: 60,
+      });
+
+      expect(result.providersUsed).toEqual(["brave", "exa"]);
+      expect(result.providersFailed).toEqual(["failing"]);
+      expect(result.results).toHaveLength(2);
+    });
+
+    it("distributes numResults across providers", async () => {
+      const capturedN: number[] = [];
+      const candidates = [
+        {
+          name: "a",
+          execute: async (n: number) => {
+            capturedN.push(n);
+            return [
+              { title: "A", url: "https://a.com", snippet: "a" },
+            ] as SearchResult[];
+          },
+        },
+        {
+          name: "b",
+          execute: async (n: number) => {
+            capturedN.push(n);
+            return [
+              { title: "B", url: "https://b.com", snippet: "b" },
+            ] as SearchResult[];
+          },
+        },
+        {
+          name: "c",
+          execute: async (n: number) => {
+            capturedN.push(n);
+            return [
+              { title: "C", url: "https://c.com", snippet: "c" },
+            ] as SearchResult[];
+          },
+        },
+      ];
+
+      await executeWithFusion({
+        candidates,
+        maxResults: 10,
+        mode: "all",
+        targetBackends: 3,
+        k: 60,
+      });
+
+      // Math.ceil(10 / 3) = 4
+      expect(capturedN).toEqual([4, 4, 4]);
+    });
+
+    it("calls onSuccess for each successful provider", async () => {
+      const onSuccess = vi.fn();
+      const candidates = [
+        {
+          name: "brave",
+          execute: async (_n: number) =>
+            [
+              { title: "A", url: "https://a.com", snippet: "a" },
+            ] as SearchResult[],
+        },
+        {
+          name: "exa",
+          execute: async (_n: number) =>
+            [
+              { title: "B", url: "https://b.com", snippet: "b" },
+            ] as SearchResult[],
+        },
+      ];
+
+      await executeWithFusion({
+        candidates,
+        maxResults: 10,
+        mode: "all",
+        targetBackends: 3,
+        k: 60,
+        onSuccess,
+      });
+
+      expect(onSuccess).toHaveBeenCalledTimes(2);
+      expect(onSuccess).toHaveBeenCalledWith("brave", expect.any(Number));
+      expect(onSuccess).toHaveBeenCalledWith("exa", expect.any(Number));
+    });
+
+    it("calls onFailure for each failed provider", async () => {
+      const onFailure = vi.fn();
+      const candidates = [
+        {
+          name: "brave",
+          execute: async (_n: number): Promise<SearchResult[]> => {
+            throw new Error("timeout");
+          },
+        },
+        {
+          name: "exa",
+          execute: async (_n: number) =>
+            [
+              { title: "A", url: "https://a.com", snippet: "a" },
+            ] as SearchResult[],
+        },
+      ];
+
+      await executeWithFusion({
+        candidates,
+        maxResults: 10,
+        mode: "all",
+        targetBackends: 3,
+        k: 60,
+        onFailure,
+      });
+
+      expect(onFailure).toHaveBeenCalledOnce();
+      expect(onFailure).toHaveBeenCalledWith("brave");
+    });
+
+    it("throws AggregateProviderError when all candidates fail", async () => {
+      const candidates = [
+        {
+          name: "brave",
+          execute: async (_n: number): Promise<SearchResult[]> => {
+            throw new Error("err-brave");
+          },
+        },
+        {
+          name: "exa",
+          execute: async (_n: number): Promise<SearchResult[]> => {
+            throw new Error("err-exa");
+          },
+        },
+      ];
+
+      await expect(
+        executeWithFusion({
+          candidates,
+          maxResults: 10,
+          mode: "all",
+          targetBackends: 3,
+          k: 60,
+        }),
+      ).rejects.toThrow("All search providers failed");
+    });
   });
 });
