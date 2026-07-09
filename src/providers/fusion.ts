@@ -45,8 +45,8 @@ export function reciprocalRankFusion(
         existing.rrfScore += rrfContribution;
         existing.providers.push(providerName);
         // Keep result with longer snippet
-        const existingLen = (existing.result.snippet ?? "").length;
-        const newLen = (r.snippet ?? "").length;
+        const existingLen = existing.result.snippet.length;
+        const newLen = r.snippet.length;
         if (newLen > existingLen) {
           existing.result = r;
         }

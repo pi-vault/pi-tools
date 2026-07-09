@@ -209,6 +209,67 @@ describe("reciprocalRankFusion", () => {
     expect(fused[0].providers).toEqual(["exa"]);
   });
 
+  it("does not deduplicate URLs with different query parameters", () => {
+    const providerResults = [
+      {
+        providerName: "brave",
+        results: [
+          { title: "A", url: "https://a.com?src=google", snippet: "a" },
+        ] as SearchResult[],
+      },
+      {
+        providerName: "exa",
+        results: [
+          { title: "A", url: "https://a.com?src=twitter", snippet: "a" },
+        ] as SearchResult[],
+      },
+    ];
+
+    const fused = reciprocalRankFusion(providerResults, 10);
+    expect(fused).toHaveLength(2);
+  });
+
+  it("prefers non-empty snippet over empty snippet on dedup", () => {
+    const providerResults = [
+      {
+        providerName: "brave",
+        results: [
+          { title: "A", url: "https://a.com", snippet: "" },
+        ] as SearchResult[],
+      },
+      {
+        providerName: "exa",
+        results: [
+          { title: "A Better", url: "https://a.com", snippet: "has content" },
+        ] as SearchResult[],
+      },
+    ];
+
+    const fused = reciprocalRankFusion(providerResults, 10);
+    expect(fused[0].result.snippet).toBe("has content");
+  });
+
+  it("falls back to lowercase comparison for invalid URLs", () => {
+    const providerResults = [
+      {
+        providerName: "brave",
+        results: [
+          { title: "A", url: "not-a-valid-url", snippet: "a" },
+        ] as SearchResult[],
+      },
+      {
+        providerName: "exa",
+        results: [
+          { title: "A", url: "NOT-A-VALID-URL", snippet: "a from exa" },
+        ] as SearchResult[],
+      },
+    ];
+
+    const fused = reciprocalRankFusion(providerResults, 10);
+    expect(fused).toHaveLength(1);
+    expect(fused[0].providers).toHaveLength(2);
+  });
+
   it("results with higher rank across more providers sort first", () => {
     // URL X is rank 0 in both providers, URL Y is rank 0 only in one
     const providerResults = [
