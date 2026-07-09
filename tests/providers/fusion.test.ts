@@ -143,4 +143,96 @@ describe("reciprocalRankFusion", () => {
     expect(fused).toHaveLength(1);
     expect(fused[0].providers).toHaveLength(2);
   });
+
+  it("keeps result with longer snippet on dedup", () => {
+    const providerResults = [
+      {
+        providerName: "brave",
+        results: [
+          { title: "A", url: "https://a.com", snippet: "short" },
+        ] as SearchResult[],
+      },
+      {
+        providerName: "exa",
+        results: [
+          {
+            title: "A Better",
+            url: "https://a.com",
+            snippet: "a much longer and more detailed snippet",
+          },
+        ] as SearchResult[],
+      },
+    ];
+
+    const fused = reciprocalRankFusion(providerResults, 10);
+    expect(fused[0].result.title).toBe("A Better");
+    expect(fused[0].result.snippet).toBe(
+      "a much longer and more detailed snippet",
+    );
+  });
+
+  it("uses custom k parameter for scoring", () => {
+    const providerResults = [
+      {
+        providerName: "brave",
+        results: [
+          { title: "A", url: "https://a.com", snippet: "a" },
+        ] as SearchResult[],
+      },
+    ];
+
+    // k=60 (default): score = 1/(60+0+1) = 1/61
+    const defaultK = reciprocalRankFusion(providerResults, 10, 60);
+    expect(defaultK[0].rrfScore).toBeCloseTo(1 / 61);
+
+    // k=10: score = 1/(10+0+1) = 1/11
+    const smallK = reciprocalRankFusion(providerResults, 10, 10);
+    expect(smallK[0].rrfScore).toBeCloseTo(1 / 11);
+  });
+
+  it("handles provider with empty results array", () => {
+    const providerResults = [
+      {
+        providerName: "brave",
+        results: [] as SearchResult[],
+      },
+      {
+        providerName: "exa",
+        results: [
+          { title: "A", url: "https://a.com", snippet: "a" },
+        ] as SearchResult[],
+      },
+    ];
+
+    const fused = reciprocalRankFusion(providerResults, 10);
+    expect(fused).toHaveLength(1);
+    expect(fused[0].providers).toEqual(["exa"]);
+  });
+
+  it("results with higher rank across more providers sort first", () => {
+    // URL X is rank 0 in both providers, URL Y is rank 0 only in one
+    const providerResults = [
+      {
+        providerName: "brave",
+        results: [
+          { title: "X", url: "https://x.com", snippet: "x" },
+          { title: "Y", url: "https://y.com", snippet: "y" },
+        ] as SearchResult[],
+      },
+      {
+        providerName: "exa",
+        results: [
+          { title: "X", url: "https://x.com", snippet: "x" },
+          { title: "Z", url: "https://z.com", snippet: "z" },
+        ] as SearchResult[],
+      },
+    ];
+
+    const fused = reciprocalRankFusion(providerResults, 10);
+    // X appears at rank 0 in both -> score = 2 * 1/(60+0+1) = 2/61
+    // Y appears at rank 1 in brave -> score = 1/(60+1+1) = 1/62
+    // Z appears at rank 1 in exa -> score = 1/(60+1+1) = 1/62
+    expect(fused[0].result.url).toBe("https://x.com");
+    expect(fused[0].rrfScore).toBeCloseTo(2 / 61);
+  });
 });
