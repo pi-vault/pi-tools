@@ -610,6 +610,7 @@ describe("targeted mode", () => {
 
     expect(result.providersUsed).toContain("good1");
     expect(result.providersUsed).toContain("good2");
+    expect(result.providersUsed).not.toContain("empty");
     // "empty" returned success but 0 results, not counted as usable
     expect(result.results).toHaveLength(2);
   });
@@ -750,13 +751,14 @@ async function executeTargeted(
 
     for (const entry of batchSettled) {
       if (entry.success) {
-        providersUsed.push(entry.name);
         if (entry.results.length > 0) {
+          providersUsed.push(entry.name);
           usableResults.push({
             providerName: entry.name,
             results: entry.results,
           });
         }
+        // empty results → not usable, not a failure, not counted as "used"
       } else {
         providersFailed.push(entry.name);
         errors.push({ provider: entry.name, error: entry.error });
