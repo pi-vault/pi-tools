@@ -57,6 +57,25 @@ describe("validateUrl", () => {
     expect(() => validateUrl("http://255.255.255.255")).toThrow(SSRFError);
   });
 
+  it("blocks IPv6 unspecified address", () => {
+    expect(() => validateUrl("http://[::]")).toThrow(SSRFError);
+  });
+
+  it("blocks IPv6 ULA (fc00::/7)", () => {
+    expect(() => validateUrl("http://[fc00::1]")).toThrow(SSRFError);
+    expect(() => validateUrl("http://[fd12:3456::1]")).toThrow(SSRFError);
+  });
+
+  it("blocks IPv6 link-local (fe80::/10)", () => {
+    expect(() => validateUrl("http://[fe80::1]")).toThrow(SSRFError);
+  });
+
+  it("blocks IPv4-mapped IPv6 with private IPv4", () => {
+    expect(() => validateUrl("http://[::ffff:127.0.0.1]")).toThrow(SSRFError);
+    expect(() => validateUrl("http://[::ffff:10.0.0.1]")).toThrow(SSRFError);
+    expect(() => validateUrl("http://[::ffff:192.168.1.1]")).toThrow(SSRFError);
+  });
+
   it("blocks cloud metadata endpoint", () => {
     expect(() => validateUrl("http://169.254.169.254")).toThrow(SSRFError);
     expect(() =>

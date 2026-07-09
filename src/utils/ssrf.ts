@@ -36,6 +36,36 @@ function isBlockedIPv4(ip: string): boolean {
   );
 }
 
+function isBlockedIPv6(ip: string): boolean {
+  const cleaned = ip.replace(/^\[|\]$/g, "");
+  const groups = parseIPv6(cleaned);
+  if (!groups) return true; // Unparseable → block
+
+  // Unspecified ::/128
+  if (groups.every((g) => g === 0)) return true;
+  // Loopback ::1/128
+  if (groups.slice(0, 7).every((g) => g === 0) && groups[7] === 1) return true;
+  // ULA fc00::/7
+  if ((groups[0] & 0xfe00) === 0xfc00) return true;
+  // Link-local fe80::/10
+  if ((groups[0] & 0xffc0) === 0xfe80) return true;
+
+  // IPv4-mapped ::ffff:x.x.x.x — delegate to IPv4 check
+  const isMapped =
+    groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff;
+  if (isMapped) {
+    const ipv4 = [
+      groups[6] >> 8,
+      groups[6] & 0xff,
+      groups[7] >> 8,
+      groups[7] & 0xff,
+    ].join(".");
+    return isBlockedIPv4(ipv4);
+  }
+
+  return false;
+}
+
 export interface ValidateUrlOptions {
   /** Explicit base URLs (scheme + host + port) that bypass hostname/IP blocks. */
   allowedBaseUrls?: string[];
@@ -93,10 +123,12 @@ export function validateUrl(url: string, opts?: ValidateUrlOptions): URL {
     }
 
     const cleanedIp = hostname.replace(/^\[|\]$/g, "");
-    if (cleanedIp === "::1") {
-      throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
-    }
-    if (net.isIP(cleanedIp) === 4 && isBlockedIPv4(cleanedIp)) {
+    const ipVersion = net.isIP(cleanedIp);
+    if (ipVersion === 6) {
+      if (isBlockedIPv6(cleanedIp)) {
+        throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
+      }
+    } else if (ipVersion === 4 && isBlockedIPv4(cleanedIp)) {
       throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
     }
   }
