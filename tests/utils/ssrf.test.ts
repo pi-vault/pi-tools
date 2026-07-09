@@ -70,6 +70,11 @@ describe("validateUrl", () => {
     expect(() => validateUrl("http://[fe80::1]")).toThrow(SSRFError);
   });
 
+  it("blocks IPv6 multicast (ff00::/8)", () => {
+    expect(() => validateUrl("http://[ff02::1]")).toThrow(SSRFError);
+    expect(() => validateUrl("http://[ff05::1:3]")).toThrow(SSRFError);
+  });
+
   it("blocks IPv4-mapped IPv6 with private IPv4", () => {
     expect(() => validateUrl("http://[::ffff:127.0.0.1]")).toThrow(SSRFError);
     expect(() => validateUrl("http://[::ffff:10.0.0.1]")).toThrow(SSRFError);
@@ -141,6 +146,16 @@ describe("validateUrl with allowRanges", () => {
       allowRanges: ["198.18.0.0/15"],
     });
     expect(result.hostname).toBe("198.18.1.1");
+  });
+
+  it("IPv4 allowRanges does not exempt IPv4-mapped IPv6 (family must match)", () => {
+    // ::ffff:198.18.1.1 is a 16-byte IPv6 address; "198.18.0.0/15" is a 4-byte rule.
+    // isInAllowedRange skips rules with different byte-length, so the address is still blocked.
+    expect(() =>
+      validateUrl("http://[::ffff:198.18.1.1]", {
+        allowRanges: ["198.18.0.0/15"],
+      }),
+    ).toThrow(SSRFError);
   });
 
   it("throws on malformed allowRanges config", () => {

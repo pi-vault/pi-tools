@@ -37,8 +37,7 @@ function isBlockedIPv4(ip: string): boolean {
 }
 
 function isBlockedIPv6(ip: string): boolean {
-  const cleaned = ip.replace(/^\[|\]$/g, "");
-  const groups = parseIPv6(cleaned);
+  const groups = parseIPv6(ip);
   if (!groups) return true; // Unparseable → block
 
   // Unspecified ::/128
@@ -49,6 +48,8 @@ function isBlockedIPv6(ip: string): boolean {
   if ((groups[0] & 0xfe00) === 0xfc00) return true;
   // Link-local fe80::/10
   if ((groups[0] & 0xffc0) === 0xfe80) return true;
+  // Multicast ff00::/8
+  if ((groups[0] & 0xff00) === 0xff00) return true;
 
   // IPv4-mapped ::ffff:x.x.x.x — delegate to IPv4 check
   const isMapped =
