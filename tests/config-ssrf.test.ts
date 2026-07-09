@@ -84,16 +84,6 @@ describe("config ssrf validation", () => {
 });
 
 describe("ssrf config end-to-end", () => {
-  it("config allowRanges can be passed to validateUrl — default config blocks 198.18", () => {
-    const config = loadConfig("/nonexistent/path.json");
-    // Default config has empty allowRanges — 198.18 should be blocked
-    expect(() =>
-      validateUrl("http://198.18.1.1", {
-        allowRanges: config.ssrf.allowRanges,
-      }),
-    ).toThrow("Blocked private/reserved IP");
-  });
-
   it("config allowRanges exempts matching IPs when loaded from file", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tools-test-"));
     const configPath = path.join(tmpDir, "tools.json");

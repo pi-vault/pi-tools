@@ -8,7 +8,6 @@ const DEFAULT_INSTANCE_URL = "http://localhost:8080";
 interface SearXNGOptions {
   instanceUrl?: string;
   apiKey?: string;
-  allowRanges?: string[];
 }
 
 interface SearXNGSearchResponse {
@@ -24,7 +23,6 @@ export class SearXNGProvider implements SearchProvider {
   readonly label = "SearXNG";
   readonly instanceUrl: string;
   private apiKey?: string;
-  private allowRanges?: string[];
 
   constructor(options?: SearXNGOptions) {
     this.instanceUrl =
@@ -32,7 +30,6 @@ export class SearXNGProvider implements SearchProvider {
       process.env.SEARXNG_URL ??
       DEFAULT_INSTANCE_URL;
     this.apiKey = options?.apiKey;
-    this.allowRanges = options?.allowRanges;
   }
 
   async search(
@@ -44,7 +41,7 @@ export class SearXNGProvider implements SearchProvider {
     const url = `${this.instanceUrl}/search?q=${encodeURIComponent(query)}&format=json`;
 
     // Allow localhost/private IPs for self-hosted instances
-    validateUrl(url, { allowedBaseUrls: [this.instanceUrl], allowRanges: this.allowRanges });
+    validateUrl(url, { allowedBaseUrls: [this.instanceUrl] });
 
     const headers: Record<string, string> = {
       Accept: "application/json",
@@ -79,7 +76,6 @@ export const providerMeta: ProviderMeta = {
     search: new SearXNGProvider({
       instanceUrl: providerConfig?.instanceUrl,
       apiKey: providerConfig?.apiKey ? resolveApiKey(providerConfig.apiKey) : undefined,
-      allowRanges: providerConfig?.ssrfAllowRanges,
     }),
   }),
 };
