@@ -85,6 +85,7 @@ export function createWebFetchTool(
   cache?: ContentCache,
   guidance?: GuidanceOverride,
   githubConfig?: GitHubConfig,
+  ssrfAllowRanges?: string[],
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
 
   async function executeSingleUrl(
@@ -104,7 +105,7 @@ export function createWebFetchTool(
       const extracted = await extractContent(
         url,
         signal,
-        { raw: params.raw, github: githubConfig },
+        { raw: params.raw, github: githubConfig, allowRanges: ssrfAllowRanges },
       );
 
       // Write to cache
@@ -204,7 +205,7 @@ export function createWebFetchTool(
         const extracted = await extractContent(
           u,
           signal ?? undefined,
-          { raw: params.raw, github: githubConfig },
+          { raw: params.raw, github: githubConfig, allowRanges: ssrfAllowRanges },
         );
 
         cache?.set(u, extracted);

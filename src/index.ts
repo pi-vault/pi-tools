@@ -80,6 +80,7 @@ export default function createExtension(pi: ExtensionAPI): void {
       fetchCache,
       configManager.current.guidance?.web_fetch,
       configManager.current.github,
+      configManager.current.ssrf.allowRanges,
     ),
   );
   pi.registerTool(createWebReadTool(store, configManager.current.guidance?.web_read));

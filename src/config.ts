@@ -3,12 +3,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { deepMerge } from "./utils/deep-merge.ts";
+import { parseAllowRanges } from "./utils/ssrf.ts";
 
 export interface ProviderConfigEntry {
   enabled: boolean;
   monthlyQuota?: number;
   apiKey?: string;
   instanceUrl?: string;
+  ssrfAllowRanges?: string[];
 }
 
 export interface GitHubConfig {
@@ -24,12 +26,17 @@ export interface GuidanceOverride {
   promptGuidelines?: string[];
 }
 
+export interface SsrfConfig {
+  allowRanges: string[];
+}
+
 export interface PiToolsConfig {
   defaultProvider: string;
   selectionStrategy: SelectionStrategy;
   providers: Record<string, ProviderConfigEntry>;
   github: GitHubConfig;
   guidance?: Record<string, GuidanceOverride>;
+  ssrf: SsrfConfig;
 }
 
 const ENV_VAR_PATTERN = /^[A-Z][A-Z0-9_]+$/;
@@ -62,6 +69,7 @@ const DEFAULT_CONFIG: PiToolsConfig = {
     context7: { enabled: true, apiKey: "CONTEXT7_API_KEY" },
   },
   github: DEFAULT_GITHUB_CONFIG,
+  ssrf: { allowRanges: [] },
 };
 
 export function getConfigPath(): string {
@@ -70,6 +78,13 @@ export function getConfigPath(): string {
 
 function getLegacyConfigPath(): string {
   return path.join(os.homedir(), ".pi", "agent", "extensions", "pi-tools.json");
+}
+
+function validateSsrfConfig(parsed: unknown): SsrfConfig {
+  const ssrf = { ...DEFAULT_CONFIG.ssrf, ...(parsed as Record<string, unknown>) };
+  // Eagerly validate so malformed config fails at load time, not on first URL fetch.
+  parseAllowRanges(ssrf.allowRanges);
+  return ssrf as SsrfConfig;
 }
 
 function parseConfigFile(raw: string): PiToolsConfig {
@@ -92,15 +107,24 @@ function parseConfigFile(raw: string): PiToolsConfig {
       ...parsed.github,
     },
     guidance: parsed.guidance,
+    ssrf: validateSsrfConfig(parsed.ssrf),
   };
 }
 
 export function loadConfig(configPath?: string): PiToolsConfig {
   const paths = configPath ? [configPath] : [getConfigPath(), getLegacyConfigPath()];
   for (const p of paths) {
+    let raw: string;
     try {
-      return parseConfigFile(fs.readFileSync(p, "utf-8"));
+      raw = fs.readFileSync(p, "utf-8");
     } catch { continue; }
+    try {
+      return parseConfigFile(raw);
+    } catch (e) {
+      // JSON syntax errors → fall through to defaults; validation errors → propagate
+      if (e instanceof SyntaxError) continue;
+      throw e;
+    }
   }
   return { ...DEFAULT_CONFIG };
 }
