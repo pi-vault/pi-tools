@@ -196,22 +196,13 @@ export function parseCidr(raw: string): ParsedCidr | null {
   if (prefixPart !== null && !/^\d+$/.test(prefixPart)) return null;
 
   const version = net.isIP(addrPart);
-
-  if (version === 4) {
-    const bytes = ipv4ToBytes(addrPart);
-    if (!bytes) return null;
-    const prefix = prefixPart === null ? 32 : Number(prefixPart);
-    if (!Number.isInteger(prefix) || prefix < 1 || prefix > 32) return null;
-    return { bytes, prefix };
-  }
-  if (version === 6) {
-    const groups = parseIPv6(addrPart);
-    if (!groups) return null;
-    const prefix = prefixPart === null ? 128 : Number(prefixPart);
-    if (!Number.isInteger(prefix) || prefix < 1 || prefix > 128) return null;
-    return { bytes: ipv6GroupsToBytes(groups), prefix };
-  }
-  return null;
+  if (version === 0) return null;
+  const maxPrefix = version === 4 ? 32 : 128;
+  const bytes = ipToBytes(addrPart, version);
+  if (!bytes) return null;
+  const prefix = prefixPart === null ? maxPrefix : Number(prefixPart);
+  if (!Number.isInteger(prefix) || prefix < 1 || prefix > maxPrefix) return null;
+  return { bytes, prefix };
 }
 
 /**
@@ -219,12 +210,11 @@ export function parseCidr(raw: string): ParsedCidr | null {
  * Returns validated CIDR rules. Throws on malformed entries (fail-loud).
  */
 export function parseAllowRanges(input: unknown): ParsedCidr[] {
-  if (input === undefined || input === null) return [];
+  if (input == null) return [];
   if (!Array.isArray(input)) {
     throw new Error("ssrf.allowRanges must be an array of CIDR strings");
   }
-  const rules: ParsedCidr[] = [];
-  for (const entry of input) {
+  return input.map((entry) => {
     if (typeof entry !== "string") {
       throw new Error(
         `ssrf.allowRanges entries must be strings, got ${typeof entry}`,
@@ -234,9 +224,8 @@ export function parseAllowRanges(input: unknown): ParsedCidr[] {
     if (!rule) {
       throw new Error(`Invalid CIDR notation in ssrf.allowRanges: "${entry}"`);
     }
-    rules.push(rule);
-  }
-  return rules;
+    return rule;
+  });
 }
 
 /** Compare the leading `prefix` bits of two equal-length byte arrays. */
