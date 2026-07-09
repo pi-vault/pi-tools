@@ -76,4 +76,71 @@ describe("reciprocalRankFusion", () => {
     expect(fused[0].result.url).toBe("https://a.com");
     expect(fused[0].providers).toEqual(["brave"]);
   });
+
+  it("deduplicates by normalized URL (trailing slash)", () => {
+    const providerResults = [
+      {
+        providerName: "brave",
+        results: [
+          { title: "A", url: "https://example.com/path/", snippet: "from brave" },
+        ] as SearchResult[],
+      },
+      {
+        providerName: "exa",
+        results: [
+          {
+            title: "A alt",
+            url: "https://example.com/path",
+            snippet: "from exa",
+          },
+        ] as SearchResult[],
+      },
+    ];
+
+    const fused = reciprocalRankFusion(providerResults, 10);
+    expect(fused).toHaveLength(1);
+    expect(fused[0].providers).toContain("brave");
+    expect(fused[0].providers).toContain("exa");
+  });
+
+  it("deduplicates by normalized URL (hash fragment stripped)", () => {
+    const providerResults = [
+      {
+        providerName: "brave",
+        results: [
+          { title: "A", url: "https://example.com/page#section1", snippet: "s" },
+        ] as SearchResult[],
+      },
+      {
+        providerName: "exa",
+        results: [
+          { title: "A", url: "https://example.com/page#section2", snippet: "s" },
+        ] as SearchResult[],
+      },
+    ];
+
+    const fused = reciprocalRankFusion(providerResults, 10);
+    expect(fused).toHaveLength(1);
+  });
+
+  it("deduplicates case-insensitively", () => {
+    const providerResults = [
+      {
+        providerName: "brave",
+        results: [
+          { title: "A", url: "https://Example.COM/Page", snippet: "s" },
+        ] as SearchResult[],
+      },
+      {
+        providerName: "exa",
+        results: [
+          { title: "A", url: "https://example.com/page", snippet: "s" },
+        ] as SearchResult[],
+      },
+    ];
+
+    const fused = reciprocalRankFusion(providerResults, 10);
+    expect(fused).toHaveLength(1);
+    expect(fused[0].providers).toHaveLength(2);
+  });
 });
