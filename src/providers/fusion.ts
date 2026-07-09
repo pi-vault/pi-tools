@@ -192,6 +192,70 @@ async function executeTargeted(
   onSuccess?: (name: string, latencyMs: number) => void,
   onFailure?: (name: string) => void,
 ): Promise<FusionResult> {
-  // Targeted mode implemented in next task
-  return executeAll(candidates, maxResults, targetBackends, k, onSuccess, onFailure);
+  const perProvider = Math.ceil(maxResults / targetBackends);
+  const providersUsed: string[] = [];
+  const providersFailed: string[] = [];
+  const usableResults: ProviderResults[] = [];
+  const errors: Array<{ provider: string; error: string }> = [];
+  let cursor = 0;
+
+  while (usableResults.length < targetBackends && cursor < candidates.length) {
+    const needed = targetBackends - usableResults.length;
+    const remaining = candidates.length - cursor;
+    const batchSize = Math.min(needed, remaining);
+    const batch = candidates.slice(cursor, cursor + batchSize);
+    cursor += batchSize;
+
+    const batchSettled = await Promise.all(
+      batch.map(async (candidate) => {
+        const startMs = Date.now();
+        try {
+          const results = await candidate.execute(perProvider);
+          const latencyMs = Date.now() - startMs;
+          onSuccess?.(candidate.name, latencyMs);
+          return { name: candidate.name, results, success: true as const };
+        } catch (err) {
+          onFailure?.(candidate.name);
+          return {
+            name: candidate.name,
+            error: err instanceof Error ? err.message : String(err),
+            success: false as const,
+          };
+        }
+      }),
+    );
+
+    for (const entry of batchSettled) {
+      if (entry.success) {
+        if (entry.results.length > 0) {
+          providersUsed.push(entry.name);
+          usableResults.push({ providerName: entry.name, results: entry.results });
+        }
+        // empty results → not usable, not a failure, not counted as "used"
+      } else {
+        providersFailed.push(entry.name);
+        errors.push({ provider: entry.name, error: entry.error });
+      }
+    }
+  }
+
+  if (usableResults.length === 0) {
+    throw new AggregateProviderError("search", errors);
+  }
+
+  const fused =
+    usableResults.length === 1
+      ? usableResults[0].results.slice(0, maxResults).map((r) => ({
+          result: r,
+          rrfScore: 0,
+          providers: [usableResults[0].providerName],
+        }))
+      : reciprocalRankFusion(usableResults, maxResults, k);
+
+  return {
+    results: fused,
+    providersUsed,
+    providersFailed,
+    degraded: usableResults.length < targetBackends,
+  };
 }

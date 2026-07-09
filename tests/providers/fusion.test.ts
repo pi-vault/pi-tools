@@ -485,4 +485,246 @@ describe("executeWithFusion", () => {
       ).rejects.toThrow("All search providers failed");
     });
   });
+
+  describe("targeted mode", () => {
+    it("stops after targetBackends usable providers respond", async () => {
+      const executionOrder: string[] = [];
+      const candidates = [
+        {
+          name: "a",
+          execute: async (_n: number) => {
+            executionOrder.push("a");
+            return [
+              { title: "A", url: "https://a.com", snippet: "a" },
+            ] as SearchResult[];
+          },
+        },
+        {
+          name: "b",
+          execute: async (_n: number) => {
+            executionOrder.push("b");
+            return [
+              { title: "B", url: "https://b.com", snippet: "b" },
+            ] as SearchResult[];
+          },
+        },
+        {
+          name: "c",
+          execute: async (_n: number) => {
+            executionOrder.push("c");
+            return [
+              { title: "C", url: "https://c.com", snippet: "c" },
+            ] as SearchResult[];
+          },
+        },
+        {
+          name: "d",
+          execute: async (_n: number) => {
+            executionOrder.push("d");
+            return [
+              { title: "D", url: "https://d.com", snippet: "d" },
+            ] as SearchResult[];
+          },
+        },
+      ];
+
+      const result = await executeWithFusion({
+        candidates,
+        maxResults: 10,
+        mode: "targeted",
+        targetBackends: 2,
+        k: 60,
+      });
+
+      // Should stop after finding 2 usable providers
+      expect(result.providersUsed).toHaveLength(2);
+      expect(executionOrder).toHaveLength(2);
+      expect(result.degraded).toBe(false);
+    });
+
+    it("continues to next batch when first batch has failures", async () => {
+      const candidates = [
+        {
+          name: "failing1",
+          execute: async (_n: number): Promise<SearchResult[]> => {
+            throw new Error("err");
+          },
+        },
+        {
+          name: "failing2",
+          execute: async (_n: number): Promise<SearchResult[]> => {
+            throw new Error("err");
+          },
+        },
+        {
+          name: "good1",
+          execute: async (_n: number) =>
+            [
+              { title: "A", url: "https://a.com", snippet: "a" },
+            ] as SearchResult[],
+        },
+        {
+          name: "good2",
+          execute: async (_n: number) =>
+            [
+              { title: "B", url: "https://b.com", snippet: "b" },
+            ] as SearchResult[],
+        },
+      ];
+
+      const result = await executeWithFusion({
+        candidates,
+        maxResults: 10,
+        mode: "targeted",
+        targetBackends: 2,
+        k: 60,
+      });
+
+      expect(result.providersUsed).toContain("good1");
+      expect(result.providersUsed).toContain("good2");
+      expect(result.providersFailed).toContain("failing1");
+      expect(result.providersFailed).toContain("failing2");
+      expect(result.degraded).toBe(false);
+    });
+
+    it("sets degraded when fewer providers respond than target", async () => {
+      const candidates = [
+        {
+          name: "good",
+          execute: async (_n: number) =>
+            [
+              { title: "A", url: "https://a.com", snippet: "a" },
+            ] as SearchResult[],
+        },
+        {
+          name: "failing",
+          execute: async (_n: number): Promise<SearchResult[]> => {
+            throw new Error("err");
+          },
+        },
+      ];
+
+      const result = await executeWithFusion({
+        candidates,
+        maxResults: 10,
+        mode: "targeted",
+        targetBackends: 3,
+        k: 60,
+      });
+
+      expect(result.providersUsed).toEqual(["good"]);
+      expect(result.degraded).toBe(true);
+      expect(result.results).toHaveLength(1);
+    });
+
+    it("treats empty results as not usable and continues", async () => {
+      const candidates = [
+        {
+          name: "empty",
+          execute: async (_n: number) => [] as SearchResult[],
+        },
+        {
+          name: "good1",
+          execute: async (_n: number) =>
+            [
+              { title: "A", url: "https://a.com", snippet: "a" },
+            ] as SearchResult[],
+        },
+        {
+          name: "good2",
+          execute: async (_n: number) =>
+            [
+              { title: "B", url: "https://b.com", snippet: "b" },
+            ] as SearchResult[],
+        },
+      ];
+
+      const result = await executeWithFusion({
+        candidates,
+        maxResults: 10,
+        mode: "targeted",
+        targetBackends: 2,
+        k: 60,
+      });
+
+      expect(result.providersUsed).toContain("good1");
+      expect(result.providersUsed).toContain("good2");
+      expect(result.providersUsed).not.toContain("empty");
+      // "empty" returned success but 0 results, not counted as usable
+      expect(result.results).toHaveLength(2);
+    });
+
+    it("distributes numResults using Math.ceil(maxResults / targetBackends)", async () => {
+      const capturedN: number[] = [];
+      const candidates = [
+        {
+          name: "a",
+          execute: async (n: number) => {
+            capturedN.push(n);
+            return [
+              { title: "A", url: "https://a.com", snippet: "a" },
+            ] as SearchResult[];
+          },
+        },
+        {
+          name: "b",
+          execute: async (n: number) => {
+            capturedN.push(n);
+            return [
+              { title: "B", url: "https://b.com", snippet: "b" },
+            ] as SearchResult[];
+          },
+        },
+        {
+          name: "c",
+          execute: async (n: number) => {
+            capturedN.push(n);
+            return [
+              { title: "C", url: "https://c.com", snippet: "c" },
+            ] as SearchResult[];
+          },
+        },
+      ];
+
+      await executeWithFusion({
+        candidates,
+        maxResults: 10,
+        mode: "targeted",
+        targetBackends: 3,
+        k: 60,
+      });
+
+      // Math.ceil(10 / 3) = 4
+      for (const n of capturedN) {
+        expect(n).toBe(4);
+      }
+    });
+
+    it("throws AggregateProviderError when no usable providers found", async () => {
+      const candidates = [
+        {
+          name: "a",
+          execute: async (_n: number): Promise<SearchResult[]> => {
+            throw new Error("err-a");
+          },
+        },
+        {
+          name: "b",
+          execute: async (_n: number): Promise<SearchResult[]> => {
+            throw new Error("err-b");
+          },
+        },
+      ];
+
+      await expect(
+        executeWithFusion({
+          candidates,
+          maxResults: 10,
+          mode: "targeted",
+          targetBackends: 3,
+          k: 60,
+        }),
+      ).rejects.toThrow("All search providers failed");
+    });
+  });
 });
