@@ -36,6 +36,51 @@ describe("validateUrl", () => {
     expect(() => validateUrl("http://169.254.1.1")).toThrow(SSRFError);
   });
 
+  it("blocks current-network addresses (0.0.0.0/8)", () => {
+    expect(() => validateUrl("http://0.0.0.1")).toThrow(SSRFError);
+    expect(() => validateUrl("http://0.255.255.255")).toThrow(SSRFError);
+  });
+
+  it("blocks carrier-grade NAT (100.64.0.0/10)", () => {
+    expect(() => validateUrl("http://100.64.0.1")).toThrow(SSRFError);
+    expect(() => validateUrl("http://100.127.255.255")).toThrow(SSRFError);
+  });
+
+  it("blocks benchmarking range (198.18.0.0/15)", () => {
+    expect(() => validateUrl("http://198.18.0.1")).toThrow(SSRFError);
+    expect(() => validateUrl("http://198.19.255.255")).toThrow(SSRFError);
+  });
+
+  it("blocks multicast and reserved (224.0.0.0+)", () => {
+    expect(() => validateUrl("http://224.0.0.1")).toThrow(SSRFError);
+    expect(() => validateUrl("http://239.255.255.255")).toThrow(SSRFError);
+    expect(() => validateUrl("http://255.255.255.255")).toThrow(SSRFError);
+  });
+
+  it("blocks IPv6 unspecified address", () => {
+    expect(() => validateUrl("http://[::]")).toThrow(SSRFError);
+  });
+
+  it("blocks IPv6 ULA (fc00::/7)", () => {
+    expect(() => validateUrl("http://[fc00::1]")).toThrow(SSRFError);
+    expect(() => validateUrl("http://[fd12:3456::1]")).toThrow(SSRFError);
+  });
+
+  it("blocks IPv6 link-local (fe80::/10)", () => {
+    expect(() => validateUrl("http://[fe80::1]")).toThrow(SSRFError);
+  });
+
+  it("blocks IPv6 multicast (ff00::/8)", () => {
+    expect(() => validateUrl("http://[ff02::1]")).toThrow(SSRFError);
+    expect(() => validateUrl("http://[ff05::1:3]")).toThrow(SSRFError);
+  });
+
+  it("blocks IPv4-mapped IPv6 with private IPv4", () => {
+    expect(() => validateUrl("http://[::ffff:127.0.0.1]")).toThrow(SSRFError);
+    expect(() => validateUrl("http://[::ffff:10.0.0.1]")).toThrow(SSRFError);
+    expect(() => validateUrl("http://[::ffff:192.168.1.1]")).toThrow(SSRFError);
+  });
+
   it("blocks cloud metadata endpoint", () => {
     expect(() => validateUrl("http://169.254.169.254")).toThrow(SSRFError);
     expect(() =>
@@ -53,6 +98,72 @@ describe("validateUrl", () => {
   it("blocks invalid URLs", () => {
     expect(() => validateUrl("not-a-url")).toThrow(SSRFError);
     expect(() => validateUrl("")).toThrow(SSRFError);
+  });
+});
+
+describe("validateUrl with allowRanges", () => {
+  it("allows a blocked IP when it falls in an allowed CIDR", () => {
+    const result = validateUrl("http://198.18.1.1/path", {
+      allowRanges: ["198.18.0.0/15"],
+    });
+    expect(result.hostname).toBe("198.18.1.1");
+  });
+
+  it("still blocks IPs NOT in allowRanges", () => {
+    expect(() =>
+      validateUrl("http://10.0.0.1", {
+        allowRanges: ["198.18.0.0/15"],
+      }),
+    ).toThrow(SSRFError);
+  });
+
+  it("allows IPv6 address when in allowed range", () => {
+    const result = validateUrl("http://[fd00::1]:8080/path", {
+      allowRanges: ["fd00::/8"],
+    });
+    expect(result.hostname).toBe("[fd00::1]");
+  });
+
+  it("does NOT bypass protocol check", () => {
+    expect(() =>
+      validateUrl("ftp://198.18.1.1", {
+        allowRanges: ["198.18.0.0/15"],
+      }),
+    ).toThrow("Blocked protocol");
+  });
+
+  it("does NOT bypass credentials check", () => {
+    expect(() =>
+      validateUrl("http://user:pass@198.18.1.1", {
+        allowRanges: ["198.18.0.0/15"],
+      }),
+    ).toThrow("credentials");
+  });
+
+  it("works alongside allowedBaseUrls (both independent)", () => {
+    const result = validateUrl("http://198.18.1.1:9090/path", {
+      allowedBaseUrls: ["http://localhost:8080"],
+      allowRanges: ["198.18.0.0/15"],
+    });
+    expect(result.hostname).toBe("198.18.1.1");
+  });
+
+  it("IPv4 allowRanges does not exempt IPv4-mapped IPv6 (family must match)", () => {
+    // ::ffff:198.18.1.1 is a 16-byte IPv6 address; "198.18.0.0/15" is a 4-byte rule.
+    // isInAllowedRange skips rules with different byte-length, so the address is still blocked.
+    expect(() =>
+      validateUrl("http://[::ffff:198.18.1.1]", {
+        allowRanges: ["198.18.0.0/15"],
+      }),
+    ).toThrow(SSRFError);
+  });
+
+  it("throws on malformed allowRanges config", () => {
+    expect(() =>
+      validateUrl("http://example.com", {
+        allowRanges: ["not-a-cidr"],
+      }),
+    ).toThrow("Invalid CIDR notation");
   });
 });
 

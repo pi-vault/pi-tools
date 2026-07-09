@@ -15,29 +15,54 @@ function isBlockedHostname(hostname: string): boolean {
   return false;
 }
 
-function isPrivateIP(hostname: string): boolean {
-  // Remove IPv6 brackets
-  const ip = hostname.replace(/^\[|\]$/g, "");
-
-  // IPv6 loopback
-  if (ip === "::1") return true;
-
-  // IPv4 checks
+function isBlockedIPv4(ip: string): boolean {
   const parts = ip.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p))) return false;
-
+  if (
+    parts.length !== 4 ||
+    parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)
+  )
+    return true;
   const [a, b] = parts;
+  return (
+    a === 0 || // 0.0.0.0/8 — current network
+    a === 10 || // 10.0.0.0/8 — private
+    a === 127 || // 127.0.0.0/8 — loopback
+    (a === 100 && b >= 64 && b <= 127) || // 100.64.0.0/10 — CGN
+    (a === 169 && b === 254) || // 169.254.0.0/16 — link-local
+    (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12 — private
+    (a === 192 && b === 168) || // 192.168.0.0/16 — private
+    (a === 198 && (b === 18 || b === 19)) || // 198.18.0.0/15 — benchmarking
+    a >= 224 // 224.0.0.0/4+ — multicast & reserved
+  );
+}
 
-  // Loopback: 127.0.0.0/8
-  if (a === 127) return true;
-  // 10.0.0.0/8
-  if (a === 10) return true;
-  // 172.16.0.0/12
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  // 192.168.0.0/16
-  if (a === 192 && b === 168) return true;
-  // Link-local: 169.254.0.0/16
-  if (a === 169 && b === 254) return true;
+function isBlockedIPv6(ip: string): boolean {
+  const groups = parseIPv6(ip);
+  if (!groups) return true; // Unparseable → block
+
+  // Unspecified ::/128
+  if (groups.every((g) => g === 0)) return true;
+  // Loopback ::1/128
+  if (groups.slice(0, 7).every((g) => g === 0) && groups[7] === 1) return true;
+  // ULA fc00::/7
+  if ((groups[0] & 0xfe00) === 0xfc00) return true;
+  // Link-local fe80::/10
+  if ((groups[0] & 0xffc0) === 0xfe80) return true;
+  // Multicast ff00::/8
+  if ((groups[0] & 0xff00) === 0xff00) return true;
+
+  // IPv4-mapped ::ffff:x.x.x.x — delegate to IPv4 check
+  const isMapped =
+    groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff;
+  if (isMapped) {
+    const ipv4 = [
+      groups[6] >> 8,
+      groups[6] & 0xff,
+      groups[7] >> 8,
+      groups[7] & 0xff,
+    ].join(".");
+    return isBlockedIPv4(ipv4);
+  }
 
   return false;
 }
@@ -45,6 +70,8 @@ function isPrivateIP(hostname: string): boolean {
 export interface ValidateUrlOptions {
   /** Explicit base URLs (scheme + host + port) that bypass hostname/IP blocks. */
   allowedBaseUrls?: string[];
+  /** CIDR ranges (e.g., "198.18.0.0/15") exempt from private/reserved IP checks. */
+  allowRanges?: string[];
 }
 
 function matchesAllowedBase(parsed: URL, allowedBaseUrls: string[]): boolean {
@@ -89,6 +116,9 @@ export function validateUrl(url: string, opts?: ValidateUrlOptions): URL {
     throw new SSRFError("URL has no hostname");
   }
 
+  // Parse allowRanges eagerly — misconfiguration must fail loud even for hostname URLs.
+  const allowedRanges = parseAllowRanges(opts?.allowRanges);
+
   const allowed =
     opts?.allowedBaseUrls?.length &&
     matchesAllowedBase(parsed, opts.allowedBaseUrls);
@@ -98,8 +128,17 @@ export function validateUrl(url: string, opts?: ValidateUrlOptions): URL {
       throw new SSRFError(`Blocked hostname: ${hostname}`);
     }
 
-    if (isPrivateIP(hostname)) {
-      throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
+    const cleanedIp = hostname.replace(/^\[|\]$/g, "");
+    const ipVersion = net.isIP(cleanedIp);
+
+    if (ipVersion > 0 && !isInAllowedRange(cleanedIp, ipVersion, allowedRanges)) {
+      if (ipVersion === 6) {
+        if (isBlockedIPv6(cleanedIp)) {
+          throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
+        }
+      } else if (isBlockedIPv4(cleanedIp)) {
+        throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
+      }
     }
   }
 
