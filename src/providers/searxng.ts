@@ -79,6 +79,7 @@ export const providerMeta: ProviderMeta = {
     search: new SearXNGProvider({
       instanceUrl: providerConfig?.instanceUrl,
       apiKey: providerConfig?.apiKey ? resolveApiKey(providerConfig.apiKey) : undefined,
+      allowRanges: providerConfig?.ssrfAllowRanges,
     }),
   }),
 };

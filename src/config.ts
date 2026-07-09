@@ -9,6 +9,7 @@ export interface ProviderConfigEntry {
   monthlyQuota?: number;
   apiKey?: string;
   instanceUrl?: string;
+  ssrfAllowRanges?: string[];
 }
 
 export interface GitHubConfig {

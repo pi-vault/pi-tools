@@ -324,7 +324,10 @@ describe("ConfigManager", () => {
     manager.refresh();
 
     expect(createFn).toHaveBeenCalledTimes(2);
-    expect(createFn).toHaveBeenLastCalledWith("new-resolved", updatedConfig.providers.brave);
+    expect(createFn).toHaveBeenLastCalledWith("new-resolved", {
+      ...updatedConfig.providers.brave,
+      ssrfAllowRanges: updatedConfig.ssrf.allowRanges,
+    });
   });
 
   it("preserves previous config when reload throws", () => {

@@ -113,9 +113,13 @@ export class ConfigManager {
     const resolvedKey = resolveApiKey(providerConfig?.apiKey);
     if (meta.requiresKey && !resolvedKey) return;
 
+    // Inject global ssrf.allowRanges so providers can use it without needing
+    // direct access to the global config.
+    const configWithSsrf = { ...providerConfig, ssrfAllowRanges: config.ssrf.allowRanges };
+
     let instances: ReturnType<typeof meta.create>;
     try {
-      instances = meta.create(resolvedKey, providerConfig);
+      instances = meta.create(resolvedKey, configWithSsrf);
     } catch {
       // Provider instantiation failed — skip, other providers unaffected
       return;
