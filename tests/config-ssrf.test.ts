@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.ts";
+import { validateUrl } from "../src/utils/ssrf.ts";
 
 describe("config ssrf defaults", () => {
   it("returns empty allowRanges by default", () => {
@@ -36,6 +37,35 @@ describe("config ssrf from file", () => {
 
     const config = loadConfig(configPath);
     expect(config.ssrf).toEqual({ allowRanges: [] });
+
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+});
+
+describe("ssrf config end-to-end", () => {
+  it("config allowRanges can be passed to validateUrl — default config blocks 198.18", () => {
+    const config = loadConfig("/nonexistent/path.json");
+    // Default config has empty allowRanges — 198.18 should be blocked
+    expect(() =>
+      validateUrl("http://198.18.1.1", {
+        allowRanges: config.ssrf.allowRanges,
+      }),
+    ).toThrow("Blocked private/reserved IP");
+  });
+
+  it("config allowRanges exempts matching IPs when loaded from file", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tools-test-"));
+    const configPath = path.join(tmpDir, "tools.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ ssrf: { allowRanges: ["198.18.0.0/15"] } }),
+    );
+
+    const config = loadConfig(configPath);
+    const result = validateUrl("http://198.18.1.1", {
+      allowRanges: config.ssrf.allowRanges,
+    });
+    expect(result.hostname).toBe("198.18.1.1");
 
     fs.rmSync(tmpDir, { recursive: true });
   });
