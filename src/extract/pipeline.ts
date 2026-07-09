@@ -46,6 +46,7 @@ const BROWSER_HEADERS: Record<string, string> = {
 export interface ExtractOptions {
   raw?: boolean;
   github?: GitHubConfig;
+  allowRanges?: string[];
 }
 
 export async function extractContent(
@@ -53,7 +54,7 @@ export async function extractContent(
   signal?: AbortSignal,
   options?: ExtractOptions,
 ): Promise<ExtractedContent> {
-  validateUrl(url);
+  validateUrl(url, { allowRanges: options?.allowRanges });
 
   // GitHub interception: try structured extraction before HTML scraping.
   // Only fires for content URLs (blob, tree, root, raw).
