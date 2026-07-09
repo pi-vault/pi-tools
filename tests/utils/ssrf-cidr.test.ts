@@ -50,6 +50,11 @@ describe("parseIPv6", () => {
     expect(parseIPv6("gggg::1")).toBeNull();
     expect(parseIPv6("12345::1")).toBeNull(); // 5 hex digits
   });
+
+  it("returns null for malformed IPv4-mapped suffix", () => {
+    expect(parseIPv6("::ffff:256.1.1.1")).toBeNull(); // invalid octet
+    expect(parseIPv6("::ffff:1.2.3")).toBeNull(); // incomplete IPv4
+  });
 });
 
 describe("ipv4ToBytes", () => {
@@ -74,6 +79,12 @@ describe("ipv4ToBytes", () => {
     expect(ipv4ToBytes("1.2.3")).toBeNull();
     expect(ipv4ToBytes("1.2.3.4.5")).toBeNull();
     expect(ipv4ToBytes("abc.def.ghi.jkl")).toBeNull();
+  });
+
+  it("treats leading zeros as decimal (not octal)", () => {
+    expect(ipv4ToBytes("192.168.001.001")).toEqual(
+      new Uint8Array([192, 168, 1, 1]),
+    );
   });
 });
 
@@ -248,7 +259,7 @@ describe("bytesMatchPrefix", () => {
   });
 
   it("handles partial-byte prefix (/12)", () => {
-    // 172.16.0.0/12 means first 12 bits must match: 10101100.0001xxxx
+    // 172.16.0.0/12: first 12 bits must match: 10101100.0001xxxx
     const addr = new Uint8Array([172, 31, 255, 255]); // inside
     const network = new Uint8Array([172, 16, 0, 0]);
     expect(bytesMatchPrefix(addr, network, 12)).toBe(true);
