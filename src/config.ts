@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { deepMerge } from "./utils/deep-merge.ts";
+import { parseAllowRanges } from "./utils/ssrf.ts";
 
 export interface ProviderConfigEntry {
   enabled: boolean;
@@ -79,6 +80,13 @@ function getLegacyConfigPath(): string {
   return path.join(os.homedir(), ".pi", "agent", "extensions", "pi-tools.json");
 }
 
+function validateSsrfConfig(parsed: unknown): SsrfConfig {
+  const ssrf = { ...DEFAULT_CONFIG.ssrf, ...(parsed as Record<string, unknown>) };
+  // Eagerly validate so malformed config fails at load time, not on first URL fetch.
+  parseAllowRanges(ssrf.allowRanges);
+  return ssrf as SsrfConfig;
+}
+
 function parseConfigFile(raw: string): PiToolsConfig {
   const parsed = JSON.parse(raw);
 
@@ -99,19 +107,24 @@ function parseConfigFile(raw: string): PiToolsConfig {
       ...parsed.github,
     },
     guidance: parsed.guidance,
-    ssrf: {
-      ...DEFAULT_CONFIG.ssrf,
-      ...parsed.ssrf,
-    },
+    ssrf: validateSsrfConfig(parsed.ssrf),
   };
 }
 
 export function loadConfig(configPath?: string): PiToolsConfig {
   const paths = configPath ? [configPath] : [getConfigPath(), getLegacyConfigPath()];
   for (const p of paths) {
+    let raw: string;
     try {
-      return parseConfigFile(fs.readFileSync(p, "utf-8"));
+      raw = fs.readFileSync(p, "utf-8");
     } catch { continue; }
+    try {
+      return parseConfigFile(raw);
+    } catch (e) {
+      // JSON syntax errors → fall through to defaults; validation errors → propagate
+      if (e instanceof SyntaxError) continue;
+      throw e;
+    }
   }
   return { ...DEFAULT_CONFIG };
 }

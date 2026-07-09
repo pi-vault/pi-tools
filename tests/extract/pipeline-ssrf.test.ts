@@ -16,7 +16,9 @@ describe("extractContent SSRF with allowRanges", () => {
     const result = extractContent("http://198.18.1.1/page", signal, {
       allowRanges: ["198.18.0.0/15"],
     });
-    // Expect a network/abort error, not an SSRFError
-    await expect(result).rejects.not.toThrow(SSRFError);
+    // Should reject with a network/abort error, never SSRFError
+    await expect(result).rejects.toSatisfy(
+      (err) => !(err instanceof SSRFError),
+    );
   }, 2000);
 });

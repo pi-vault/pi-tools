@@ -42,6 +42,47 @@ describe("config ssrf from file", () => {
   });
 });
 
+describe("config ssrf validation", () => {
+  it("throws at load time when allowRanges is not an array", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tools-test-"));
+    const configPath = path.join(tmpDir, "tools.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ ssrf: { allowRanges: "not-an-array" } }),
+    );
+
+    expect(() => loadConfig(configPath)).toThrow("ssrf.allowRanges must be an array");
+
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it("throws at load time when allowRanges contains non-string entries", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tools-test-"));
+    const configPath = path.join(tmpDir, "tools.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ ssrf: { allowRanges: [123] } }),
+    );
+
+    expect(() => loadConfig(configPath)).toThrow("ssrf.allowRanges entries must be strings");
+
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+
+  it("throws at load time when allowRanges contains invalid CIDR", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tools-test-"));
+    const configPath = path.join(tmpDir, "tools.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({ ssrf: { allowRanges: ["not-a-cidr"] } }),
+    );
+
+    expect(() => loadConfig(configPath)).toThrow("Invalid CIDR notation in ssrf.allowRanges");
+
+    fs.rmSync(tmpDir, { recursive: true });
+  });
+});
+
 describe("ssrf config end-to-end", () => {
   it("config allowRanges can be passed to validateUrl — default config blocks 198.18", () => {
     const config = loadConfig("/nonexistent/path.json");
