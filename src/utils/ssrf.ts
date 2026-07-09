@@ -15,31 +15,25 @@ function isBlockedHostname(hostname: string): boolean {
   return false;
 }
 
-function isPrivateIP(hostname: string): boolean {
-  // Remove IPv6 brackets
-  const ip = hostname.replace(/^\[|\]$/g, "");
-
-  // IPv6 loopback
-  if (ip === "::1") return true;
-
-  // IPv4 checks
+function isBlockedIPv4(ip: string): boolean {
   const parts = ip.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((p) => Number.isNaN(p))) return false;
-
+  if (
+    parts.length !== 4 ||
+    parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)
+  )
+    return true;
   const [a, b] = parts;
-
-  // Loopback: 127.0.0.0/8
-  if (a === 127) return true;
-  // 10.0.0.0/8
-  if (a === 10) return true;
-  // 172.16.0.0/12
-  if (a === 172 && b >= 16 && b <= 31) return true;
-  // 192.168.0.0/16
-  if (a === 192 && b === 168) return true;
-  // Link-local: 169.254.0.0/16
-  if (a === 169 && b === 254) return true;
-
-  return false;
+  return (
+    a === 0 || // 0.0.0.0/8 — current network
+    a === 10 || // 10.0.0.0/8 — private
+    a === 127 || // 127.0.0.0/8 — loopback
+    (a === 100 && b >= 64 && b <= 127) || // 100.64.0.0/10 — CGN
+    (a === 169 && b === 254) || // 169.254.0.0/16 — link-local
+    (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12 — private
+    (a === 192 && b === 168) || // 192.168.0.0/16 — private
+    (a === 198 && (b === 18 || b === 19)) || // 198.18.0.0/15 — benchmarking
+    a >= 224 // 224.0.0.0/4+ — multicast & reserved
+  );
 }
 
 export interface ValidateUrlOptions {
@@ -98,7 +92,11 @@ export function validateUrl(url: string, opts?: ValidateUrlOptions): URL {
       throw new SSRFError(`Blocked hostname: ${hostname}`);
     }
 
-    if (isPrivateIP(hostname)) {
+    const cleanedIp = hostname.replace(/^\[|\]$/g, "");
+    if (cleanedIp === "::1") {
+      throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
+    }
+    if (net.isIP(cleanedIp) === 4 && isBlockedIPv4(cleanedIp)) {
       throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
     }
   }

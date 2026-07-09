@@ -36,6 +36,27 @@ describe("validateUrl", () => {
     expect(() => validateUrl("http://169.254.1.1")).toThrow(SSRFError);
   });
 
+  it("blocks current-network addresses (0.0.0.0/8)", () => {
+    expect(() => validateUrl("http://0.0.0.1")).toThrow(SSRFError);
+    expect(() => validateUrl("http://0.255.255.255")).toThrow(SSRFError);
+  });
+
+  it("blocks carrier-grade NAT (100.64.0.0/10)", () => {
+    expect(() => validateUrl("http://100.64.0.1")).toThrow(SSRFError);
+    expect(() => validateUrl("http://100.127.255.255")).toThrow(SSRFError);
+  });
+
+  it("blocks benchmarking range (198.18.0.0/15)", () => {
+    expect(() => validateUrl("http://198.18.0.1")).toThrow(SSRFError);
+    expect(() => validateUrl("http://198.19.255.255")).toThrow(SSRFError);
+  });
+
+  it("blocks multicast and reserved (224.0.0.0+)", () => {
+    expect(() => validateUrl("http://224.0.0.1")).toThrow(SSRFError);
+    expect(() => validateUrl("http://239.255.255.255")).toThrow(SSRFError);
+    expect(() => validateUrl("http://255.255.255.255")).toThrow(SSRFError);
+  });
+
   it("blocks cloud metadata endpoint", () => {
     expect(() => validateUrl("http://169.254.169.254")).toThrow(SSRFError);
     expect(() =>
