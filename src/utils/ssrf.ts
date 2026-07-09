@@ -69,6 +69,8 @@ function isBlockedIPv6(ip: string): boolean {
 export interface ValidateUrlOptions {
   /** Explicit base URLs (scheme + host + port) that bypass hostname/IP blocks. */
   allowedBaseUrls?: string[];
+  /** CIDR ranges (e.g., "198.18.0.0/15") exempt from private/reserved IP checks. */
+  allowRanges?: string[];
 }
 
 function matchesAllowedBase(parsed: URL, allowedBaseUrls: string[]): boolean {
@@ -113,6 +115,9 @@ export function validateUrl(url: string, opts?: ValidateUrlOptions): URL {
     throw new SSRFError("URL has no hostname");
   }
 
+  // Parse allowRanges eagerly — misconfiguration must fail loud even for hostname URLs.
+  const allowedRanges = parseAllowRanges(opts?.allowRanges);
+
   const allowed =
     opts?.allowedBaseUrls?.length &&
     matchesAllowedBase(parsed, opts.allowedBaseUrls);
@@ -124,12 +129,15 @@ export function validateUrl(url: string, opts?: ValidateUrlOptions): URL {
 
     const cleanedIp = hostname.replace(/^\[|\]$/g, "");
     const ipVersion = net.isIP(cleanedIp);
-    if (ipVersion === 6) {
-      if (isBlockedIPv6(cleanedIp)) {
+
+    if (ipVersion > 0 && !isInAllowedRange(cleanedIp, ipVersion, allowedRanges)) {
+      if (ipVersion === 6) {
+        if (isBlockedIPv6(cleanedIp)) {
+          throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
+        }
+      } else if (isBlockedIPv4(cleanedIp)) {
         throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
       }
-    } else if (ipVersion === 4 && isBlockedIPv4(cleanedIp)) {
-      throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
     }
   }
 

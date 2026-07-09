@@ -96,6 +96,62 @@ describe("validateUrl", () => {
   });
 });
 
+describe("validateUrl with allowRanges", () => {
+  it("allows a blocked IP when it falls in an allowed CIDR", () => {
+    const result = validateUrl("http://198.18.1.1/path", {
+      allowRanges: ["198.18.0.0/15"],
+    });
+    expect(result.hostname).toBe("198.18.1.1");
+  });
+
+  it("still blocks IPs NOT in allowRanges", () => {
+    expect(() =>
+      validateUrl("http://10.0.0.1", {
+        allowRanges: ["198.18.0.0/15"],
+      }),
+    ).toThrow(SSRFError);
+  });
+
+  it("allows IPv6 address when in allowed range", () => {
+    const result = validateUrl("http://[fd00::1]:8080/path", {
+      allowRanges: ["fd00::/8"],
+    });
+    expect(result.hostname).toBe("[fd00::1]");
+  });
+
+  it("does NOT bypass protocol check", () => {
+    expect(() =>
+      validateUrl("ftp://198.18.1.1", {
+        allowRanges: ["198.18.0.0/15"],
+      }),
+    ).toThrow("Blocked protocol");
+  });
+
+  it("does NOT bypass credentials check", () => {
+    expect(() =>
+      validateUrl("http://user:pass@198.18.1.1", {
+        allowRanges: ["198.18.0.0/15"],
+      }),
+    ).toThrow("credentials");
+  });
+
+  it("works alongside allowedBaseUrls (both independent)", () => {
+    const result = validateUrl("http://198.18.1.1:9090/path", {
+      allowedBaseUrls: ["http://localhost:8080"],
+      allowRanges: ["198.18.0.0/15"],
+    });
+    expect(result.hostname).toBe("198.18.1.1");
+  });
+
+  it("throws on malformed allowRanges config", () => {
+    expect(() =>
+      validateUrl("http://example.com", {
+        allowRanges: ["not-a-cidr"],
+      }),
+    ).toThrow("Invalid CIDR notation");
+  });
+});
+
 describe("validateUrl with allowedBaseUrls", () => {
   it("allows localhost URL when it matches an allowed base URL", () => {
     const result = validateUrl(
