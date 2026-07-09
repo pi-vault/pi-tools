@@ -24,12 +24,17 @@ export interface GuidanceOverride {
   promptGuidelines?: string[];
 }
 
+export interface SsrfConfig {
+  allowRanges: string[];
+}
+
 export interface PiToolsConfig {
   defaultProvider: string;
   selectionStrategy: SelectionStrategy;
   providers: Record<string, ProviderConfigEntry>;
   github: GitHubConfig;
   guidance?: Record<string, GuidanceOverride>;
+  ssrf: SsrfConfig;
 }
 
 const ENV_VAR_PATTERN = /^[A-Z][A-Z0-9_]+$/;
@@ -62,6 +67,7 @@ const DEFAULT_CONFIG: PiToolsConfig = {
     context7: { enabled: true, apiKey: "CONTEXT7_API_KEY" },
   },
   github: DEFAULT_GITHUB_CONFIG,
+  ssrf: { allowRanges: [] },
 };
 
 export function getConfigPath(): string {
@@ -92,6 +98,10 @@ function parseConfigFile(raw: string): PiToolsConfig {
       ...parsed.github,
     },
     guidance: parsed.guidance,
+    ssrf: {
+      ...DEFAULT_CONFIG.ssrf,
+      ...parsed.ssrf,
+    },
   };
 }
 
