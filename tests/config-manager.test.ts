@@ -26,6 +26,7 @@ function makeConfig(overrides: Partial<PiToolsConfig> = {}): PiToolsConfig {
       exa: { enabled: false, apiKey: "EXA_API_KEY" },
     },
     github: { enabled: true, maxRepoSizeMB: 350, cloneTimeoutSeconds: 30 },
+    ssrf: { allowRanges: [] },
     ...overrides,
   };
 }
