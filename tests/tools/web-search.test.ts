@@ -590,7 +590,7 @@ describe("web_search renderResult fusion display", () => {
     >[3];
   }
 
-  it("collapsed view shows 'N results fused from providerList'", async () => {
+  it("collapsed and expanded views show fusion provider attribution", async () => {
     const providerBrave = makeProvider("brave", [
       { title: "A", url: "https://a.com", snippet: "s" },
     ]);
@@ -609,45 +609,21 @@ describe("web_search renderResult fusion display", () => {
     const ctx = makeCtx();
     const result = await tool.execute("id", { query: "test", combine: true }, undefined, undefined, ctx);
 
-    const textComponent = new Text("", 0, 0);
-    const setTextSpy = vi.spyOn(textComponent, "setText");
-    tool.renderResult!(result, { expanded: false, isPartial: false }, makeMockTheme(), makeRenderCtx(textComponent));
+    // Collapsed
+    const collapsed = new Text("", 0, 0);
+    const collapsedSpy = vi.spyOn(collapsed, "setText");
+    tool.renderResult!(result, { expanded: false, isPartial: false }, makeMockTheme(), makeRenderCtx(collapsed));
+    const collapsedText = collapsedSpy.mock.calls[0][0] as string;
+    expect(collapsedText).toContain("fused from");
+    expect(collapsedText).toContain("brave");
 
-    expect(setTextSpy).toHaveBeenCalled();
-    const rendered = setTextSpy.mock.calls[0][0] as string;
-    expect(rendered).toContain("fused from");
-    expect(rendered).toContain("brave");
-    expect(rendered).toContain("exa");
-  });
-
-  it("expanded view shows fusion header with provider list", async () => {
-    const providerBrave = makeProvider("brave", [
-      { title: "A", url: "https://a.com", snippet: "s" },
-    ]);
-    const providerExa = makeProvider("exa", [
-      { title: "B", url: "https://b.com", snippet: "s" },
-    ]);
-
-    const tool = createWebSearchTool(
-      () => [providerBrave, providerExa],
-      vi.fn(),
-      undefined,
-      vi.fn(),
-      vi.fn(),
-      combineConfig,
-    );
-    const ctx = makeCtx();
-    const result = await tool.execute("id", { query: "test", combine: true }, undefined, undefined, ctx);
-
-    const textComponent = new Text("", 0, 0);
-    const setTextSpy = vi.spyOn(textComponent, "setText");
-    tool.renderResult!(result, { expanded: true, isPartial: false }, makeMockTheme(), makeRenderCtx(textComponent));
-
-    expect(setTextSpy).toHaveBeenCalled();
-    const rendered = setTextSpy.mock.calls[0][0] as string;
-    expect(rendered).toContain("fused");
-    expect(rendered).toContain("brave");
-    expect(rendered).toContain("exa");
+    // Expanded
+    const expanded = new Text("", 0, 0);
+    const expandedSpy = vi.spyOn(expanded, "setText");
+    tool.renderResult!(result, { expanded: true, isPartial: false }, makeMockTheme(), makeRenderCtx(expanded));
+    const expandedText = expandedSpy.mock.calls[0][0] as string;
+    expect(expandedText).toContain("fused");
+    expect(expandedText).toContain("exa");
   });
 
   it("expanded view shows per-result provider tags next to URLs", async () => {

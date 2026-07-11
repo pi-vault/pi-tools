@@ -5,7 +5,6 @@ import type { SearchFilters, SearchProvider, SearchResult } from "../providers/t
 import { executeWithFallback } from "../providers/execute.ts";
 import type { GuidanceOverride, CombineConfig } from "../config.ts";
 import { executeWithFusion } from "../providers/fusion.ts";
-import type { FusedResult } from "../providers/fusion.ts";
 
 const WebSearchParams = Type.Object({
   query: Type.String({ description: "Search query" }),
@@ -102,21 +101,15 @@ function buildFilters(params: {
 
 function formatFusionOutput(
   results: SearchResult[],
-  fusionResult: { providersUsed: string[]; degraded: boolean; results: FusedResult[] },
+  degraded: boolean,
+  providerCount: number,
   compact: boolean,
 ): string {
-  const lines: string[] = [];
-  if (fusionResult.degraded) {
-    lines.push(
-      `Warning: Only ${fusionResult.providersUsed.length} of target providers responded (quota exhaustion)`,
-    );
-  }
-  if (results.length === 0) {
-    lines.push("No results found.");
-    return lines.join("\n");
-  }
-  lines.push(compact ? formatResultsCompact(results) : formatResults(results));
-  return lines.join("\n");
+  const warn = degraded
+    ? `Warning: Only ${providerCount} of target providers responded (quota exhaustion)\n`
+    : "";
+  if (results.length === 0) return `${warn}No results found.`;
+  return `${warn}${compact ? formatResultsCompact(results) : formatResults(results)}`;
 }
 
 export function createWebSearchTool(
@@ -177,7 +170,12 @@ export function createWebSearchTool(
           }
 
           const searchResults = fusionResult.results.map((f) => f.result);
-          const text = formatFusionOutput(searchResults, fusionResult, params.compact ?? false);
+          const text = formatFusionOutput(
+            searchResults,
+            fusionResult.degraded,
+            fusionResult.providersUsed.length,
+            params.compact ?? false,
+          );
 
           return {
             content: [{ type: "text" as const, text }],
@@ -254,15 +252,17 @@ export function createWebSearchTool(
       const count = result.details?.resultCount ?? 0;
       const provider = result.details?.provider ?? "unknown";
 
+      const meta = result.details?.fusionMeta;
+      const label = meta
+        ? `${count} results fused${meta.degraded ? " (degraded)" : ""} from ${meta.providersUsed.join(", ")}`
+        : `${count} results via ${provider}`;
+
       if (options.expanded) {
         const raw =
           result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
 
-        if (result.details?.fusionMeta) {
-          const meta = result.details.fusionMeta;
-          const header = meta.degraded
-            ? theme.fg("warning", `${count} results fused (degraded) from ${meta.providersUsed.join(", ")}`)
-            : theme.fg("toolOutput", `${count} results fused from ${meta.providersUsed.join(", ")}`);
+        if (meta) {
+          const header = theme.fg(meta.degraded ? "warning" : "toolOutput", label);
           const resultLines = raw.split("\n").slice(0, 15).map((line) => {
             const match = meta.results.find((r) => line.includes(r.url));
             if (match) return theme.fg("toolOutput", `${line}  [${match.providers.join(", ")}]`);
@@ -274,15 +274,7 @@ export function createWebSearchTool(
           text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));
         }
       } else {
-        if (result.details?.fusionMeta) {
-          const meta = result.details.fusionMeta;
-          const status = meta.degraded
-            ? `${count} results fused (degraded) from ${meta.providersUsed.join(", ")}`
-            : `${count} results fused from ${meta.providersUsed.join(", ")}`;
-          text.setText(theme.fg("toolOutput", status));
-        } else {
-          text.setText(theme.fg("toolOutput", `${count} results via ${provider}`));
-        }
+        text.setText(theme.fg("toolOutput", label));
       }
       return text;
     },
