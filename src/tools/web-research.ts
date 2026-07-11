@@ -134,6 +134,7 @@ export function createWebResearchTool(
     ],
     parameters: WebResearchParams,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      // Defense-in-depth: config is captured at registration time
       if (!deepResearchConfig.enabled) {
         throw new Error("web_research is disabled via deepResearch.enabled config.");
       }

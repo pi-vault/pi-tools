@@ -3,6 +3,7 @@ import { createWebSearchTool } from "../../src/tools/web-search.ts";
 import { createWebFetchTool } from "../../src/tools/web-fetch.ts";
 import { createWebReadTool } from "../../src/tools/web-read.ts";
 import { createCodeSearchTool } from "../../src/tools/code-search.ts";
+import { createWebResearchTool } from "../../src/tools/web-research.ts";
 import type { GuidanceOverride } from "../../src/config.ts";
 import type { ContentStore } from "../../src/storage.ts";
 
@@ -107,5 +108,27 @@ describe("prompt guidance overrides", () => {
     expect(tool.promptSnippet).toBe(
       "Search code, library APIs, and technical documentation across the web.",
     );
+  });
+
+  it("web_research uses custom promptSnippet when provided", () => {
+    const guidance: GuidanceOverride = {
+      promptSnippet: "Custom research snippet",
+    };
+    const tool = createWebResearchTool("key", { enabled: true }, vi.fn(), guidance);
+    expect(tool.promptSnippet).toBe("Custom research snippet");
+  });
+
+  it("web_research uses custom promptGuidelines when provided", () => {
+    const guidance: GuidanceOverride = {
+      promptGuidelines: ["Research guideline A"],
+    };
+    const tool = createWebResearchTool("key", { enabled: true }, vi.fn(), guidance);
+    expect(tool.promptGuidelines).toEqual(["Research guideline A"]);
+  });
+
+  it("web_research uses defaults when no guidance provided", () => {
+    const tool = createWebResearchTool("key", { enabled: true }, vi.fn());
+    expect(tool.promptSnippet).toContain("Exa deep research");
+    expect(tool.promptGuidelines!.length).toBeGreaterThan(0);
   });
 });

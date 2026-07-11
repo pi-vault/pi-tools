@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { Text } from "@earendil-works/pi-tui";
 import { createWebSearchTool } from "../../src/tools/web-search.ts";
 import { createWebFetchTool } from "../../src/tools/web-fetch.ts";
 import { createCodeSearchTool } from "../../src/tools/code-search.ts";
 import { createWebReadTool } from "../../src/tools/web-read.ts";
+import { createWebResearchTool } from "../../src/tools/web-research.ts";
 import { ContentStore } from "../../src/storage.ts";
 import { DuckDuckGoProvider } from "../../src/providers/duckduckgo.ts";
 
@@ -16,6 +17,7 @@ const mockTheme = {
 function makeContext(
   overrides: Partial<{
     isPartial: boolean;
+    isError: boolean;
     expanded: boolean;
     lastComponent: unknown;
     argsComplete: boolean;
@@ -258,5 +260,99 @@ describe("component reuse across renders", () => {
     const ctx = makeContext({ lastComponent: existing });
     const returned = tool.renderCall!({ url: "https://example.com" }, mockTheme, ctx);
     expect(returned).toBe(existing);
+  });
+});
+
+describe("web_research rendering", () => {
+  const tool = createWebResearchTool("key", { enabled: true }, vi.fn());
+
+  it("renderCall shows tool name and query preview with mode", () => {
+    const component = tool.renderCall!(
+      { query: "what are the best testing frameworks" },
+      mockTheme,
+      makeContext(),
+    );
+    expect(component).toBeInstanceOf(Text);
+    const output = component.render(120).join("");
+    expect(output).toContain("web_research");
+    expect(output).toContain("what are the best testing frameworks");
+    expect(output).toContain("standard");
+  });
+
+  it("renderCall truncates long queries at 60 chars", () => {
+    const longQuery = "a".repeat(80);
+    const component = tool.renderCall!({ query: longQuery }, mockTheme, makeContext());
+    const output = component.render(120).join("");
+    expect(output).toContain("a".repeat(57) + "...");
+    expect(output).not.toContain("a".repeat(58));
+  });
+
+  it("renderCall shows streaming placeholder when args are incomplete", () => {
+    const component = tool.renderCall!(
+      { query: "" },
+      mockTheme,
+      makeContext({ argsComplete: false }),
+    );
+    const output = component.render(120).join("");
+    expect(output).toContain("Researching");
+    expect(output).not.toContain("web_research");
+  });
+
+  it("renderCall displays specified researchMode", () => {
+    const component = tool.renderCall!(
+      { query: "test", researchMode: "full" },
+      mockTheme,
+      makeContext(),
+    );
+    const output = component.render(120).join("");
+    expect(output).toContain("full");
+  });
+
+  it("renderResult shows source count and output path", () => {
+    const result = {
+      content: [{ type: "text" as const, text: "report content" }],
+      details: { sourceCount: 7, outputPath: "/tmp/findings.md", metadata: {} },
+    };
+    const component = tool.renderResult!(
+      result,
+      { expanded: false, isPartial: false },
+      mockTheme,
+      makeContext(),
+    );
+    expect(component).toBeInstanceOf(Text);
+    const output = component.render(120).join("");
+    expect(output).toContain("7 sources");
+    expect(output).toContain("findings.md");
+  });
+
+  it("renderResult shows error text on failure", () => {
+    const result = {
+      content: [{ type: "text" as const, text: "API rate limit exceeded" }],
+      details: undefined as any,
+    };
+    const component = tool.renderResult!(
+      result,
+      { expanded: false, isPartial: false },
+      mockTheme,
+      makeContext({ isError: true }),
+    );
+    const output = component.render(120).join("");
+    expect(output).toContain("failed");
+    expect(output).toContain("API rate limit exceeded");
+  });
+
+  it("renderResult shows placeholder when partial", () => {
+    const result = {
+      content: [],
+      details: undefined as any,
+    };
+    const component = tool.renderResult!(
+      result,
+      { expanded: false, isPartial: true },
+      mockTheme,
+      makeContext({ isPartial: true }),
+    );
+    const output = component.render(120).join("");
+    expect(output).toContain("Researching");
   });
 });
