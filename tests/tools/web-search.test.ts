@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
+import { Text } from "@earendil-works/pi-tui";
 import { createWebSearchTool } from "../../src/tools/web-search.ts";
 import { makeCtx } from "../helpers.ts";
 import type { SearchFilters, SearchProvider, SearchResult } from "../../src/providers/types.ts";
+import type { Theme } from "@earendil-works/pi-coding-agent";
+
+function makeMockTheme(): Theme {
+  return {
+    fg: (_color: string, text: string) => text,
+    bold: (text: string) => text,
+  } as unknown as Theme;
+}
 
 function makeProvider(name: string, results: SearchResult[]): SearchProvider {
   return {
@@ -376,6 +385,240 @@ describe("web_search compact output", () => {
     );
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toBe("No results found.");
+  });
+});
+
+describe("web_search fusion mode", () => {
+  const resultA: SearchResult = { title: "Result A", url: "https://a.com", snippet: "Snippet A" };
+  const resultB: SearchResult = { title: "Result B", url: "https://b.com", snippet: "Snippet B" };
+  const resultC: SearchResult = { title: "Result C", url: "https://c.com", snippet: "Snippet C" };
+
+  const combineConfig = { enabled: true, mode: "targeted" as const, targetBackends: 3, k: 60 };
+
+  it("fusionMeta.results tracks which providers found each URL", async () => {
+    const sharedResult: SearchResult = { title: "Shared", url: "https://shared.com", snippet: "shared" };
+    const providerBrave = makeProvider("brave", [sharedResult, resultA]);
+    const providerExa = makeProvider("exa", [sharedResult, resultC]);
+
+    const tool = createWebSearchTool(
+      () => [providerBrave, providerExa],
+      vi.fn(),
+      undefined,
+      vi.fn(),
+      vi.fn(),
+      combineConfig,
+    );
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-fuse-6",
+      { query: "test", combine: true },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const sharedEntry = result.details.fusionMeta!.results.find(
+      (r) => r.url === "https://shared.com",
+    );
+    expect(sharedEntry?.providers).toContain("brave");
+    expect(sharedEntry?.providers).toContain("exa");
+  });
+
+  it("falls back to single-provider when only 1 candidate available", async () => {
+    const providerBrave = makeProvider("brave", [resultA]);
+
+    const tool = createWebSearchTool(
+      () => [providerBrave],
+      vi.fn(),
+      undefined,
+      vi.fn(),
+      vi.fn(),
+      combineConfig,
+    );
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-fuse-5",
+      { query: "test", combine: true },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(result.details.provider).toBe("brave");
+    expect(result.details.fusionMeta).toBeUndefined();
+  });
+
+  it("degraded warning appears in output when fewer providers than target respond", async () => {
+    const providerBrave = makeProvider("brave", [resultA]);
+    const failingExa = makeFailingProvider("exa", "API error");
+
+    const tool = createWebSearchTool(
+      () => [providerBrave, failingExa],
+      vi.fn(),
+      undefined,
+      vi.fn(),
+      vi.fn(),
+      { ...combineConfig, targetBackends: 3 },
+    );
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-fuse-4",
+      { query: "test", combine: true },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("Warning");
+    expect(result.details.fusionMeta!.degraded).toBe(true);
+  });
+
+  it("config-driven fusion activates when no param override and config.enabled=true", async () => {
+    const providerBrave = makeProvider("brave", [resultA]);
+    const providerExa = makeProvider("exa", [resultB]);
+
+    const tool = createWebSearchTool(
+      (_name, combine) => (combine ? [providerBrave, providerExa] : [providerBrave]),
+      vi.fn(),
+      undefined,
+      vi.fn(),
+      vi.fn(),
+      combineConfig,
+    );
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-fuse-3",
+      { query: "test" },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(result.details.provider).toBe("fusion");
+  });
+
+  it("combine=false forces fallback even when config has enabled=true", async () => {
+    const providerBrave = makeProvider("brave", [resultA]);
+    const providerExa = makeProvider("exa", [resultB]);
+
+    const tool = createWebSearchTool(
+      () => [providerBrave, providerExa],
+      vi.fn(),
+      undefined,
+      vi.fn(),
+      vi.fn(),
+      combineConfig,
+    );
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-fuse-2",
+      { query: "test", combine: false },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(result.details.provider).toBe("brave");
+    expect(result.details.fusionMeta).toBeUndefined();
+  });
+
+  it("combine param triggers fusion path and returns fused results", async () => {
+    const providerBrave = makeProvider("brave", [resultA, resultB]);
+    const providerExa = makeProvider("exa", [resultB, resultC]);
+
+    const tool = createWebSearchTool(
+      () => [providerBrave, providerExa],
+      vi.fn(),
+      undefined,
+      vi.fn(),
+      vi.fn(),
+      combineConfig,
+    );
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-fuse-1",
+      { query: "test", combine: true },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(result.details.provider).toBe("fusion");
+    expect(result.details.resultCount).toBeGreaterThan(0);
+    expect(result.details.fusionMeta).toBeDefined();
+    expect(result.details.fusionMeta!.providersUsed).toContain("brave");
+    expect(result.details.fusionMeta!.providersUsed).toContain("exa");
+  });
+});
+
+describe("web_search renderResult fusion display", () => {
+  const combineConfig = { enabled: true, mode: "targeted" as const, targetBackends: 3, k: 60 };
+
+  function makeRenderCtx(textComponent: Text) {
+    return { lastComponent: textComponent, isPartial: false } as unknown as Parameters<
+      NonNullable<ReturnType<typeof createWebSearchTool>["renderResult"]>
+    >[3];
+  }
+
+  it("collapsed view shows 'N results fused from providerList'", async () => {
+    const providerBrave = makeProvider("brave", [
+      { title: "A", url: "https://a.com", snippet: "s" },
+    ]);
+    const providerExa = makeProvider("exa", [
+      { title: "B", url: "https://b.com", snippet: "s" },
+    ]);
+
+    const tool = createWebSearchTool(
+      () => [providerBrave, providerExa],
+      vi.fn(),
+      undefined,
+      vi.fn(),
+      vi.fn(),
+      combineConfig,
+    );
+    const ctx = makeCtx();
+    const result = await tool.execute("id", { query: "test", combine: true }, undefined, undefined, ctx);
+
+    const textComponent = new Text("", 0, 0);
+    const setTextSpy = vi.spyOn(textComponent, "setText");
+    tool.renderResult!(result, { expanded: false, isPartial: false }, makeMockTheme(), makeRenderCtx(textComponent));
+
+    expect(setTextSpy).toHaveBeenCalled();
+    const rendered = setTextSpy.mock.calls[0][0] as string;
+    expect(rendered).toContain("fused from");
+    expect(rendered).toContain("brave");
+    expect(rendered).toContain("exa");
+  });
+
+  it("expanded view shows fusion header with provider list", async () => {
+    const providerBrave = makeProvider("brave", [
+      { title: "A", url: "https://a.com", snippet: "s" },
+    ]);
+    const providerExa = makeProvider("exa", [
+      { title: "B", url: "https://b.com", snippet: "s" },
+    ]);
+
+    const tool = createWebSearchTool(
+      () => [providerBrave, providerExa],
+      vi.fn(),
+      undefined,
+      vi.fn(),
+      vi.fn(),
+      combineConfig,
+    );
+    const ctx = makeCtx();
+    const result = await tool.execute("id", { query: "test", combine: true }, undefined, undefined, ctx);
+
+    const textComponent = new Text("", 0, 0);
+    const setTextSpy = vi.spyOn(textComponent, "setText");
+    tool.renderResult!(result, { expanded: true, isPartial: false }, makeMockTheme(), makeRenderCtx(textComponent));
+
+    expect(setTextSpy).toHaveBeenCalled();
+    const rendered = setTextSpy.mock.calls[0][0] as string;
+    expect(rendered).toContain("fused");
+    expect(rendered).toContain("brave");
+    expect(rendered).toContain("exa");
   });
 });
 
