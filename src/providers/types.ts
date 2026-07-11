@@ -43,11 +43,7 @@ export interface FetchProvider {
 
 export interface CodeSearchProvider {
   readonly name: string;
-  codeSearch(
-    query: string,
-    maxResults: number,
-    signal?: AbortSignal,
-  ): Promise<CodeSearchResult[]>;
+  codeSearch(query: string, maxResults: number, signal?: AbortSignal): Promise<CodeSearchResult[]>;
 }
 
 export type ProviderTier = 1 | 2 | 3;
@@ -57,7 +53,10 @@ export interface ProviderMeta {
   tier: ProviderTier;
   monthlyQuota: number | null;
   requiresKey: boolean;
-  create: (key?: string, providerConfig?: ProviderConfigEntry) => {
+  create: (
+    key?: string,
+    providerConfig?: ProviderConfigEntry,
+  ) => {
     search?: SearchProvider;
     fetch?: FetchProvider;
     codeSearch?: CodeSearchProvider;
@@ -83,9 +82,5 @@ export interface DocsProvider {
     query: string,
     signal?: AbortSignal,
   ): Promise<DocsSearchResult[]>;
-  getContext(
-    libraryId: string,
-    query: string,
-    signal?: AbortSignal,
-  ): Promise<string>;
+  getContext(libraryId: string, query: string, signal?: AbortSignal): Promise<string>;
 }

@@ -7,8 +7,12 @@ import type { SearchFilters } from "../../src/providers/types.ts";
 describe("FirecrawlProvider", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
 
-  beforeEach(() => { fetchStub = stubFetch(); });
-  afterEach(() => { fetchStub.restore(); });
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+  afterEach(() => {
+    fetchStub.restore();
+  });
 
   it("has correct name and label", () => {
     expect(new FirecrawlProvider("key").name).toBe("firecrawl");
@@ -18,9 +22,7 @@ describe("FirecrawlProvider", () => {
   it("returns search results", async () => {
     fetchStub.addResponse("api.firecrawl.dev/v1/search", {
       body: {
-        data: [
-          { title: "FC Result", url: "https://firecrawl.dev", markdown: "snippet text" },
-        ],
+        data: [{ title: "FC Result", url: "https://firecrawl.dev", markdown: "snippet text" }],
       },
     });
     const results = await new FirecrawlProvider("key").search("test", 5);

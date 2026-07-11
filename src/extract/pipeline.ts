@@ -78,9 +78,7 @@ export async function extractContent(
       redirect: "follow",
     });
   } catch (err) {
-    throw new RetryableExtractionError(
-      err instanceof Error ? err.message : String(err),
-    );
+    throw new RetryableExtractionError(err instanceof Error ? err.message : String(err));
   }
 
   chain.push(`http:${response.status}`);
@@ -142,9 +140,7 @@ export async function extractContent(
       // fall through
     }
     chain.push("pdf:fail");
-    throw new Error(
-      `Could not extract content from ${url}. Tried: ${chain.join(" -> ")}`,
-    );
+    throw new Error(`Could not extract content from ${url}. Tried: ${chain.join(" -> ")}`);
   }
 
   const body = await response.text();
@@ -195,7 +191,10 @@ export async function extractContent(
   chain.push("jina-reader:fail");
 
   // Final fallback: raw text stripped of HTML
-  const rawText = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  const rawText = body
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
   if (rawText.length > 0) {
     chain.push("raw-text");
     return {
@@ -208,7 +207,5 @@ export async function extractContent(
     };
   }
 
-  throw new Error(
-    `Could not extract content from ${url}. Tried: ${chain.join(" -> ")}`,
-  );
+  throw new Error(`Could not extract content from ${url}. Tried: ${chain.join(" -> ")}`);
 }

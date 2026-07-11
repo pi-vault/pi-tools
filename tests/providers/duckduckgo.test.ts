@@ -73,9 +73,7 @@ describe("DuckDuckGoProvider", () => {
   it("respects abort signal", async () => {
     const controller = new AbortController();
     controller.abort();
-    await expect(
-      provider.search("test", 5, controller.signal),
-    ).rejects.toThrow();
+    await expect(provider.search("test", 5, controller.signal)).rejects.toThrow();
   });
 
   it("cleans up temp file after success", async () => {
@@ -103,16 +101,12 @@ describe("DuckDuckGoProvider", () => {
 
   it("throws contextual error on malformed JSON", async () => {
     execStub.setOutput("not valid json" as unknown);
-    await expect(provider.search("test", 5)).rejects.toThrow(
-      /failed to parse ddgs output/i,
-    );
+    await expect(provider.search("test", 5)).rejects.toThrow(/failed to parse ddgs output/i);
   });
 
   it("throws contextual error when output is not an array", async () => {
     execStub.setOutput({ unexpected: "object" });
-    await expect(provider.search("test", 5)).rejects.toThrow(
-      /failed to parse ddgs output/i,
-    );
+    await expect(provider.search("test", 5)).rejects.toThrow(/failed to parse ddgs output/i);
   });
 
   describe("search filters", () => {

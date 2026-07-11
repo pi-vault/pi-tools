@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  researchModeDefaults,
-  defaultResearchOutputSchema,
-} from "../../src/research/types.ts";
+import { researchModeDefaults, defaultResearchOutputSchema } from "../../src/research/types.ts";
 
 describe("researchModeDefaults", () => {
   it("lite uses deep-lite type with 15 results", () => {

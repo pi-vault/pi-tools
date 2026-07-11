@@ -56,13 +56,7 @@ describe("web_search tool", () => {
   it("executes search and returns formatted results", async () => {
     const tool = createWebSearchTool(() => [makeProvider("stub", sampleResults)]);
     const ctx = makeCtx();
-    const result = await tool.execute(
-      "call-1",
-      { query: "typescript" },
-      undefined,
-      undefined,
-      ctx,
-    );
+    const result = await tool.execute("call-1", { query: "typescript" }, undefined, undefined, ctx);
     expect(result.content).toBeDefined();
     expect(result.content.length).toBeGreaterThan(0);
     expect(result.content[0]).toHaveProperty("type", "text");
@@ -74,13 +68,7 @@ describe("web_search tool", () => {
   it("returns error result on provider failure", async () => {
     const tool = createWebSearchTool(() => [makeFailingProvider("stub", "Provider exploded")]);
     const ctx = makeCtx();
-    const result = await tool.execute(
-      "call-2",
-      { query: "test" },
-      undefined,
-      undefined,
-      ctx,
-    );
+    const result = await tool.execute("call-2", { query: "test" }, undefined, undefined, ctx);
     // Tool should not throw — it returns an error in content
     expect(result.content[0]).toHaveProperty("type", "text");
     const text = (result.content[0] as { type: "text"; text: string }).text;
@@ -155,9 +143,7 @@ function makeCapturingProvider(): {
       filters?: SearchFilters,
     ): Promise<SearchResult[]> {
       captured.push({ query, filters });
-      return [
-        { title: "Captured Result", url: "https://example.com", snippet: "captured" },
-      ];
+      return [{ title: "Captured Result", url: "https://example.com", snippet: "captured" }];
     },
   };
   return { provider, captured };
@@ -240,13 +226,7 @@ describe("web_search filter parameters", () => {
     const { provider, captured } = makeCapturingProvider();
     const tool = createWebSearchTool(() => [provider]);
     const ctx = makeCtx();
-    await tool.execute(
-      "call-f5",
-      { query: "test" },
-      undefined,
-      undefined,
-      ctx,
-    );
+    await tool.execute("call-f5", { query: "test" }, undefined, undefined, ctx);
     expect(captured).toHaveLength(1);
     expect(captured[0].filters).toBeUndefined();
   });
@@ -346,13 +326,7 @@ describe("web_search compact output", () => {
   it("returns full format when compact is not set", async () => {
     const tool = createWebSearchTool(() => [makeProvider("stub", sampleResults)]);
     const ctx = makeCtx();
-    const result = await tool.execute(
-      "call-c2",
-      { query: "test" },
-      undefined,
-      undefined,
-      ctx,
-    );
+    const result = await tool.execute("call-c2", { query: "test" }, undefined, undefined, ctx);
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toContain("[TypeScript]");
     expect(text).toContain("A typed superset of JavaScript");
@@ -425,7 +399,11 @@ describe("web_search fusion mode", () => {
   });
 
   it("fusionMeta.results tracks which providers found each URL", async () => {
-    const sharedResult: SearchResult = { title: "Shared", url: "https://shared.com", snippet: "shared" };
+    const sharedResult: SearchResult = {
+      title: "Shared",
+      url: "https://shared.com",
+      snippet: "shared",
+    };
     const providerBrave = makeProvider("brave", [sharedResult, resultA]);
     const providerExa = makeProvider("exa", [sharedResult, resultC]);
 
@@ -516,13 +494,7 @@ describe("web_search fusion mode", () => {
       combineConfig,
     );
     const ctx = makeCtx();
-    const result = await tool.execute(
-      "call-fuse-3",
-      { query: "test" },
-      undefined,
-      undefined,
-      ctx,
-    );
+    const result = await tool.execute("call-fuse-3", { query: "test" }, undefined, undefined, ctx);
 
     expect(result.details.provider).toBe("fusion");
   });
@@ -594,9 +566,7 @@ describe("web_search renderResult fusion display", () => {
     const providerBrave = makeProvider("brave", [
       { title: "A", url: "https://a.com", snippet: "s" },
     ]);
-    const providerExa = makeProvider("exa", [
-      { title: "B", url: "https://b.com", snippet: "s" },
-    ]);
+    const providerExa = makeProvider("exa", [{ title: "B", url: "https://b.com", snippet: "s" }]);
 
     const tool = createWebSearchTool(
       () => [providerBrave, providerExa],
@@ -607,12 +577,23 @@ describe("web_search renderResult fusion display", () => {
       combineConfig,
     );
     const ctx = makeCtx();
-    const result = await tool.execute("id", { query: "test", combine: true }, undefined, undefined, ctx);
+    const result = await tool.execute(
+      "id",
+      { query: "test", combine: true },
+      undefined,
+      undefined,
+      ctx,
+    );
 
     // Collapsed
     const collapsed = new Text("", 0, 0);
     const collapsedSpy = vi.spyOn(collapsed, "setText");
-    tool.renderResult!(result, { expanded: false, isPartial: false }, makeMockTheme(), makeRenderCtx(collapsed));
+    tool.renderResult!(
+      result,
+      { expanded: false, isPartial: false },
+      makeMockTheme(),
+      makeRenderCtx(collapsed),
+    );
     const collapsedText = collapsedSpy.mock.calls[0][0] as string;
     expect(collapsedText).toContain("fused from");
     expect(collapsedText).toContain("brave");
@@ -620,15 +601,28 @@ describe("web_search renderResult fusion display", () => {
     // Expanded
     const expanded = new Text("", 0, 0);
     const expandedSpy = vi.spyOn(expanded, "setText");
-    tool.renderResult!(result, { expanded: true, isPartial: false }, makeMockTheme(), makeRenderCtx(expanded));
+    tool.renderResult!(
+      result,
+      { expanded: true, isPartial: false },
+      makeMockTheme(),
+      makeRenderCtx(expanded),
+    );
     const expandedText = expandedSpy.mock.calls[0][0] as string;
     expect(expandedText).toContain("fused");
     expect(expandedText).toContain("exa");
   });
 
   it("expanded view shows per-result provider tags next to URLs", async () => {
-    const sharedResult: SearchResult = { title: "Shared", url: "https://shared.com", snippet: "shared snippet" };
-    const onlyBrave: SearchResult = { title: "Brave Only", url: "https://brave-only.com", snippet: "brave snippet" };
+    const sharedResult: SearchResult = {
+      title: "Shared",
+      url: "https://shared.com",
+      snippet: "shared snippet",
+    };
+    const onlyBrave: SearchResult = {
+      title: "Brave Only",
+      url: "https://brave-only.com",
+      snippet: "brave snippet",
+    };
     const providerBrave = makeProvider("brave", [sharedResult, onlyBrave]);
     const providerExa = makeProvider("exa", [sharedResult]);
 
@@ -641,11 +635,22 @@ describe("web_search renderResult fusion display", () => {
       combineConfig,
     );
     const ctx = makeCtx();
-    const result = await tool.execute("id", { query: "test", combine: true }, undefined, undefined, ctx);
+    const result = await tool.execute(
+      "id",
+      { query: "test", combine: true },
+      undefined,
+      undefined,
+      ctx,
+    );
 
     const textComponent = new Text("", 0, 0);
     const setTextSpy = vi.spyOn(textComponent, "setText");
-    tool.renderResult!(result, { expanded: true, isPartial: false }, makeMockTheme(), makeRenderCtx(textComponent));
+    tool.renderResult!(
+      result,
+      { expanded: true, isPartial: false },
+      makeMockTheme(),
+      makeRenderCtx(textComponent),
+    );
 
     const rendered = setTextSpy.mock.calls[0][0] as string;
     // Shared result found by both providers should have both tags
@@ -664,10 +669,7 @@ describe("web_search metrics callbacks", () => {
 
   it("calls onSuccess with provider name and latencyMs on success", async () => {
     const onSuccess = vi.fn();
-    const tool = createWebSearchTool(
-      () => [makeProvider("brave", sampleResults)],
-      onSuccess,
-    );
+    const tool = createWebSearchTool(() => [makeProvider("brave", sampleResults)], onSuccess);
     const ctx = makeCtx();
     await tool.execute("id", { query: "test" }, undefined, undefined, ctx);
 
@@ -685,12 +687,7 @@ describe("web_search metrics callbacks", () => {
       label: "Brave",
       search: vi.fn().mockRejectedValue(new Error("API error")),
     };
-    const tool = createWebSearchTool(
-      () => [provider],
-      undefined,
-      undefined,
-      onFailure,
-    );
+    const tool = createWebSearchTool(() => [provider], undefined, undefined, onFailure);
     const ctx = makeCtx();
     await tool.execute("id", { query: "test" }, undefined, undefined, ctx);
 
@@ -723,13 +720,7 @@ describe("web_search metrics callbacks", () => {
       onResult,
     );
     const ctx = makeCtx();
-    await tool.execute(
-      "id",
-      { query: "test", numResults: 10 },
-      undefined,
-      undefined,
-      ctx,
-    );
+    await tool.execute("id", { query: "test", numResults: 10 }, undefined, undefined, ctx);
 
     expect(onResult).toHaveBeenCalledOnce();
     expect(onResult).toHaveBeenCalledWith("brave", 1, 10);

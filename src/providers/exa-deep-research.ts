@@ -18,30 +18,21 @@ function normalizeResults(raw: any): DeepResearchResult[] {
     highlights: Array.isArray(r.highlights)
       ? r.highlights.filter((h: unknown) => typeof h === "string")
       : undefined,
-    publishedDate:
-      typeof r.publishedDate === "string" ? r.publishedDate : undefined,
+    publishedDate: typeof r.publishedDate === "string" ? r.publishedDate : undefined,
   }));
 }
 
 function synthesizeAnswer(raw: any): string | undefined {
   const outputContent = raw?.output?.content;
-  if (typeof outputContent === "string" && outputContent.trim())
-    return outputContent;
-  if (
-    outputContent &&
-    typeof outputContent === "object" &&
-    !Array.isArray(outputContent)
-  ) {
+  if (typeof outputContent === "string" && outputContent.trim()) return outputContent;
+  if (outputContent && typeof outputContent === "object" && !Array.isArray(outputContent)) {
     const parts: string[] = [];
     if (typeof outputContent.executiveSummary === "string")
       parts.push(outputContent.executiveSummary);
     if (Array.isArray(outputContent.keyFindings)) {
-      parts.push(
-        outputContent.keyFindings.map((f: string) => `- ${f}`).join("\n"),
-      );
+      parts.push(outputContent.keyFindings.map((f: string) => `- ${f}`).join("\n"));
     }
-    if (typeof outputContent.recommendation === "string")
-      parts.push(outputContent.recommendation);
+    if (typeof outputContent.recommendation === "string") parts.push(outputContent.recommendation);
     if (parts.length) return parts.join("\n\n");
   }
   if (typeof raw?.answer === "string" && raw.answer.trim()) return raw.answer;
@@ -72,9 +63,7 @@ export class ExaDeepResearchClient {
       highlightsOptions.numSentences = params.highlightNumSentences;
     if (params.highlightsPerUrl != null)
       highlightsOptions.highlightsPerUrl = params.highlightsPerUrl;
-    const highlights = Object.keys(highlightsOptions).length
-      ? highlightsOptions
-      : true;
+    const highlights = Object.keys(highlightsOptions).length ? highlightsOptions : true;
 
     const contents: Record<string, unknown> = {
       text: { maxCharacters: params.textMaxCharacters ?? 12000 },
@@ -91,16 +80,11 @@ export class ExaDeepResearchClient {
 
     if (params.category) body.category = params.category;
     if (params.maxAgeHours != null) body.maxAgeHours = params.maxAgeHours;
-    if (params.includeDomains?.length)
-      body.includeDomains = params.includeDomains;
-    if (params.excludeDomains?.length)
-      body.excludeDomains = params.excludeDomains;
-    if (params.startPublishedDate)
-      body.startPublishedDate = params.startPublishedDate;
-    if (params.endPublishedDate)
-      body.endPublishedDate = params.endPublishedDate;
-    if (params.additionalQueries?.length)
-      body.additionalQueries = params.additionalQueries;
+    if (params.includeDomains?.length) body.includeDomains = params.includeDomains;
+    if (params.excludeDomains?.length) body.excludeDomains = params.excludeDomains;
+    if (params.startPublishedDate) body.startPublishedDate = params.startPublishedDate;
+    if (params.endPublishedDate) body.endPublishedDate = params.endPublishedDate;
+    if (params.additionalQueries?.length) body.additionalQueries = params.additionalQueries;
     if (params.systemPrompt) body.systemPrompt = params.systemPrompt;
     if (params.outputSchema) body.outputSchema = params.outputSchema;
 

@@ -69,11 +69,17 @@ export class ExaProvider implements SearchProvider, FetchProvider, CodeSearchPro
     if (!response.ok) throw new Error(`Exa API error: ${response.status} ${response.statusText}`);
     const data = (await response.json()) as ExaSearchResponse;
     return (data.results ?? []).slice(0, maxResults).map((r) => ({
-      title: r.title, url: r.url, snippet: r.text ?? "",
+      title: r.title,
+      url: r.url,
+      snippet: r.text ?? "",
     }));
   }
 
-  async codeSearch(query: string, maxResults: number, signal?: AbortSignal): Promise<CodeSearchResult[]> {
+  async codeSearch(
+    query: string,
+    maxResults: number,
+    signal?: AbortSignal,
+  ): Promise<CodeSearchResult[]> {
     const response = await fetch("https://api.exa.ai/search", {
       method: "POST",
       headers: this.headers(),
@@ -85,10 +91,13 @@ export class ExaProvider implements SearchProvider, FetchProvider, CodeSearchPro
       }),
       signal,
     });
-    if (!response.ok) throw new Error(`Exa code search error: ${response.status} ${response.statusText}`);
+    if (!response.ok)
+      throw new Error(`Exa code search error: ${response.status} ${response.statusText}`);
     const data = (await response.json()) as ExaSearchResponse;
     return (data.results ?? []).slice(0, maxResults).map((r) => ({
-      title: r.title, url: r.url, snippet: r.text ?? "",
+      title: r.title,
+      url: r.url,
+      snippet: r.text ?? "",
     }));
   }
 
@@ -99,7 +108,8 @@ export class ExaProvider implements SearchProvider, FetchProvider, CodeSearchPro
       body: JSON.stringify({ urls: [url], text: true }),
       signal,
     });
-    if (!response.ok) throw new Error(`Exa contents error: ${response.status} ${response.statusText}`);
+    if (!response.ok)
+      throw new Error(`Exa contents error: ${response.status} ${response.statusText}`);
     const data = (await response.json()) as ExaContentsResponse;
     return { text: data.results?.[0]?.text ?? "" };
   }

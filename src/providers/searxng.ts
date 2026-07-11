@@ -25,10 +25,7 @@ export class SearXNGProvider implements SearchProvider {
   private apiKey?: string;
 
   constructor(options?: SearXNGOptions) {
-    this.instanceUrl =
-      options?.instanceUrl ??
-      process.env.SEARXNG_URL ??
-      DEFAULT_INSTANCE_URL;
+    this.instanceUrl = options?.instanceUrl ?? process.env.SEARXNG_URL ?? DEFAULT_INSTANCE_URL;
     this.apiKey = options?.apiKey;
   }
 
@@ -53,9 +50,7 @@ export class SearXNGProvider implements SearchProvider {
     const response = await fetch(url, { headers, signal });
 
     if (!response.ok) {
-      throw new Error(
-        `SearXNG error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`SearXNG error: ${response.status} ${response.statusText}`);
     }
 
     const data = (await response.json()) as SearXNGSearchResponse;

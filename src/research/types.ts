@@ -56,13 +56,7 @@ export interface ResearchModeDefaults {
 
 export const defaultResearchOutputSchema = {
   type: "object" as const,
-  required: [
-    "executiveSummary",
-    "keyFindings",
-    "recommendation",
-    "risks",
-    "revisitConditions",
-  ],
+  required: ["executiveSummary", "keyFindings", "recommendation", "risks", "revisitConditions"],
   properties: {
     executiveSummary: {
       type: "string",
@@ -95,39 +89,38 @@ export const defaultResearchOutputSchema = {
   },
 };
 
-export const researchModeDefaults: Record<ResearchMode, ResearchModeDefaults> =
-  {
-    lite: {
-      type: "deep-lite",
-      numResults: 15,
-      textMaxCharacters: 10000,
-      timeoutSeconds: 300,
-      highlightsMaxCharacters: 600,
-      highlightNumSentences: 3,
-      highlightsPerUrl: 1,
-    },
-    standard: {
-      type: "deep-reasoning",
-      numResults: 50,
-      textMaxCharacters: 16000,
-      timeoutSeconds: 600,
-      highlightsMaxCharacters: 900,
-      highlightNumSentences: 4,
-      highlightsPerUrl: 2,
-      summaryQuery:
-        "Summarize the source evidence relevant to the research question, preserving concrete facts and tradeoffs.",
-      outputSchema: defaultResearchOutputSchema,
-    },
-    full: {
-      type: "deep-reasoning",
-      numResults: 150,
-      textMaxCharacters: 24000,
-      timeoutSeconds: 1800,
-      highlightsMaxCharacters: 1200,
-      highlightNumSentences: 5,
-      highlightsPerUrl: 3,
-      summaryQuery:
-        "Summarize the source evidence relevant to the research question, emphasizing decision criteria, tradeoffs, risks, and revisit triggers.",
-      outputSchema: defaultResearchOutputSchema,
-    },
-  };
+export const researchModeDefaults: Record<ResearchMode, ResearchModeDefaults> = {
+  lite: {
+    type: "deep-lite",
+    numResults: 15,
+    textMaxCharacters: 10000,
+    timeoutSeconds: 300,
+    highlightsMaxCharacters: 600,
+    highlightNumSentences: 3,
+    highlightsPerUrl: 1,
+  },
+  standard: {
+    type: "deep-reasoning",
+    numResults: 50,
+    textMaxCharacters: 16000,
+    timeoutSeconds: 600,
+    highlightsMaxCharacters: 900,
+    highlightNumSentences: 4,
+    highlightsPerUrl: 2,
+    summaryQuery:
+      "Summarize the source evidence relevant to the research question, preserving concrete facts and tradeoffs.",
+    outputSchema: defaultResearchOutputSchema,
+  },
+  full: {
+    type: "deep-reasoning",
+    numResults: 150,
+    textMaxCharacters: 24000,
+    timeoutSeconds: 1800,
+    highlightsMaxCharacters: 1200,
+    highlightNumSentences: 5,
+    highlightsPerUrl: 3,
+    summaryQuery:
+      "Summarize the source evidence relevant to the research question, emphasizing decision criteria, tradeoffs, risks, and revisit triggers.",
+    outputSchema: defaultResearchOutputSchema,
+  },
+};

@@ -31,7 +31,13 @@ describe("code_search tool", () => {
   it("returns formatted code results", async () => {
     const tool = createCodeSearchTool(() => mockCodeSearch());
     const ctx = makeCtx();
-    const result = await tool.execute("call-1", { query: "react hooks" }, undefined, undefined, ctx);
+    const result = await tool.execute(
+      "call-1",
+      { query: "react hooks" },
+      undefined,
+      undefined,
+      ctx,
+    );
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toContain("React useState");
     expect(text).toContain("useState(0)");
@@ -75,7 +81,13 @@ describe("code_search tool", () => {
     };
     const tool = createCodeSearchTool(() => emptyProvider);
     const ctx = makeCtx();
-    const result = await tool.execute("call-5", { query: "nonexistent" }, undefined, undefined, ctx);
+    const result = await tool.execute(
+      "call-5",
+      { query: "nonexistent" },
+      undefined,
+      undefined,
+      ctx,
+    );
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toBe("No code results found.");
   });

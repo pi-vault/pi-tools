@@ -113,20 +113,62 @@ export function parseGitHubUrl(url: string): GitHubUrl | null {
 
 const BINARY_EXTENSIONS = new Set([
   // Images
-  ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp", ".tiff", ".tif",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".ico",
+  ".webp",
+  ".bmp",
+  ".tiff",
+  ".tif",
   // Fonts
-  ".woff", ".woff2", ".ttf", ".eot", ".otf",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".eot",
+  ".otf",
   // Archives
-  ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz", ".7z", ".rar",
+  ".zip",
+  ".tar",
+  ".gz",
+  ".tgz",
+  ".bz2",
+  ".xz",
+  ".7z",
+  ".rar",
   // Compiled / native
-  ".exe", ".dll", ".so", ".dylib", ".o", ".a", ".lib",
-  ".class", ".pyc", ".pyo", ".wasm",
+  ".exe",
+  ".dll",
+  ".so",
+  ".dylib",
+  ".o",
+  ".a",
+  ".lib",
+  ".class",
+  ".pyc",
+  ".pyo",
+  ".wasm",
   // Media
-  ".mp3", ".mp4", ".wav", ".avi", ".mov", ".flac", ".ogg", ".webm",
+  ".mp3",
+  ".mp4",
+  ".wav",
+  ".avi",
+  ".mov",
+  ".flac",
+  ".ogg",
+  ".webm",
   // Databases
-  ".sqlite", ".db",
+  ".sqlite",
+  ".db",
   // Documents (binary)
-  ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".ppt",
+  ".pptx",
 ]);
 
 const BINARY_CHECK_SIZE = 8 * 1024; // 8KB
@@ -209,19 +251,14 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDirListing(
-  entries: GitHubContentsDir[],
-  parsed: GitHubUrl,
-): string {
+function formatDirListing(entries: GitHubContentsDir[], parsed: GitHubUrl): string {
   const truncated = entries.length > MAX_DIR_ENTRIES;
   const visible = entries.slice(0, MAX_DIR_ENTRIES);
 
   const lines: string[] = [];
   const pathLabel = parsed.path ?? "";
   const ref = parsed.ref ?? "HEAD";
-  lines.push(
-    `# ${parsed.owner}/${parsed.repo}${pathLabel ? `/${pathLabel}` : ""} (${ref})`,
-  );
+  lines.push(`# ${parsed.owner}/${parsed.repo}${pathLabel ? `/${pathLabel}` : ""} (${ref})`);
   lines.push("");
 
   const dirs = visible.filter((e) => e.type === "dir");
@@ -237,9 +274,7 @@ function formatDirListing(
 
   if (truncated) {
     lines.push("");
-    lines.push(
-      `[truncated] showing ${MAX_DIR_ENTRIES} of ${entries.length} entries`,
-    );
+    lines.push(`[truncated] showing ${MAX_DIR_ENTRIES} of ${entries.length} entries`);
   }
 
   return lines.join("\n");
@@ -454,7 +489,9 @@ export function listCloneDir(
 
   const filtered = entries.filter((e) => !NOISE_DIRS.has(e.name));
   const dirs = filtered.filter((e) => e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name));
-  const files = filtered.filter((e) => !e.isDirectory()).sort((a, b) => a.name.localeCompare(b.name));
+  const files = filtered
+    .filter((e) => !e.isDirectory())
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const all = [...dirs, ...files];
   const truncated = all.length > MAX_DIR_ENTRIES;
@@ -470,9 +507,7 @@ export function listCloneDir(
 
   if (truncated) {
     lines.push("");
-    lines.push(
-      `[truncated] showing ${MAX_DIR_ENTRIES} of ${all.length} entries`,
-    );
+    lines.push(`[truncated] showing ${MAX_DIR_ENTRIES} of ${all.length} entries`);
   }
 
   return lines.join("\n");
@@ -599,12 +634,7 @@ export async function fetchViaClone(
   const sizeMB = await getRepoSizeMB(parsed.owner, parsed.repo, signal);
   if (sizeMB !== null && sizeMB > cfg.maxRepoSizeMB) return null;
 
-  const cloneDir = await cloneRepo(
-    parsed.owner,
-    parsed.repo,
-    ref,
-    cfg.cloneTimeoutSeconds,
-  );
+  const cloneDir = await cloneRepo(parsed.owner, parsed.repo, ref, cfg.cloneTimeoutSeconds);
   if (!cloneDir) return null;
 
   if (parsed.type === "blob" || parsed.type === "raw") {
@@ -624,9 +654,7 @@ export async function fetchViaClone(
   }
 
   const isRoot = parsed.type === "root";
-  const targetDir = parsed.path
-    ? nodePath.join(cloneDir, parsed.path)
-    : cloneDir;
+  const targetDir = parsed.path ? nodePath.join(cloneDir, parsed.path) : cloneDir;
 
   if (!fs.existsSync(targetDir) || !fs.statSync(targetDir).isDirectory()) {
     return null;

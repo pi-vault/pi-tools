@@ -13,9 +13,7 @@ import {
 describe("parseIPv6", () => {
   it("parses a full address", () => {
     const groups = parseIPv6("2001:0db8:85a3:0000:0000:8a2e:0370:7334");
-    expect(groups).toEqual([
-      0x2001, 0x0db8, 0x85a3, 0, 0, 0x8a2e, 0x0370, 0x7334,
-    ]);
+    expect(groups).toEqual([0x2001, 0x0db8, 0x85a3, 0, 0, 0x8a2e, 0x0370, 0x7334]);
   });
 
   it("expands :: at the start", () => {
@@ -59,9 +57,7 @@ describe("parseIPv6", () => {
 
 describe("ipv4ToBytes", () => {
   it("converts a valid IPv4 address to 4 bytes", () => {
-    expect(ipv4ToBytes("192.168.1.1")).toEqual(
-      new Uint8Array([192, 168, 1, 1]),
-    );
+    expect(ipv4ToBytes("192.168.1.1")).toEqual(new Uint8Array([192, 168, 1, 1]));
   });
 
   it("converts 0.0.0.0", () => {
@@ -69,9 +65,7 @@ describe("ipv4ToBytes", () => {
   });
 
   it("converts 255.255.255.255", () => {
-    expect(ipv4ToBytes("255.255.255.255")).toEqual(
-      new Uint8Array([255, 255, 255, 255]),
-    );
+    expect(ipv4ToBytes("255.255.255.255")).toEqual(new Uint8Array([255, 255, 255, 255]));
   });
 
   it("returns null for invalid addresses", () => {
@@ -82,18 +76,14 @@ describe("ipv4ToBytes", () => {
   });
 
   it("treats leading zeros as decimal (not octal)", () => {
-    expect(ipv4ToBytes("192.168.001.001")).toEqual(
-      new Uint8Array([192, 168, 1, 1]),
-    );
+    expect(ipv4ToBytes("192.168.001.001")).toEqual(new Uint8Array([192, 168, 1, 1]));
   });
 });
 
 describe("ipv6GroupsToBytes", () => {
   it("converts 8 groups to 16 bytes", () => {
     const bytes = ipv6GroupsToBytes([0xfe80, 0, 0, 0, 0, 0, 0, 1]);
-    expect(bytes).toEqual(
-      new Uint8Array([0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]),
-    );
+    expect(bytes).toEqual(new Uint8Array([0xfe, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
   });
 });
 
@@ -104,9 +94,7 @@ describe("ipToBytes", () => {
 
   it("dispatches IPv6", () => {
     const bytes = ipToBytes("::1", 6);
-    expect(bytes).toEqual(
-      new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]),
-    );
+    expect(bytes).toEqual(new Uint8Array([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]));
   });
 
   it("returns null for unknown version", () => {
@@ -224,12 +212,8 @@ describe("parseAllowRanges", () => {
   });
 
   it("throws for malformed CIDR entry", () => {
-    expect(() => parseAllowRanges(["not-a-cidr"])).toThrow(
-      "Invalid CIDR notation",
-    );
-    expect(() => parseAllowRanges(["10.0.0.0/0"])).toThrow(
-      "Invalid CIDR notation",
-    );
+    expect(() => parseAllowRanges(["not-a-cidr"])).toThrow("Invalid CIDR notation");
+    expect(() => parseAllowRanges(["10.0.0.0/0"])).toThrow("Invalid CIDR notation");
   });
 });
 

@@ -46,10 +46,7 @@ describe("config ssrf validation", () => {
   it("throws at load time when allowRanges is not an array", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tools-test-"));
     const configPath = path.join(tmpDir, "tools.json");
-    fs.writeFileSync(
-      configPath,
-      JSON.stringify({ ssrf: { allowRanges: "not-an-array" } }),
-    );
+    fs.writeFileSync(configPath, JSON.stringify({ ssrf: { allowRanges: "not-an-array" } }));
 
     expect(() => loadConfig(configPath)).toThrow("ssrf.allowRanges must be an array");
 
@@ -59,10 +56,7 @@ describe("config ssrf validation", () => {
   it("throws at load time when allowRanges contains non-string entries", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tools-test-"));
     const configPath = path.join(tmpDir, "tools.json");
-    fs.writeFileSync(
-      configPath,
-      JSON.stringify({ ssrf: { allowRanges: [123] } }),
-    );
+    fs.writeFileSync(configPath, JSON.stringify({ ssrf: { allowRanges: [123] } }));
 
     expect(() => loadConfig(configPath)).toThrow("ssrf.allowRanges entries must be strings");
 
@@ -72,10 +66,7 @@ describe("config ssrf validation", () => {
   it("throws at load time when allowRanges contains invalid CIDR", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tools-test-"));
     const configPath = path.join(tmpDir, "tools.json");
-    fs.writeFileSync(
-      configPath,
-      JSON.stringify({ ssrf: { allowRanges: ["not-a-cidr"] } }),
-    );
+    fs.writeFileSync(configPath, JSON.stringify({ ssrf: { allowRanges: ["not-a-cidr"] } }));
 
     expect(() => loadConfig(configPath)).toThrow("Invalid CIDR notation in ssrf.allowRanges");
 
@@ -87,10 +78,7 @@ describe("ssrf config end-to-end", () => {
   it("config allowRanges exempts matching IPs when loaded from file", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tools-test-"));
     const configPath = path.join(tmpDir, "tools.json");
-    fs.writeFileSync(
-      configPath,
-      JSON.stringify({ ssrf: { allowRanges: ["198.18.0.0/15"] } }),
-    );
+    fs.writeFileSync(configPath, JSON.stringify({ ssrf: { allowRanges: ["198.18.0.0/15"] } }));
 
     const config = loadConfig(configPath);
     const result = validateUrl("http://198.18.1.1", {

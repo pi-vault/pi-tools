@@ -10,10 +10,7 @@ export interface HtmlExtractResult {
   title?: string;
 }
 
-export function extractHtml(
-  html: string,
-  _url: string,
-): HtmlExtractResult | null {
+export function extractHtml(html: string, _url: string): HtmlExtractResult | null {
   const { document } = parseHTML(html);
 
   // Strip non-content elements

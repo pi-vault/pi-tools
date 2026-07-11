@@ -7,8 +7,12 @@ import type { SearchFilters } from "../../src/providers/types.ts";
 describe("ExaProvider", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
 
-  beforeEach(() => { fetchStub = stubFetch(); });
-  afterEach(() => { fetchStub.restore(); });
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+  afterEach(() => {
+    fetchStub.restore();
+  });
 
   it("has correct name and label", () => {
     expect(new ExaProvider("key").name).toBe("exa");
@@ -18,9 +22,7 @@ describe("ExaProvider", () => {
   it("returns search results", async () => {
     fetchStub.addResponse("api.exa.ai/search", {
       body: {
-        results: [
-          { title: "Exa Result", url: "https://exa.ai", text: "Exa snippet" },
-        ],
+        results: [{ title: "Exa Result", url: "https://exa.ai", text: "Exa snippet" }],
       },
     });
     const results = await new ExaProvider("key").search("test", 5);
@@ -31,9 +33,7 @@ describe("ExaProvider", () => {
   it("returns code search results", async () => {
     fetchStub.addResponse("api.exa.ai/search", {
       body: {
-        results: [
-          { title: "Code Example", url: "https://github.com/ex", text: "const x = 1;" },
-        ],
+        results: [{ title: "Code Example", url: "https://github.com/ex", text: "const x = 1;" }],
       },
     });
     const results = await new ExaProvider("key").codeSearch("typescript example", 5);
@@ -144,9 +144,7 @@ describe("ExaProvider", () => {
     it("does not affect codeSearch method", async () => {
       fetchStub.addResponse("api.exa.ai/search", {
         body: {
-          results: [
-            { title: "Code", url: "https://github.com/ex", text: "const x = 1;" },
-          ],
+          results: [{ title: "Code", url: "https://github.com/ex", text: "const x = 1;" }],
         },
       });
 

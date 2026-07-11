@@ -133,16 +133,12 @@ export class ProviderRegistry {
       }
     }
 
-    const finiteLatencies = metricsEntries
-      .map((e) => e.avgLatency)
-      .filter((l) => l !== Infinity);
+    const finiteLatencies = metricsEntries.map((e) => e.avgLatency).filter((l) => l !== Infinity);
     const maxLatency = finiteLatencies.length > 0 ? Math.max(...finiteLatencies) : 1;
 
     const scoredEntries = metricsEntries.map((e) => {
       const speedScore =
-        e.avgLatency === Infinity
-          ? 0
-          : Math.max(0, 1 - e.avgLatency / (maxLatency || 1));
+        e.avgLatency === Infinity ? 0 : Math.max(0, 1 - e.avgLatency / (maxLatency || 1));
       return {
         provider: e.provider,
         score: e.successRate * 0.5 + speedScore * 0.3 + e.qualityScore * 0.2,

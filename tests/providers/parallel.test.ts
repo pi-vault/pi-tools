@@ -100,9 +100,7 @@ describe("ParallelProvider", () => {
         body: "Forbidden",
       });
       const provider = new ParallelProvider("bad-key");
-      await expect(provider.search("test", 5)).rejects.toThrow(
-        "Parallel search error",
-      );
+      await expect(provider.search("test", 5)).rejects.toThrow("Parallel search error");
     });
 
     it("handles empty results array", async () => {
@@ -184,9 +182,9 @@ describe("ParallelProvider", () => {
         body: "Server Error",
       });
       const provider = new ParallelProvider("key");
-      await expect(
-        provider.fetch("https://example.com/broken"),
-      ).rejects.toThrow("Parallel extract error");
+      await expect(provider.fetch("https://example.com/broken")).rejects.toThrow(
+        "Parallel extract error",
+      );
     });
 
     it("throws when extract returns no results for URL", async () => {
@@ -198,9 +196,9 @@ describe("ParallelProvider", () => {
         },
       });
       const provider = new ParallelProvider("key");
-      await expect(
-        provider.fetch("https://example.com/missing"),
-      ).rejects.toThrow("Parallel extract error");
+      await expect(provider.fetch("https://example.com/missing")).rejects.toThrow(
+        "Parallel extract error",
+      );
     });
   });
 });

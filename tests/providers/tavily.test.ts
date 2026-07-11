@@ -7,8 +7,12 @@ import type { SearchFilters } from "../../src/providers/types.ts";
 describe("TavilyProvider", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
 
-  beforeEach(() => { fetchStub = stubFetch(); });
-  afterEach(() => { fetchStub.restore(); });
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+  afterEach(() => {
+    fetchStub.restore();
+  });
 
   it("has correct name and label", () => {
     expect(new TavilyProvider("key").name).toBe("tavily");
@@ -18,9 +22,7 @@ describe("TavilyProvider", () => {
   it("returns search results", async () => {
     fetchStub.addResponse("api.tavily.com", {
       body: {
-        results: [
-          { title: "Tavily Result", url: "https://tavily.com", content: "A snippet" },
-        ],
+        results: [{ title: "Tavily Result", url: "https://tavily.com", content: "A snippet" }],
       },
     });
     const results = await new TavilyProvider("key").search("test", 5);

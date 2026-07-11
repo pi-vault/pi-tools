@@ -1,5 +1,12 @@
 // src/providers/jina.ts
-import type { FetchProvider, FetchResult, ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type {
+  FetchProvider,
+  FetchResult,
+  ProviderMeta,
+  SearchFilters,
+  SearchProvider,
+  SearchResult,
+} from "./types.ts";
 
 interface JinaSearchResponse {
   data: Array<{

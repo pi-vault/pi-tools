@@ -171,9 +171,7 @@ describe("ExaDeepResearchClient", () => {
       body: "Rate limited",
     });
     const client = new ExaDeepResearchClient("key");
-    await expect(
-      client.deepResearch({ query: "test", type: "deep-lite" }),
-    ).rejects.toThrow(/429/);
+    await expect(client.deepResearch({ query: "test", type: "deep-lite" })).rejects.toThrow(/429/);
   });
 
   it("omits undefined optional params from request body", async () => {
@@ -224,10 +222,7 @@ describe("ExaDeepResearchClient", () => {
     });
     const controller = new AbortController();
     const client = new ExaDeepResearchClient("key");
-    await client.deepResearch(
-      { query: "test", type: "deep-lite" },
-      controller.signal,
-    );
+    await client.deepResearch({ query: "test", type: "deep-lite" }, controller.signal);
 
     const fetchCall = (globalThis.fetch as any).mock.calls[0];
     expect(fetchCall[1].signal).toBe(controller.signal);

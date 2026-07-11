@@ -218,9 +218,7 @@ describe("OpenAINativeProvider", () => {
             id: "msg_1",
             status: "completed",
             role: "assistant",
-            content: [
-              { type: "output_text", text: "I could not find any results." },
-            ],
+            content: [{ type: "output_text", text: "I could not find any results." }],
           },
         ],
       },

@@ -129,24 +129,19 @@ function validateCombineConfig(parsed: unknown): CombineConfig {
     mode,
     targetBackends: Math.max(
       1,
-      typeof raw.targetBackends === "number" ? raw.targetBackends : DEFAULT_COMBINE_CONFIG.targetBackends,
+      typeof raw.targetBackends === "number"
+        ? raw.targetBackends
+        : DEFAULT_COMBINE_CONFIG.targetBackends,
     ),
-    k: Math.max(
-      1,
-      typeof raw.k === "number" ? raw.k : DEFAULT_COMBINE_CONFIG.k,
-    ),
+    k: Math.max(1, typeof raw.k === "number" ? raw.k : DEFAULT_COMBINE_CONFIG.k),
   };
 }
 
 function validateDeepResearchConfig(parsed: unknown): DeepResearchConfig {
-  if (!parsed || typeof parsed !== "object")
-    return { ...DEFAULT_DEEP_RESEARCH_CONFIG };
+  if (!parsed || typeof parsed !== "object") return { ...DEFAULT_DEEP_RESEARCH_CONFIG };
   const raw = parsed as Record<string, unknown>;
   return {
-    enabled:
-      typeof raw.enabled === "boolean"
-        ? raw.enabled
-        : DEFAULT_DEEP_RESEARCH_CONFIG.enabled,
+    enabled: typeof raw.enabled === "boolean" ? raw.enabled : DEFAULT_DEEP_RESEARCH_CONFIG.enabled,
     modeDefaults:
       raw.modeDefaults && typeof raw.modeDefaults === "object"
         ? (raw.modeDefaults as DeepResearchConfig["modeDefaults"])
@@ -196,7 +191,9 @@ export function loadConfig(configPath?: string): PiToolsConfig {
     let raw: string;
     try {
       raw = fs.readFileSync(p, "utf-8");
-    } catch { continue; }
+    } catch {
+      continue;
+    }
     try {
       return parseConfigFile(raw);
     } catch (e) {
@@ -276,9 +273,14 @@ export function loadMergedConfig(cwd?: string): PiToolsConfig {
   // Layer 2: global config (try new path, fall back to legacy)
   for (const globalPath of [getConfigPath(), getLegacyConfigPath()]) {
     try {
-      merged = deepMerge(merged, JSON.parse(fs.readFileSync(globalPath, "utf-8")) as Record<string, unknown>);
+      merged = deepMerge(
+        merged,
+        JSON.parse(fs.readFileSync(globalPath, "utf-8")) as Record<string, unknown>,
+      );
       break;
-    } catch { continue; }
+    } catch {
+      continue;
+    }
   }
 
   // Layer 1: project config (highest priority)

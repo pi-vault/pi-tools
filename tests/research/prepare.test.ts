@@ -11,9 +11,7 @@ vi.mock("node:fs/promises");
 
 describe("resolveOutputPath", () => {
   it("resolves relative path against cwd", () => {
-    expect(resolveOutputPath("/project", "findings.md")).toMatch(
-      /\/project\/findings.md$/,
-    );
+    expect(resolveOutputPath("/project", "findings.md")).toMatch(/\/project\/findings.md$/);
   });
 
   it("returns absolute path unchanged", () => {
@@ -21,9 +19,7 @@ describe("resolveOutputPath", () => {
   });
 
   it("strips leading @ from path", () => {
-    expect(resolveOutputPath("/project", "@docs/out.md")).toMatch(
-      /\/project\/docs\/out.md$/,
-    );
+    expect(resolveOutputPath("/project", "@docs/out.md")).toMatch(/\/project\/docs\/out.md$/);
   });
 });
 
@@ -65,27 +61,19 @@ describe("applyResearchMode", () => {
     const configDefaults = {
       standard: { numResults: 60, textMaxCharacters: 20000 },
     };
-    const result = applyResearchMode(
-      { researchMode: "standard" },
-      configDefaults,
-    );
+    const result = applyResearchMode({ researchMode: "standard" }, configDefaults);
     expect(result.numResults).toBe(60);
     expect(result.textMaxCharacters).toBe(20000);
   });
 
   it("per-call params override config modeDefaults", () => {
     const configDefaults = { standard: { numResults: 60 } };
-    const result = applyResearchMode(
-      { researchMode: "standard", numResults: 25 },
-      configDefaults,
-    );
+    const result = applyResearchMode({ researchMode: "standard", numResults: 25 }, configDefaults);
     expect(result.numResults).toBe(25);
   });
 
   it("throws on invalid research mode", () => {
-    expect(() => applyResearchMode({ researchMode: "invalid" as any })).toThrow(
-      /invalid/i,
-    );
+    expect(() => applyResearchMode({ researchMode: "invalid" as any })).toThrow(/invalid/i);
   });
 });
 
@@ -113,9 +101,7 @@ describe("expandSimpleGlob", () => {
       isFile: () => true,
     }));
     vi.mocked(fs.readdir).mockResolvedValue(entries as any);
-    await expect(
-      expandSimpleGlob("/project", "docs/file-*.md"),
-    ).rejects.toThrow(/limit/);
+    await expect(expandSimpleGlob("/project", "docs/file-*.md")).rejects.toThrow(/limit/);
   });
 
   it("throws on multiple wildcards", async () => {
@@ -179,9 +165,9 @@ describe("prepareResearchInput", () => {
 
   it("throws when queryFile content is empty", async () => {
     vi.mocked(fs.readFile).mockResolvedValue("   ");
-    await expect(
-      prepareResearchInput("/project", { queryFile: "empty.txt" }),
-    ).rejects.toThrow(/requires query or queryFile/);
+    await expect(prepareResearchInput("/project", { queryFile: "empty.txt" })).rejects.toThrow(
+      /requires query or queryFile/,
+    );
   });
 
   it("expands contextGlob and appends to system prompt", async () => {

@@ -11,9 +11,11 @@ function mockProvider(name: string, label: string): SearchProvider {
   return {
     name,
     label,
-    search: vi.fn().mockResolvedValue([
-      { title: `${name} result`, url: `https://${name}.com`, snippet: "test" },
-    ]),
+    search: vi
+      .fn()
+      .mockResolvedValue([
+        { title: `${name} result`, url: `https://${name}.com`, snippet: "test" },
+      ]),
   };
 }
 
@@ -627,9 +629,7 @@ describe("ProviderRegistry", () => {
       // Re-register — provider is back, metrics survived
       const brave2 = mockProvider("brave", "Brave");
       registry.registerSearch(brave2, { tier: 1, monthlyQuota: 2000 });
-      expect(registry.selectSearchCandidates().map((c) => c.name)).toEqual([
-        "brave",
-      ]);
+      expect(registry.selectSearchCandidates().map((c) => c.name)).toEqual(["brave"]);
       expect(registry.getMetrics("brave")!.successes).toBe(2);
     });
 

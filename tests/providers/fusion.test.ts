@@ -65,9 +65,7 @@ describe("reciprocalRankFusion", () => {
     const providerResults = [
       {
         providerName: "brave",
-        results: [
-          { title: "A", url: "https://a.com", snippet: "a" },
-        ] as SearchResult[],
+        results: [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
       },
     ];
 
@@ -127,15 +125,11 @@ describe("reciprocalRankFusion", () => {
     const providerResults = [
       {
         providerName: "brave",
-        results: [
-          { title: "A", url: "https://Example.COM/Page", snippet: "s" },
-        ] as SearchResult[],
+        results: [{ title: "A", url: "https://Example.COM/Page", snippet: "s" }] as SearchResult[],
       },
       {
         providerName: "exa",
-        results: [
-          { title: "A", url: "https://example.com/page", snippet: "s" },
-        ] as SearchResult[],
+        results: [{ title: "A", url: "https://example.com/page", snippet: "s" }] as SearchResult[],
       },
     ];
 
@@ -148,9 +142,7 @@ describe("reciprocalRankFusion", () => {
     const providerResults = [
       {
         providerName: "brave",
-        results: [
-          { title: "A", url: "https://a.com", snippet: "short" },
-        ] as SearchResult[],
+        results: [{ title: "A", url: "https://a.com", snippet: "short" }] as SearchResult[],
       },
       {
         providerName: "exa",
@@ -166,18 +158,14 @@ describe("reciprocalRankFusion", () => {
 
     const fused = reciprocalRankFusion(providerResults, 10);
     expect(fused[0].result.title).toBe("A Better");
-    expect(fused[0].result.snippet).toBe(
-      "a much longer and more detailed snippet",
-    );
+    expect(fused[0].result.snippet).toBe("a much longer and more detailed snippet");
   });
 
   it("uses custom k parameter for scoring", () => {
     const providerResults = [
       {
         providerName: "brave",
-        results: [
-          { title: "A", url: "https://a.com", snippet: "a" },
-        ] as SearchResult[],
+        results: [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
       },
     ];
 
@@ -198,9 +186,7 @@ describe("reciprocalRankFusion", () => {
       },
       {
         providerName: "exa",
-        results: [
-          { title: "A", url: "https://a.com", snippet: "a" },
-        ] as SearchResult[],
+        results: [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
       },
     ];
 
@@ -213,15 +199,11 @@ describe("reciprocalRankFusion", () => {
     const providerResults = [
       {
         providerName: "brave",
-        results: [
-          { title: "A", url: "https://a.com?src=google", snippet: "a" },
-        ] as SearchResult[],
+        results: [{ title: "A", url: "https://a.com?src=google", snippet: "a" }] as SearchResult[],
       },
       {
         providerName: "exa",
-        results: [
-          { title: "A", url: "https://a.com?src=twitter", snippet: "a" },
-        ] as SearchResult[],
+        results: [{ title: "A", url: "https://a.com?src=twitter", snippet: "a" }] as SearchResult[],
       },
     ];
 
@@ -233,15 +215,11 @@ describe("reciprocalRankFusion", () => {
     const providerResults = [
       {
         providerName: "brave",
-        results: [
-          { title: "A", url: "not-a-valid-url", snippet: "a" },
-        ] as SearchResult[],
+        results: [{ title: "A", url: "not-a-valid-url", snippet: "a" }] as SearchResult[],
       },
       {
         providerName: "exa",
-        results: [
-          { title: "A", url: "NOT-A-VALID-URL", snippet: "a from exa" },
-        ] as SearchResult[],
+        results: [{ title: "A", url: "NOT-A-VALID-URL", snippet: "a from exa" }] as SearchResult[],
       },
     ];
 
@@ -285,16 +263,12 @@ describe("executeWithFusion", () => {
         {
           name: "brave",
           execute: async (_n: number) =>
-            [
-              { title: "A", url: "https://a.com", snippet: "a" },
-            ] as SearchResult[],
+            [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
         },
         {
           name: "exa",
           execute: async (_n: number) =>
-            [
-              { title: "B", url: "https://b.com", snippet: "b" },
-            ] as SearchResult[],
+            [{ title: "B", url: "https://b.com", snippet: "b" }] as SearchResult[],
         },
       ];
 
@@ -318,9 +292,7 @@ describe("executeWithFusion", () => {
         {
           name: "brave",
           execute: async (_n: number) =>
-            [
-              { title: "A", url: "https://a.com", snippet: "a" },
-            ] as SearchResult[],
+            [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
         },
         {
           name: "failing",
@@ -331,9 +303,7 @@ describe("executeWithFusion", () => {
         {
           name: "exa",
           execute: async (_n: number) =>
-            [
-              { title: "B", url: "https://b.com", snippet: "b" },
-            ] as SearchResult[],
+            [{ title: "B", url: "https://b.com", snippet: "b" }] as SearchResult[],
         },
       ];
 
@@ -357,27 +327,21 @@ describe("executeWithFusion", () => {
           name: "a",
           execute: async (n: number) => {
             capturedN.push(n);
-            return [
-              { title: "A", url: "https://a.com", snippet: "a" },
-            ] as SearchResult[];
+            return [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[];
           },
         },
         {
           name: "b",
           execute: async (n: number) => {
             capturedN.push(n);
-            return [
-              { title: "B", url: "https://b.com", snippet: "b" },
-            ] as SearchResult[];
+            return [{ title: "B", url: "https://b.com", snippet: "b" }] as SearchResult[];
           },
         },
         {
           name: "c",
           execute: async (n: number) => {
             capturedN.push(n);
-            return [
-              { title: "C", url: "https://c.com", snippet: "c" },
-            ] as SearchResult[];
+            return [{ title: "C", url: "https://c.com", snippet: "c" }] as SearchResult[];
           },
         },
       ];
@@ -400,16 +364,12 @@ describe("executeWithFusion", () => {
         {
           name: "brave",
           execute: async (_n: number) =>
-            [
-              { title: "A", url: "https://a.com", snippet: "a" },
-            ] as SearchResult[],
+            [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
         },
         {
           name: "exa",
           execute: async (_n: number) =>
-            [
-              { title: "B", url: "https://b.com", snippet: "b" },
-            ] as SearchResult[],
+            [{ title: "B", url: "https://b.com", snippet: "b" }] as SearchResult[],
         },
       ];
 
@@ -439,9 +399,7 @@ describe("executeWithFusion", () => {
         {
           name: "exa",
           execute: async (_n: number) =>
-            [
-              { title: "A", url: "https://a.com", snippet: "a" },
-            ] as SearchResult[],
+            [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
         },
       ];
 
@@ -592,36 +550,28 @@ describe("executeWithFusion", () => {
           name: "a",
           execute: async (_n: number) => {
             executionOrder.push("a");
-            return [
-              { title: "A", url: "https://a.com", snippet: "a" },
-            ] as SearchResult[];
+            return [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[];
           },
         },
         {
           name: "b",
           execute: async (_n: number) => {
             executionOrder.push("b");
-            return [
-              { title: "B", url: "https://b.com", snippet: "b" },
-            ] as SearchResult[];
+            return [{ title: "B", url: "https://b.com", snippet: "b" }] as SearchResult[];
           },
         },
         {
           name: "c",
           execute: async (_n: number) => {
             executionOrder.push("c");
-            return [
-              { title: "C", url: "https://c.com", snippet: "c" },
-            ] as SearchResult[];
+            return [{ title: "C", url: "https://c.com", snippet: "c" }] as SearchResult[];
           },
         },
         {
           name: "d",
           execute: async (_n: number) => {
             executionOrder.push("d");
-            return [
-              { title: "D", url: "https://d.com", snippet: "d" },
-            ] as SearchResult[];
+            return [{ title: "D", url: "https://d.com", snippet: "d" }] as SearchResult[];
           },
         },
       ];
@@ -657,16 +607,12 @@ describe("executeWithFusion", () => {
         {
           name: "good1",
           execute: async (_n: number) =>
-            [
-              { title: "A", url: "https://a.com", snippet: "a" },
-            ] as SearchResult[],
+            [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
         },
         {
           name: "good2",
           execute: async (_n: number) =>
-            [
-              { title: "B", url: "https://b.com", snippet: "b" },
-            ] as SearchResult[],
+            [{ title: "B", url: "https://b.com", snippet: "b" }] as SearchResult[],
         },
       ];
 
@@ -690,9 +636,7 @@ describe("executeWithFusion", () => {
         {
           name: "good",
           execute: async (_n: number) =>
-            [
-              { title: "A", url: "https://a.com", snippet: "a" },
-            ] as SearchResult[],
+            [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
         },
         {
           name: "failing",
@@ -724,16 +668,12 @@ describe("executeWithFusion", () => {
         {
           name: "good1",
           execute: async (_n: number) =>
-            [
-              { title: "A", url: "https://a.com", snippet: "a" },
-            ] as SearchResult[],
+            [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
         },
         {
           name: "good2",
           execute: async (_n: number) =>
-            [
-              { title: "B", url: "https://b.com", snippet: "b" },
-            ] as SearchResult[],
+            [{ title: "B", url: "https://b.com", snippet: "b" }] as SearchResult[],
         },
       ];
 
@@ -759,27 +699,21 @@ describe("executeWithFusion", () => {
           name: "a",
           execute: async (n: number) => {
             capturedN.push(n);
-            return [
-              { title: "A", url: "https://a.com", snippet: "a" },
-            ] as SearchResult[];
+            return [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[];
           },
         },
         {
           name: "b",
           execute: async (n: number) => {
             capturedN.push(n);
-            return [
-              { title: "B", url: "https://b.com", snippet: "b" },
-            ] as SearchResult[];
+            return [{ title: "B", url: "https://b.com", snippet: "b" }] as SearchResult[];
           },
         },
         {
           name: "c",
           execute: async (n: number) => {
             capturedN.push(n);
-            return [
-              { title: "C", url: "https://c.com", snippet: "c" },
-            ] as SearchResult[];
+            return [{ title: "C", url: "https://c.com", snippet: "c" }] as SearchResult[];
           },
         },
       ];

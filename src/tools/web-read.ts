@@ -5,7 +5,9 @@ import type { ContentStore } from "../storage.ts";
 import type { GuidanceOverride } from "../config.ts";
 
 const WebReadParams = Type.Object({
-  contentId: Type.String({ description: "Content ID from a previous web_fetch or web_docs_fetch result" }),
+  contentId: Type.String({
+    description: "Content ID from a previous web_fetch or web_docs_fetch result",
+  }),
 });
 
 export function createWebReadTool(
@@ -15,9 +17,9 @@ export function createWebReadTool(
   return {
     name: "web_read",
     label: "Web Read",
-    description:
-      "Retrieve previously fetched web content by its content ID without re-fetching.",
-    promptSnippet: guidance?.promptSnippet ??
+    description: "Retrieve previously fetched web content by its content ID without re-fetching.",
+    promptSnippet:
+      guidance?.promptSnippet ??
       "Retrieve previously fetched web content by its content ID without re-fetching.",
     parameters: WebReadParams,
     async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -45,16 +47,17 @@ export function createWebReadTool(
       };
     },
     renderCall(args, theme: Theme, context) {
-      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      const text =
+        context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
       text.setText(
         `${theme.fg("toolTitle", theme.bold("web_read"))} ${theme.fg("accent", `"${args.contentId}"`)}`,
       );
       return text;
     },
     renderResult(result, options, theme: Theme, context) {
-      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
-      const raw =
-        result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
+      const text =
+        context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      const raw = result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
       if (options.expanded) {
         const lines = raw.split("\n").slice(0, 20);
         text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));

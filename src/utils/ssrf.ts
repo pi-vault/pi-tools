@@ -17,10 +17,7 @@ function isBlockedHostname(hostname: string): boolean {
 
 function isBlockedIPv4(ip: string): boolean {
   const parts = ip.split(".").map(Number);
-  if (
-    parts.length !== 4 ||
-    parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)
-  )
+  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255))
     return true;
   const [a, b] = parts;
   return (
@@ -52,15 +49,9 @@ function isBlockedIPv6(ip: string): boolean {
   if ((groups[0] & 0xff00) === 0xff00) return true;
 
   // IPv4-mapped ::ffff:x.x.x.x — delegate to IPv4 check
-  const isMapped =
-    groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff;
+  const isMapped = groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff;
   if (isMapped) {
-    const ipv4 = [
-      groups[6] >> 8,
-      groups[6] & 0xff,
-      groups[7] >> 8,
-      groups[7] & 0xff,
-    ].join(".");
+    const ipv4 = [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join(".");
     return isBlockedIPv4(ipv4);
   }
 
@@ -119,9 +110,7 @@ export function validateUrl(url: string, opts?: ValidateUrlOptions): URL {
   // Parse allowRanges eagerly — misconfiguration must fail loud even for hostname URLs.
   const allowedRanges = parseAllowRanges(opts?.allowRanges);
 
-  const allowed =
-    opts?.allowedBaseUrls?.length &&
-    matchesAllowedBase(parsed, opts.allowedBaseUrls);
+  const allowed = opts?.allowedBaseUrls?.length && matchesAllowedBase(parsed, opts.allowedBaseUrls);
 
   if (!allowed) {
     if (isBlockedHostname(hostname)) {
@@ -177,15 +166,11 @@ export function parseIPv6(address: string): number[] | null {
   if (pieces.length === 1 && missing !== 0) return null;
   if (pieces.length === 2 && missing < 0) return null;
 
-  const groups = [...left, ...Array(missing).fill("0"), ...right].map(
-    (part) => {
-      if (!/^[0-9a-f]{1,4}$/i.test(part)) return -1;
-      return parseInt(part, 16);
-    },
-  );
-  return groups.length === 8 && groups.every((g) => g >= 0 && g <= 0xffff)
-    ? groups
-    : null;
+  const groups = [...left, ...Array(missing).fill("0"), ...right].map((part) => {
+    if (!/^[0-9a-f]{1,4}$/i.test(part)) return -1;
+    return parseInt(part, 16);
+  });
+  return groups.length === 8 && groups.every((g) => g >= 0 && g <= 0xffff) ? groups : null;
 }
 
 export function ipv4ToBytes(address: string): Uint8Array | null {
@@ -255,9 +240,7 @@ export function parseAllowRanges(input: unknown): ParsedCidr[] {
   }
   return input.map((entry) => {
     if (typeof entry !== "string") {
-      throw new Error(
-        `ssrf.allowRanges entries must be strings, got ${typeof entry}`,
-      );
+      throw new Error(`ssrf.allowRanges entries must be strings, got ${typeof entry}`);
     }
     const rule = parseCidr(entry.trim());
     if (!rule) {
@@ -268,11 +251,7 @@ export function parseAllowRanges(input: unknown): ParsedCidr[] {
 }
 
 /** Compare the leading `prefix` bits of two equal-length byte arrays. */
-export function bytesMatchPrefix(
-  addr: Uint8Array,
-  network: Uint8Array,
-  prefix: number,
-): boolean {
+export function bytesMatchPrefix(addr: Uint8Array, network: Uint8Array, prefix: number): boolean {
   const fullBytes = prefix >> 3;
   const remBits = prefix & 7;
   for (let i = 0; i < fullBytes; i++) {

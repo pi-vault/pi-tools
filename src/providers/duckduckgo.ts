@@ -46,10 +46,7 @@ export class DuckDuckGoProvider implements SearchProvider {
     const effectiveQuery = applyDomainFilters(query, filters);
     const timelimit = computeTimelimit(filters);
 
-    const tmpFile = path.join(
-      os.tmpdir(),
-      `ddgs-${crypto.randomUUID()}.json`,
-    );
+    const tmpFile = path.join(os.tmpdir(), `ddgs-${crypto.randomUUID()}.json`);
 
     try {
       // runDdgs handles ENOENT (binary missing) and rethrows with install hint

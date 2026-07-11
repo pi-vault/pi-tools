@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SSRFError, validateUrl } from "../../src/utils/ssrf.ts";
 
-
 describe("validateUrl", () => {
   it("allows valid HTTPS URLs", () => {
     expect(() => validateUrl("https://example.com")).not.toThrow();
@@ -83,15 +82,11 @@ describe("validateUrl", () => {
 
   it("blocks cloud metadata endpoint", () => {
     expect(() => validateUrl("http://169.254.169.254")).toThrow(SSRFError);
-    expect(() =>
-      validateUrl("http://169.254.169.254/latest/meta-data"),
-    ).toThrow(SSRFError);
+    expect(() => validateUrl("http://169.254.169.254/latest/meta-data")).toThrow(SSRFError);
   });
 
   it("blocks URLs with credentials", () => {
-    expect(() => validateUrl("http://user:pass@example.com")).toThrow(
-      SSRFError,
-    );
+    expect(() => validateUrl("http://user:pass@example.com")).toThrow(SSRFError);
     expect(() => validateUrl("http://admin@example.com")).toThrow(SSRFError);
   });
 
@@ -169,25 +164,21 @@ describe("validateUrl with allowRanges", () => {
 
 describe("validateUrl with allowedBaseUrls", () => {
   it("allows localhost URL when it matches an allowed base URL", () => {
-    const result = validateUrl(
-      "http://localhost:8080/search?q=test&format=json",
-      { allowedBaseUrls: ["http://localhost:8080"] },
-    );
+    const result = validateUrl("http://localhost:8080/search?q=test&format=json", {
+      allowedBaseUrls: ["http://localhost:8080"],
+    });
     expect(result.hostname).toBe("localhost");
   });
 
   it("allows private IP URL when it matches an allowed base URL", () => {
-    const result = validateUrl(
-      "http://192.168.1.100:8080/search?q=hello",
-      { allowedBaseUrls: ["http://192.168.1.100:8080"] },
-    );
+    const result = validateUrl("http://192.168.1.100:8080/search?q=hello", {
+      allowedBaseUrls: ["http://192.168.1.100:8080"],
+    });
     expect(result.hostname).toBe("192.168.1.100");
   });
 
   it("still blocks localhost without allowedBaseUrls", () => {
-    expect(() => validateUrl("http://localhost:8080/search")).toThrow(
-      "Blocked hostname",
-    );
+    expect(() => validateUrl("http://localhost:8080/search")).toThrow("Blocked hostname");
   });
 
   it("blocks localhost when URL does not match any allowed base URL", () => {
