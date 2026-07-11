@@ -270,6 +270,10 @@ export class ProviderRegistry {
     return this.scoreEligibleProviders()[0]?.provider;
   }
 
+  selectSearchByPerformanceAll(): SearchProvider[] {
+    return this.scoreEligibleProviders().map((s) => s.provider);
+  }
+
   selectFetchCandidates(): FetchProvider[] {
     return [...this.fetchProviders.values()].map((r) => r.provider);
   }

@@ -651,6 +651,52 @@ describe("ProviderRegistry", () => {
       expect(registry.selectDocs()).toBeUndefined();
     });
   });
+
+  describe("selectSearchByPerformanceAll", () => {
+    it("returns all eligible providers sorted by composite score descending", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      const exa = mockProvider("exa", "Exa");
+      const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
+      registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+      // brave: 100% success, fast
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 });
+      registry.recordOutcome("brave", { success: true, latencyMs: 200 });
+
+      // exa: 50% success, slow
+      registry.recordOutcome("exa", { success: true, latencyMs: 800 });
+      registry.recordOutcome("exa", { success: false });
+
+      // ddg: no metrics -> neutral score 0.5
+      const all = registry.selectSearchByPerformanceAll();
+      expect(all.length).toBe(3);
+      // brave should be first (best score)
+      expect(all[0].name).toBe("brave");
+    });
+
+    it("excludes exhausted providers", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 1 });
+      registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+      registry.recordOutcome("brave", { success: true }); // exhausted
+
+      const all = registry.selectSearchByPerformanceAll();
+      expect(all.map((p) => p.name)).toEqual(["duckduckgo"]);
+    });
+
+    it("returns empty array when no providers registered", () => {
+      const registry = mem();
+      expect(registry.selectSearchByPerformanceAll()).toEqual([]);
+    });
+  });
 });
 
 describe("docs provider registration", () => {
