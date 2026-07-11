@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-11
+
+### Added
+
+- `web_research`, an Exa Deep Search tool for evidence-backed research and optional findings reports.
+- Context7-backed `web_docs_search` and `web_docs_fetch` tools for version-aware library documentation.
+- Opt-in multi-provider search fusion using reciprocal rank fusion (RRF), with per-call `combine` overrides.
+- Automatic configuration refresh, plus `/tools --reload` to force a reload.
+- Provider performance scoring based on a rolling window of reliability, latency, and result quality.
+- CIDR allow-ranges for configured SSRF exceptions, with expanded IPv4 and IPv6 private/reserved-address protection.
+
+### Changed
+
+- `web_search` supports domain and publication-date filters, compact output, and fused-result attribution in expanded views.
+- `web_fetch` and `web_docs_fetch` retain large responses for follow-up retrieval with `web_read`.
+- Provider status now reports rolling session outcomes and average latency.
+
 ## [0.2.0] - 2026-07-03
 
 ### Added
