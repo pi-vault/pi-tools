@@ -12,7 +12,9 @@ import { createWebDocsFetchTool } from "./tools/web-docs-fetch.ts";
 import { createWebDocsSearchTool } from "./tools/web-docs-search.ts";
 import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
+import { createWebResearchTool } from "./tools/web-research.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
+import { resolveApiKey } from "./config.ts";
 
 function isStoredContent(data: unknown): data is StoredContent {
   if (typeof data !== "object" || data === null) return false;
@@ -115,6 +117,20 @@ export default function createExtension(pi: ExtensionAPI): void {
     );
     pi.registerTool(
       createWebDocsFetchTool(selectDocs, store, configManager.current.guidance?.web_docs_fetch),
+    );
+  }
+
+  // Register web_research when Exa key is available and deep research enabled
+  const exaConfig = configManager.current.providers?.exa;
+  const resolvedExaKey = resolveApiKey(exaConfig?.apiKey);
+  if (resolvedExaKey && configManager.current.deepResearch?.enabled !== false) {
+    pi.registerTool(
+      createWebResearchTool(
+        resolvedExaKey,
+        configManager.current.deepResearch,
+        (customType, data) => pi.appendEntry(customType, data),
+        configManager.current.deepResearch?.guidance,
+      ),
     );
   }
 
