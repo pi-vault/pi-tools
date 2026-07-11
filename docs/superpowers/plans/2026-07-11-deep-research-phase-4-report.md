@@ -10,6 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-11-deep-research-design.md`
 **Main plan:** `docs/superpowers/plans/2026-07-11-deep-research.md`
+**Reference:** `pi-web-tools/src/tools/web-research.ts` (canonical implementation)
 
 **Depends on:** Phase 1 (`DeepResearchResponse` type), Phase 3 (`WebResearchInput` type)
 **Produces:** Tested report renderer ready for the tool's file-writing flow.
@@ -25,7 +26,7 @@ The findings report is a structured markdown document with these sections:
 3. Key Findings (from structured `keyFindings` or top source snippets)
 4. Evidence and Sources (numbered source list + per-source evidence)
 5. Tradeoffs / Alternatives
-6. Recommendation / Decision Criteria
+6. Recommendation / Decision Criteria (followed by a guidance paragraph)
 7. Risks / Unknowns
 8. Revisit Conditions
 9. Research Metadata (mode, type, query count, sources)
@@ -33,6 +34,8 @@ The findings report is a structured markdown document with these sections:
 When Exa returns structured output (via `outputSchema`), the content lives at `response.raw.output.content`. When it doesn't, the renderer falls back to source-derived content.
 
 The `defaultRawOutputPath` function replaces the file extension with `.raw.json` (e.g., `findings.md` -> `findings.raw.json`).
+
+All fallback text must match the pi-web-tools reference exactly. The spec describes this as a "full 1:1 port."
 
 ---
 
@@ -173,9 +176,17 @@ describe("renderFindingsReport", () => {
     expect(report).toContain("Structured summary");
     expect(report).toContain("Finding A");
     expect(report).toContain("Finding B");
+    expect(report).toContain("Tradeoff 1");
     expect(report).toContain("Do X");
     expect(report).toContain("Risk 1");
     expect(report).toContain("Condition 1");
+  });
+
+  it("includes recommendation guidance line", () => {
+    const report = renderFindingsReport({ query: "test" }, baseResponse);
+    expect(report).toContain(
+      "Use the source evidence above as decision criteria; validate any project-specific assumptions before irreversible work.",
+    );
   });
 
   it("handles response with no answer gracefully", () => {
@@ -186,6 +197,19 @@ describe("renderFindingsReport", () => {
     const report = renderFindingsReport({ query: "test" }, noAnswer);
     expect(report).toContain("## Executive Summary");
     expect(report).toContain("Source One");
+    expect(report).toContain("strongest source clusters");
+  });
+
+  it("handles response with no sources", () => {
+    const noSources: DeepResearchResponse = {
+      answer: undefined,
+      results: [],
+      raw: {},
+      metadata: { researchMode: "standard" },
+    };
+    const report = renderFindingsReport({ query: "test" }, noSources);
+    expect(report).toContain("Re-run with broader terms or fewer filters");
+    expect(report).toContain("No source URLs returned by Exa");
   });
 
   it("includes rawOutputPath in metadata when provided", () => {
@@ -194,13 +218,25 @@ describe("renderFindingsReport", () => {
     });
     expect(report).toContain("out.raw.json");
   });
+
+  it("falls back to input researchMode in metadata", () => {
+    const noModeResponse: DeepResearchResponse = {
+      ...baseResponse,
+      metadata: {},
+    };
+    const report = renderFindingsReport(
+      { query: "test", researchMode: "lite" },
+      noModeResponse,
+    );
+    expect(report).toContain("Mode: lite");
+  });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd /Users/lanh/Developer/pi-vault/pi-tools && npx vitest run tests/research/report.test.ts`
-Expected: FAIL — module not found
+Expected: FAIL -- module not found
 
 - [ ] **Step 3: Write the implementation**
 
@@ -247,7 +283,7 @@ function structuredOutputContent(
   return undefined;
 }
 
-function sanitizeText(value: string): string {
+function sanitizeEvidenceText(value: string): string {
   return String(value ?? "")
     .split(/\r?\n/)
     .map((line) =>
@@ -264,7 +300,7 @@ function sanitizeText(value: string): string {
 }
 
 function oneLine(value: string, max = 260): string {
-  const cleaned = sanitizeText(value);
+  const cleaned = sanitizeEvidenceText(value).replace(/\s+/g, " ").trim();
   return cleaned.length > max ? `${cleaned.slice(0, max - 1)}\u2026` : cleaned;
 }
 
@@ -285,7 +321,7 @@ function listMarkdown(value: unknown, fallback: string): string {
     return value
       .map(
         (item) =>
-          `- ${sanitizeText(typeof item === "string" ? item : JSON.stringify(item))}`,
+          `- ${sanitizeEvidenceText(typeof item === "string" ? item : JSON.stringify(item))}`,
       )
       .join("\n");
   }
@@ -296,19 +332,21 @@ function listMarkdown(value: unknown, fallback: string): string {
 function isGenericNoAnswer(value: string | undefined): boolean {
   return (
     !value?.trim() ||
-    /Exa returned (sources|\d+ sources) but no synthesized answer/i.test(value)
+    /Exa returned (sources|\d+ sources) but no synthesized answer field/i.test(
+      value,
+    )
   );
 }
 
 function fallbackSummary(response: DeepResearchResponse): string {
   if (!isGenericNoAnswer(response.answer)) return response.answer!.trim();
   if (response.results.length === 0)
-    return "No sources were returned. Re-run with broader terms or fewer filters.";
+    return "No sources were returned. Re-run with broader terms or fewer filters before making a decision.";
   const themes = response.results
     .slice(0, 5)
     .map((r, i) => `(${i + 1}) ${r.title ?? r.url ?? "Untitled"}`)
     .join("; ");
-  return `Exa returned ${response.results.length} sources but no synthesized answer. Source clusters: ${themes}. Validate recommendations against primary sources.`;
+  return `Exa returned ${response.results.length} sources but no synthesized answer field. The strongest source clusters are: ${themes}. Treat the findings below as an evidence brief and validate recommendations against primary sources before committing.`;
 }
 
 function keyFindings(response: DeepResearchResponse): string {
@@ -335,7 +373,7 @@ function bulletSources(response: DeepResearchResponse): string {
 }
 
 export function renderFindingsReport(
-  input: Pick<WebResearchInput, "query" | "reportTitle">,
+  input: Pick<WebResearchInput, "query" | "reportTitle" | "researchMode" | "type">,
   response: DeepResearchResponse,
   options: { rawOutputPath?: string } = {},
 ): string {
@@ -357,9 +395,9 @@ export function renderFindingsReport(
   const tradeoffs = structured
     ? listMarkdown(
         structured.tradeoffs,
-        "- Compare benefits against implementation cost and project constraints.",
+        "- Compare benefits against implementation cost, operational risk, and project-specific constraints before committing.\n- Prefer primary-source documentation and current release notes when evidence conflicts.",
       )
-    : "- Compare benefits against implementation cost and project constraints.";
+    : "- Compare benefits against implementation cost, operational risk, and project-specific constraints before committing.\n- Prefer primary-source documentation and current release notes when evidence conflicts.";
 
   const recommendation =
     typeof structured?.recommendation === "string" &&
@@ -370,20 +408,20 @@ export function renderFindingsReport(
   const risks = structured
     ? listMarkdown(
         structured.risks,
-        "- Verify source freshness and applicability.\n- Treat uncited claims as hypotheses.",
+        "- Verify source freshness and applicability to this project.\n- Re-run research if provider APIs, pricing, or release notes change.\n- Treat uncited or snippet-only claims as hypotheses until confirmed by primary sources.",
       )
-    : "- Verify source freshness and applicability.\n- Treat uncited claims as hypotheses.";
+    : "- Verify source freshness and applicability to this project.\n- Re-run research if provider APIs, pricing, or release notes change.\n- Treat uncited or snippet-only claims as hypotheses until confirmed by primary sources.";
 
   const revisit = structured
     ? listMarkdown(
         structured.revisitConditions,
-        "- New primary-source documentation contradicts findings.\n- Implementation constraints differ from research context.",
+        "- New primary-source documentation contradicts these findings.\n- Implementation constraints differ from the context supplied to research.\n- Exa Deep Search returns materially different source coverage in a later run.",
       )
-    : "- New primary-source documentation contradicts findings.\n- Implementation constraints differ from research context.";
+    : "- New primary-source documentation contradicts these findings.\n- Implementation constraints differ from the context supplied to research.\n- Exa Deep Search returns materially different source coverage in a later run.";
 
   const evidence = response.results
     .map((r, i) => {
-      const snippet = sanitizeText(resultSnippet(r, 1200))
+      const snippet = sanitizeEvidenceText(resultSnippet(r, 1200))
         .split("\n")
         .map((line) => `> ${line}`)
         .join("\n");
@@ -392,8 +430,8 @@ export function renderFindingsReport(
     .join("\n\n");
 
   const metadata = [
-    `- Mode: ${response.metadata.researchMode ?? "standard"}`,
-    `- Exa type: ${response.metadata.type ?? "deep-reasoning"}`,
+    `- Mode: ${response.metadata.researchMode ?? input.researchMode ?? "standard"}`,
+    `- Exa type: ${response.metadata.type ?? input.type ?? "deep-reasoning"}`,
     `- Queries: ${response.metadata.queryCount ?? 1}`,
     `- Sources: ${response.metadata.uniqueSourceCount ?? response.results.length} unique${response.metadata.sourceCount && response.metadata.sourceCount !== response.results.length ? ` (${response.metadata.sourceCount} returned before dedupe)` : ""}`,
     options.rawOutputPath
@@ -403,7 +441,7 @@ export function renderFindingsReport(
     .filter(Boolean)
     .join("\n");
 
-  return `# Findings: ${title}\n\n## Research Question\n\n${input.query}\n\n## Executive Summary\n\n${answer}\n\n## Key Findings\n\n${findings}\n\n## Evidence and Sources\n\n${bulletSources(response)}\n\n${evidence}\n\n## Tradeoffs / Alternatives\n\n${tradeoffs}\n\n## Recommendation / Decision Criteria\n\n${recommendation}\n\n## Risks / Unknowns\n\n${risks}\n\n## Revisit Conditions\n\n${revisit}\n\n## Research Metadata\n\n${metadata}\n`;
+  return `# Findings: ${title}\n\n## Research Question\n\n${input.query}\n\n## Executive Summary\n\n${answer}\n\n## Key Findings\n\n${findings}\n\n## Evidence and Sources\n\n${bulletSources(response)}\n\n${evidence}\n\n## Tradeoffs / Alternatives\n\n${tradeoffs}\n\n## Recommendation / Decision Criteria\n\n${recommendation}\n\nUse the source evidence above as decision criteria; validate any project-specific assumptions before irreversible work.\n\n## Risks / Unknowns\n\n${risks}\n\n## Revisit Conditions\n\n${revisit}\n\n## Research Metadata\n\n${metadata}\n`;
 }
 ````
 
