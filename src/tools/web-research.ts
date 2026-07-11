@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative } from "node:path";
+import { dirname, relative } from "node:path";
 import { Type } from "typebox";
 import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
@@ -95,9 +95,7 @@ const WebResearchParams = Type.Object({
 
 interface WebResearchDetails {
   outputPath?: string;
-  rawOutputPath?: string;
   sourceCount: number;
-  metadata: Record<string, unknown>;
 }
 
 async function writeQueued(path: string, content: string): Promise<void> {
@@ -110,7 +108,7 @@ async function writeQueued(path: string, content: string): Promise<void> {
 function displayPath(cwd: string | undefined, filePath: string): string {
   if (!cwd) return filePath;
   const rel = relative(cwd, filePath);
-  return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : filePath;
+  return rel && !rel.startsWith("..") ? rel : filePath;
 }
 
 export function createWebResearchTool(
@@ -280,9 +278,7 @@ export function createWebResearchTool(
         content: [{ type: "text" as const, text }],
         details: {
           outputPath,
-          rawOutputPath,
           sourceCount: uniqueResults.length,
-          metadata: response.metadata,
         },
       };
     },

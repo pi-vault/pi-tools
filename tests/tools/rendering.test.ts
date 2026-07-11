@@ -311,7 +311,7 @@ describe("web_research rendering", () => {
   it("renderResult shows source count and output path", () => {
     const result = {
       content: [{ type: "text" as const, text: "report content" }],
-      details: { sourceCount: 7, outputPath: "/tmp/findings.md", metadata: {} },
+      details: { sourceCount: 7, outputPath: "/tmp/findings.md" },
     };
     const component = tool.renderResult!(
       result,
