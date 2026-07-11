@@ -69,14 +69,15 @@ describe("tools extension", () => {
     // Verify restore worked by using web_read tool to retrieve the content
     const webRead = pi.tools.find((t) => t.name === "web_read");
     expect(webRead).toBeDefined();
-    const result = await webRead?.execute(
+    if (!webRead) throw new Error("web_read tool not registered");
+    const result = await webRead.execute(
       "call-1",
       { contentId: "wc-restored-1" },
       undefined,
       undefined,
       ctx,
     );
-    const text = (result?.content[0] as { type: "text"; text: string }).text;
+    const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toContain("Restored content");
   });
 
@@ -141,25 +142,27 @@ describe("tools extension", () => {
 
     // Valid entry should be accessible
     const webRead = pi.tools.find((t) => t.name === "web_read");
-    const validResult = await webRead?.execute(
+    expect(webRead).toBeDefined();
+    if (!webRead) throw new Error("web_read tool not registered");
+    const validResult = await webRead.execute(
       "r1",
       { contentId: "wc-valid" },
       undefined,
       undefined,
       ctx,
     );
-    const validText = (validResult?.content[0] as { type: "text"; text: string }).text;
+    const validText = (validResult.content[0] as { type: "text"; text: string }).text;
     expect(validText).toContain("Valid content");
 
     // Corrupt entry should NOT be accessible (filtered out by validation)
-    const corruptResult = await webRead?.execute(
+    const corruptResult = await webRead.execute(
       "r2",
       { contentId: "wc-corrupt" },
       undefined,
       undefined,
       ctx,
     );
-    const corruptText = (corruptResult?.content[0] as { type: "text"; text: string }).text;
+    const corruptText = (corruptResult.content[0] as { type: "text"; text: string }).text;
     expect(corruptText.toLowerCase()).toContain("not found");
   });
 });
