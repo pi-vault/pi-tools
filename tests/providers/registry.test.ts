@@ -697,6 +697,64 @@ describe("ProviderRegistry", () => {
       expect(registry.selectSearchByPerformanceAll()).toEqual([]);
     });
   });
+
+  describe("selectSearchForFusion", () => {
+    it("returns single provider when name is explicitly set", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+      const result = registry.selectSearchForFusion("auto", "duckduckgo");
+      expect(result.map((p) => p.name)).toEqual(["duckduckgo"]);
+    });
+
+    it("delegates to selectSearchCandidates for 'auto' strategy", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+      const result = registry.selectSearchForFusion("auto");
+      // Same order as selectSearchCandidates: tier-sorted, quota-filtered
+      expect(result.map((p) => p.name)).toEqual(["brave", "duckduckgo"]);
+    });
+
+    it("delegates to selectSearchByPerformanceAll for 'best-performing' strategy", () => {
+      const registry = mem();
+      const brave = mockProvider("brave", "Brave");
+      const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+
+      registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+      registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+      // Give ddg better metrics
+      registry.recordOutcome("duckduckgo", { success: true, latencyMs: 100 });
+      registry.recordOutcome("duckduckgo", { success: true, latencyMs: 100 });
+      registry.recordOutcome("brave", { success: true, latencyMs: 2000 });
+      registry.recordOutcome("brave", { success: false });
+
+      const result = registry.selectSearchForFusion("best-performing");
+      // ddg should be first due to better performance
+      expect(result[0].name).toBe("duckduckgo");
+      // Both present
+      expect(result).toHaveLength(2);
+    });
+
+    it("returns empty array for unknown explicit provider", () => {
+      const registry = mem();
+      expect(registry.selectSearchForFusion("auto", "nonexistent")).toEqual([]);
+    });
+
+    it("returns empty array when no providers registered", () => {
+      const registry = mem();
+      expect(registry.selectSearchForFusion("auto")).toEqual([]);
+    });
+  });
 });
 
 describe("docs provider registration", () => {

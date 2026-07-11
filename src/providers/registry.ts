@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { SelectionStrategy } from "../config.ts";
 import type {
   CodeSearchProvider,
   DocsProvider,
@@ -272,6 +273,17 @@ export class ProviderRegistry {
 
   selectSearchByPerformanceAll(): SearchProvider[] {
     return this.scoreEligibleProviders().map((s) => s.provider);
+  }
+
+  selectSearchForFusion(strategy: SelectionStrategy, name?: string): SearchProvider[] {
+    if (name && name !== "auto") {
+      const provider = this.searchProviders.get(name)?.provider;
+      return provider ? [provider] : [];
+    }
+    if (strategy === "best-performing") {
+      return this.selectSearchByPerformanceAll();
+    }
+    return this.selectSearchCandidates();
   }
 
   selectFetchCandidates(): FetchProvider[] {
