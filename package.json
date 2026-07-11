@@ -1,8 +1,8 @@
 {
   "name": "@pi-vault/pi-tools",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
-  "description": "Pi extension for quick access to code search, web fetch, and web search tools",
+  "description": "Pi extension for web search, page fetching, documentation lookup, and deep research",
   "author": "Lanh Hoang <lanhhoang@users.noreply.github.com>",
   "license": "MIT",
   "homepage": "https://github.com/pi-vault/pi-tools#readme",
@@ -21,7 +21,9 @@
     "pi-tools",
     "code-search",
     "web-fetch",
-    "web-search"
+    "web-search",
+    "web-docs",
+    "web-research"
   ],
   "scripts": {
     "format": "biome format --write .",
