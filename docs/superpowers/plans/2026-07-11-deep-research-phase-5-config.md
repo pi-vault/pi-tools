@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-07-11-deep-research-design.md`
 **Main plan:** `docs/superpowers/plans/2026-07-11-deep-research.md`
 
-**Depends on:** Phase 1 (`ResearchMode`, `ResearchModeDefaults` types for the modeDefaults interface)
+**Depends on:** Phase 1 (`ResearchMode`, `ResearchModeDefaults` types in `src/research/types.ts`)
 **Produces:** Config interface and parsing ready for tool registration in Phase 6.
 
 ---
@@ -23,7 +23,8 @@ The config system lives in `src/config.ts` (257 lines). Key structures:
 - `PiToolsConfig` interface — the master config type
 - `DEFAULT_CONFIG` — built-in defaults
 - `parseConfigFile()` — parses JSON from disk into `PiToolsConfig`
-- `loadConfig()` / `loadMergedConfig()` — load from filesystem with fallbacks
+- `loadConfig()` — single-file load with fallback to legacy path
+- `loadMergedConfig()` — three-layer resolution (defaults → global → project) via `deepMerge`
 - `resolveApiKey()` — resolves API keys from env vars, shell commands, or literals
 
 Each config section has a pattern:
@@ -32,6 +33,10 @@ Each config section has a pattern:
 2. Default constant (e.g., `DEFAULT_COMBINE_CONFIG`)
 3. Validator function (e.g., `validateCombineConfig`)
 4. Added to `DEFAULT_CONFIG` and `parseConfigFile` return
+
+`loadMergedConfig` starts from `DEFAULT_CONFIG` and deep-merges JSON layers on top, so adding `deepResearch` to `DEFAULT_CONFIG` ensures the field is always present in the merged result.
+
+`ConfigManager` (in `src/config-manager.ts`) uses `loadMergedConfig` and exposes `current: PiToolsConfig`. Phase 6 tool registration will access `configManager.current.deepResearch`.
 
 Tests in `tests/config.test.ts` mock `node:fs` with `vi.mock("node:fs")` and use `vi.mocked(fs.readFileSync).mockReturnValue(...)`.
 
@@ -50,13 +55,18 @@ Create `tests/config-deep-research.test.ts`:
 
 ```typescript
 import * as fs from "node:fs";
-import { describe, expect, it, vi } from "vitest";
-import { loadConfig } from "../src/config.ts";
+import * as path from "node:path";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { loadConfig, loadMergedConfig } from "../src/config.ts";
 import type { DeepResearchConfig } from "../src/config.ts";
 
 vi.mock("node:fs");
 
-describe("DeepResearchConfig loading", () => {
+describe("DeepResearchConfig — loadConfig", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("returns default deepResearch config when not in file", () => {
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({}));
     const config = loadConfig();
@@ -110,6 +120,82 @@ describe("DeepResearchConfig loading", () => {
     const config = loadConfig();
     expect(config.deepResearch.guidance?.promptSnippet).toBe("Custom snippet");
   });
+
+  it("ignores non-boolean enabled values and falls back to default", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ deepResearch: { enabled: "yes" } }),
+    );
+    const config = loadConfig();
+    expect(config.deepResearch.enabled).toBe(true);
+  });
+
+  it("returns default when deepResearch is not an object", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ deepResearch: "invalid" }),
+    );
+    const config = loadConfig();
+    expect(config.deepResearch).toEqual({ enabled: true });
+  });
+});
+
+describe("DeepResearchConfig — loadMergedConfig", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("preserves deepResearch defaults when no config files exist", () => {
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const config = loadMergedConfig("/projects/my-app");
+    expect(config.deepResearch).toBeDefined();
+    expect(config.deepResearch.enabled).toBe(true);
+  });
+
+  it("deep-merges deepResearch overrides from global config", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const filePath = typeof p === "string" ? p : p.toString();
+      if (filePath.includes(path.join(".pi", "agent"))) {
+        return JSON.stringify({
+          deepResearch: {
+            enabled: true,
+            modeDefaults: { lite: { numResults: 25 } },
+          },
+        });
+      }
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const config = loadMergedConfig("/projects/my-app");
+    expect(config.deepResearch.enabled).toBe(true);
+    expect(config.deepResearch.modeDefaults?.lite?.numResults).toBe(25);
+  });
+
+  it("project config overrides global deepResearch settings", () => {
+    vi.mocked(fs.readFileSync).mockImplementation((p) => {
+      const filePath = typeof p === "string" ? p : p.toString();
+      if (filePath.includes(path.join(".pi", "agent"))) {
+        return JSON.stringify({
+          deepResearch: { enabled: true },
+        });
+      }
+      if (filePath.includes(path.join(".pi", "tools.json"))) {
+        return JSON.stringify({
+          deepResearch: { enabled: false },
+        });
+      }
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockImplementation((p) => {
+      return (p as string).includes(path.join(".pi", "tools.json"));
+    });
+
+    const config = loadMergedConfig("/projects/my-app");
+    expect(config.deepResearch.enabled).toBe(false);
+  });
 });
 ```
 
@@ -120,29 +206,18 @@ Expected: FAIL — `DeepResearchConfig` not exported, `config.deepResearch` is u
 
 - [ ] **Step 3: Add DeepResearchConfig to config.ts**
 
-Add the interface after `CombineConfig` (after line 38 in `src/config.ts`):
+Import the Phase 1 types at the top of `src/config.ts` (after existing imports):
+
+```typescript
+import type { ResearchMode, ResearchModeDefaults } from "./research/types.ts";
+```
+
+Add the interface after `CombineConfig` (after line 38):
 
 ```typescript
 export interface DeepResearchConfig {
   enabled: boolean;
-  modeDefaults?: Partial<
-    Record<
-      string,
-      Partial<{
-        type: string;
-        numResults: number;
-        textMaxCharacters: number;
-        timeoutSeconds: number;
-        highlightsMaxCharacters: number;
-        highlightNumSentences: number;
-        highlightsPerUrl: number;
-        summaryQuery: string;
-        maxAgeHours: number;
-        category: string;
-        outputSchema: Record<string, unknown>;
-      }>
-    >
-  >;
+  modeDefaults?: Partial<Record<ResearchMode, Partial<ResearchModeDefaults>>>;
   outputSchema?: Record<string, unknown> | null;
   guidance?: GuidanceOverride;
 }
@@ -156,9 +231,19 @@ export const DEFAULT_DEEP_RESEARCH_CONFIG: DeepResearchConfig = {
 };
 ```
 
-Add `deepResearch: DeepResearchConfig;` field to the `PiToolsConfig` interface (after `combine: CombineConfig;`).
+Add `deepResearch: DeepResearchConfig;` field to the `PiToolsConfig` interface (after `combine: CombineConfig;`):
 
-Add `deepResearch: DEFAULT_DEEP_RESEARCH_CONFIG,` to the `DEFAULT_CONFIG` object.
+```typescript
+  combine: CombineConfig;
+  deepResearch: DeepResearchConfig;
+```
+
+Add `deepResearch: DEFAULT_DEEP_RESEARCH_CONFIG,` to the `DEFAULT_CONFIG` object (after `combine`):
+
+```typescript
+  combine: DEFAULT_COMBINE_CONFIG,
+  deepResearch: DEFAULT_DEEP_RESEARCH_CONFIG,
+```
 
 Add the validator function (place it after `validateCombineConfig`):
 
@@ -191,6 +276,7 @@ function validateDeepResearchConfig(parsed: unknown): DeepResearchConfig {
 In `parseConfigFile`, add `deepResearch` to the return object (after the `combine` line):
 
 ```typescript
+    combine: validateCombineConfig(parsed.combine),
     deepResearch: validateDeepResearchConfig(parsed.deepResearch),
 ```
 
