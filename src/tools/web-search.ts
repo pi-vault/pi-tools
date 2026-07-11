@@ -263,8 +263,12 @@ export function createWebSearchTool(
           const header = meta.degraded
             ? theme.fg("warning", `${count} results fused (degraded) from ${meta.providersUsed.join(", ")}`)
             : theme.fg("toolOutput", `${count} results fused from ${meta.providersUsed.join(", ")}`);
-          const resultLines = raw.split("\n").slice(0, 15);
-          text.setText([header, ...resultLines.map((l) => theme.fg("toolOutput", l))].join("\n"));
+          const resultLines = raw.split("\n").slice(0, 15).map((line) => {
+            const match = meta.results.find((r) => line.includes(r.url));
+            if (match) return theme.fg("toolOutput", `${line}  [${match.providers.join(", ")}]`);
+            return theme.fg("toolOutput", line);
+          });
+          text.setText([header, ...resultLines].join("\n"));
         } else {
           const lines = raw.split("\n").slice(0, 15);
           text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));

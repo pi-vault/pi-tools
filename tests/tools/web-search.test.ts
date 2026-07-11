@@ -395,6 +395,35 @@ describe("web_search fusion mode", () => {
 
   const combineConfig = { enabled: true, mode: "targeted" as const, targetBackends: 3, k: 60 };
 
+  it("fusion with compact=true returns compact format", async () => {
+    const providerBrave = makeProvider("brave", [resultA, resultB]);
+    const providerExa = makeProvider("exa", [resultB, resultC]);
+
+    const tool = createWebSearchTool(
+      () => [providerBrave, providerExa],
+      vi.fn(),
+      undefined,
+      vi.fn(),
+      vi.fn(),
+      combineConfig,
+    );
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-fuse-compact",
+      { query: "test", combine: true, compact: true },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(result.details.provider).toBe("fusion");
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    // Compact format uses "title -- url" style
+    expect(text).toContain("--");
+    // No snippets in compact format (no multi-line entries)
+    expect(text).not.toContain("Snippet");
+  });
+
   it("fusionMeta.results tracks which providers found each URL", async () => {
     const sharedResult: SearchResult = { title: "Shared", url: "https://shared.com", snippet: "shared" };
     const providerBrave = makeProvider("brave", [sharedResult, resultA]);
@@ -619,6 +648,36 @@ describe("web_search renderResult fusion display", () => {
     expect(rendered).toContain("fused");
     expect(rendered).toContain("brave");
     expect(rendered).toContain("exa");
+  });
+
+  it("expanded view shows per-result provider tags next to URLs", async () => {
+    const sharedResult: SearchResult = { title: "Shared", url: "https://shared.com", snippet: "shared snippet" };
+    const onlyBrave: SearchResult = { title: "Brave Only", url: "https://brave-only.com", snippet: "brave snippet" };
+    const providerBrave = makeProvider("brave", [sharedResult, onlyBrave]);
+    const providerExa = makeProvider("exa", [sharedResult]);
+
+    const tool = createWebSearchTool(
+      () => [providerBrave, providerExa],
+      vi.fn(),
+      undefined,
+      vi.fn(),
+      vi.fn(),
+      combineConfig,
+    );
+    const ctx = makeCtx();
+    const result = await tool.execute("id", { query: "test", combine: true }, undefined, undefined, ctx);
+
+    const textComponent = new Text("", 0, 0);
+    const setTextSpy = vi.spyOn(textComponent, "setText");
+    tool.renderResult!(result, { expanded: true, isPartial: false }, makeMockTheme(), makeRenderCtx(textComponent));
+
+    const rendered = setTextSpy.mock.calls[0][0] as string;
+    // Shared result found by both providers should have both tags
+    const sharedLine = rendered.split("\n").find((l) => l.includes("https://shared.com"));
+    expect(sharedLine).toContain("[brave, exa]");
+    // Brave-only result should only have brave tag
+    const braveLine = rendered.split("\n").find((l) => l.includes("https://brave-only.com"));
+    expect(braveLine).toContain("[brave]");
   });
 });
 
