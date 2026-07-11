@@ -110,7 +110,6 @@ export class ProviderRegistry {
 
     if (eligible.length === 0) return [];
 
-    const NEUTRAL_SCORE = 0.5;
     const metricsEntries: Array<{
       provider: SearchProvider;
       successRate: number;
@@ -122,7 +121,7 @@ export class ProviderRegistry {
     for (const r of eligible) {
       const m = this.getActiveMetrics(r.provider.name);
       if (!m || m.successes + m.failures === 0) {
-        neutralEntries.push({ provider: r.provider, score: NEUTRAL_SCORE });
+        neutralEntries.push({ provider: r.provider, score: 0.5 });
       } else {
         const total = m.successes + m.failures;
         metricsEntries.push({

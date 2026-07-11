@@ -512,35 +512,24 @@ describe("CombineConfig", () => {
     expect(config.combine.k).toBe(60); // default preserved
   });
 
-  it("rejects invalid combine.mode and falls back to default", () => {
+  it("validates combine.mode and falls back to default for unknown values", () => {
     vi.mocked(fs.readFileSync).mockReturnValue(
       JSON.stringify({ combine: { mode: "invalid" } }),
     );
-    const config = loadConfig();
-    expect(config.combine.mode).toBe("targeted");
-  });
+    expect(loadConfig().combine.mode).toBe("targeted");
 
-  it("accepts 'all' as a valid combine.mode", () => {
     vi.mocked(fs.readFileSync).mockReturnValue(
       JSON.stringify({ combine: { mode: "all" } }),
     );
-    const config = loadConfig();
-    expect(config.combine.mode).toBe("all");
+    expect(loadConfig().combine.mode).toBe("all");
   });
 
-  it("clamps combine.targetBackends to minimum of 1", () => {
+  it("clamps combine.targetBackends and k to minimum of 1", () => {
     vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ combine: { targetBackends: 0 } }),
+      JSON.stringify({ combine: { targetBackends: 0, k: -5 } }),
     );
     const config = loadConfig();
     expect(config.combine.targetBackends).toBe(1);
-  });
-
-  it("clamps combine.k to minimum of 1", () => {
-    vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ combine: { k: -5 } }),
-    );
-    const config = loadConfig();
     expect(config.combine.k).toBe(1);
   });
 
