@@ -17,7 +17,12 @@ describe("executeWithFallback", () => {
   it("falls back to second candidate when first fails", async () => {
     const result = await executeWithFallback({
       candidates: [
-        { name: "failing", execute: async () => { throw new Error("timeout"); } },
+        {
+          name: "failing",
+          execute: async () => {
+            throw new Error("timeout");
+          },
+        },
         { name: "working", execute: async () => "fallback-result" },
       ],
       operation: "search",
@@ -30,8 +35,18 @@ describe("executeWithFallback", () => {
     await expect(
       executeWithFallback({
         candidates: [
-          { name: "a", execute: async () => { throw new Error("err-a"); } },
-          { name: "b", execute: async () => { throw new Error("err-b"); } },
+          {
+            name: "a",
+            execute: async () => {
+              throw new Error("err-a");
+            },
+          },
+          {
+            name: "b",
+            execute: async () => {
+              throw new Error("err-b");
+            },
+          },
         ],
         operation: "fetch",
       }),
@@ -52,7 +67,12 @@ describe("executeWithFallback", () => {
     const onFailure = vi.fn();
     await executeWithFallback({
       candidates: [
-        { name: "bad", execute: async () => { throw new Error("x"); } },
+        {
+          name: "bad",
+          execute: async () => {
+            throw new Error("x");
+          },
+        },
         { name: "good", execute: async () => "ok" },
       ],
       operation: "search",

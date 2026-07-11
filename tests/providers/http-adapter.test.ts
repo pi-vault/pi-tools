@@ -110,7 +110,9 @@ describe("createHttpSearchProvider", () => {
 
   it("slices results to maxResults", async () => {
     const manyResults = Array.from({ length: 20 }, (_, i) => ({
-      title: `R${i}`, url: `https://r${i}.com`, snippet: `s${i}`,
+      title: `R${i}`,
+      url: `https://r${i}.com`,
+      snippet: `s${i}`,
     }));
     fetchStub.addResponse("api.example.com", {
       body: { results: manyResults },

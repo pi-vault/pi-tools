@@ -1,10 +1,6 @@
 import { readdir, readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
-import {
-  researchModeDefaults,
-  type ResearchMode,
-  type ResearchModeDefaults,
-} from "./types.ts";
+import { researchModeDefaults, type ResearchMode, type ResearchModeDefaults } from "./types.ts";
 
 export const MAX_CONTEXT_FILES = 25;
 
@@ -36,9 +32,7 @@ export interface WebResearchInput {
   rawOutputPath?: string;
 }
 
-type ModeDefaultOverrides = Partial<
-  Record<ResearchMode, Partial<ResearchModeDefaults>>
->;
+type ModeDefaultOverrides = Partial<Record<ResearchMode, Partial<ResearchModeDefaults>>>;
 
 function cleanPath(p: string): string {
   return p.startsWith("@") ? p.slice(1) : p;
@@ -60,9 +54,7 @@ export async function expandSimpleGlob(
   const normalized = cleaned.replace(/\\/g, "/");
 
   if (normalized.split("*").length > 2) {
-    throw new Error(
-      `contextGlob supports one '*' wildcard in the path: ${rawGlob}`,
-    );
+    throw new Error(`contextGlob supports one '*' wildcard in the path: ${rawGlob}`);
   }
 
   const slash = normalized.lastIndexOf("/");
@@ -74,18 +66,13 @@ export async function expandSimpleGlob(
   const entries = await readdir(dir, { withFileTypes: true });
   const matches = entries
     .filter(
-      (entry) =>
-        entry.isFile() &&
-        entry.name.startsWith(prefix) &&
-        entry.name.endsWith(suffix),
+      (entry) => entry.isFile() && entry.name.startsWith(prefix) && entry.name.endsWith(suffix),
     )
     .map((entry) => join(dir, entry.name))
     .sort();
 
   if (matches.length > limit) {
-    throw new Error(
-      `contextGlob matched ${matches.length} files; limit is ${limit}: ${rawGlob}`,
-    );
+    throw new Error(`contextGlob matched ${matches.length} files; limit is ${limit}: ${rawGlob}`);
   }
   return matches;
 }
@@ -107,8 +94,7 @@ export function applyResearchMode(
   >,
   configDefaults?: ModeDefaultOverrides,
 ) {
-  const researchMode: ResearchMode =
-    (input.researchMode as ResearchMode) ?? "standard";
+  const researchMode: ResearchMode = (input.researchMode as ResearchMode) ?? "standard";
   const defaults = researchModeDefaults[researchMode];
   if (!defaults) {
     throw new Error(
@@ -122,9 +108,7 @@ export function applyResearchMode(
     type: input.type ?? profile.type ?? defaults.type,
     numResults: input.numResults ?? profile.numResults ?? defaults.numResults,
     textMaxCharacters:
-      input.textMaxCharacters ??
-      profile.textMaxCharacters ??
-      defaults.textMaxCharacters,
+      input.textMaxCharacters ?? profile.textMaxCharacters ?? defaults.textMaxCharacters,
     timeoutSeconds: profile.timeoutSeconds ?? defaults.timeoutSeconds,
     highlightsMaxCharacters:
       input.highlightsMaxCharacters ??
@@ -135,29 +119,17 @@ export function applyResearchMode(
       profile.highlightNumSentences ??
       defaults.highlightNumSentences,
     highlightsPerUrl:
-      input.highlightsPerUrl ??
-      profile.highlightsPerUrl ??
-      defaults.highlightsPerUrl,
-    summaryQuery:
-      input.summaryQuery ?? profile.summaryQuery ?? defaults.summaryQuery,
-    maxAgeHours:
-      input.maxAgeHours ?? profile.maxAgeHours ?? defaults.maxAgeHours,
+      input.highlightsPerUrl ?? profile.highlightsPerUrl ?? defaults.highlightsPerUrl,
+    summaryQuery: input.summaryQuery ?? profile.summaryQuery ?? defaults.summaryQuery,
+    maxAgeHours: input.maxAgeHours ?? profile.maxAgeHours ?? defaults.maxAgeHours,
     category: input.category ?? profile.category ?? defaults.category,
-    outputSchema:
-      input.outputSchema ?? profile.outputSchema ?? defaults.outputSchema,
+    outputSchema: input.outputSchema ?? profile.outputSchema ?? defaults.outputSchema,
   };
 }
 
-async function resolveContextPaths(
-  cwd: string,
-  params: WebResearchInput,
-): Promise<string[]> {
-  const explicit = (params.contextFiles ?? []).map((p) =>
-    resolveOutputPath(cwd, p),
-  );
-  const globbed = params.contextGlob
-    ? await expandSimpleGlob(cwd, params.contextGlob)
-    : [];
+async function resolveContextPaths(cwd: string, params: WebResearchInput): Promise<string[]> {
+  const explicit = (params.contextFiles ?? []).map((p) => resolveOutputPath(cwd, p));
+  const globbed = params.contextGlob ? await expandSimpleGlob(cwd, params.contextGlob) : [];
   return Array.from(new Set([...explicit, ...globbed])).sort();
 }
 
@@ -170,9 +142,7 @@ export async function prepareResearchInput(
 ): Promise<WebResearchInput & { query: string; systemPrompt: string }> {
   let query = params.query?.trim() ?? "";
   if (params.queryFile) {
-    query = (
-      await readFile(resolveOutputPath(cwd, params.queryFile), "utf8")
-    ).trim();
+    query = (await readFile(resolveOutputPath(cwd, params.queryFile), "utf8")).trim();
   }
   if (!query) throw new Error("web_research requires query or queryFile.");
 

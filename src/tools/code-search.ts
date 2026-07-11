@@ -8,7 +8,12 @@ import type { GuidanceOverride } from "../config.ts";
 const CodeSearchParams = Type.Object({
   query: Type.String({ description: "Code or technical documentation search query" }),
   numResults: Type.Optional(
-    Type.Number({ minimum: 1, maximum: 10, default: 5, description: "Number of results (1-10, default 5)" }),
+    Type.Number({
+      minimum: 1,
+      maximum: 10,
+      default: 5,
+      description: "Number of results (1-10, default 5)",
+    }),
   ),
 });
 
@@ -19,12 +24,7 @@ interface CodeSearchDetails {
 
 function formatCodeResults(results: CodeSearchResult[]): string {
   if (results.length === 0) return "No code results found.";
-  return results
-    .map(
-      (r, i) =>
-        `${i + 1}. [${r.title}](${r.url})\n   ${r.snippet}`,
-    )
-    .join("\n\n");
+  return results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${r.snippet}`).join("\n\n");
 }
 
 export function createCodeSearchTool(
@@ -35,9 +35,9 @@ export function createCodeSearchTool(
   return {
     name: "code_search",
     label: "Code Search",
-    description:
-      "Search code, library APIs, and technical documentation across the web.",
-    promptSnippet: guidance?.promptSnippet ??
+    description: "Search code, library APIs, and technical documentation across the web.",
+    promptSnippet:
+      guidance?.promptSnippet ??
       "Search code, library APIs, and technical documentation across the web.",
     promptGuidelines: guidance?.promptGuidelines ?? [
       "Use code_search for finding code examples, library documentation, and API references.",
@@ -78,7 +78,8 @@ export function createCodeSearchTool(
       }
     },
     renderCall(args, theme: Theme, context) {
-      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      const text =
+        context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
       if (!context.argsComplete) {
         text.setText(theme.fg("warning", "Searching code..."));
         return text;
@@ -90,15 +91,15 @@ export function createCodeSearchTool(
       return text;
     },
     renderResult(result, options, theme: Theme, context) {
-      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      const text =
+        context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
       if (context.isPartial) {
         text.setText(theme.fg("warning", "Searching code..."));
         return text;
       }
       const count = result.details?.resultCount ?? 0;
       if (options.expanded) {
-        const raw =
-          result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
+        const raw = result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
         const lines = raw.split("\n").slice(0, 15);
         text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));
       } else {

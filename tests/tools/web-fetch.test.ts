@@ -367,13 +367,7 @@ describe("web_fetch multi-URL", () => {
     const store = new ContentStore(() => {});
     const tool = createWebFetchTool(store);
     const ctx = makeCtx();
-    const result = await tool.execute(
-      "call-m2",
-      {} as any,
-      undefined,
-      undefined,
-      ctx,
-    );
+    const result = await tool.execute("call-m2", {} as any, undefined, undefined, ctx);
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text.toLowerCase()).toContain("error");
     expect(text).toContain("exactly one");
@@ -384,13 +378,7 @@ describe("web_fetch multi-URL", () => {
     const tool = createWebFetchTool(store);
     const ctx = makeCtx();
     const urls = Array.from({ length: 21 }, (_, i) => `https://example.com/${i}`);
-    const result = await tool.execute(
-      "call-m3",
-      { urls } as any,
-      undefined,
-      undefined,
-      ctx,
-    );
+    const result = await tool.execute("call-m3", { urls } as any, undefined, undefined, ctx);
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text.toLowerCase()).toContain("error");
     expect(text).toContain("20");
@@ -495,13 +483,7 @@ describe("web_fetch multi-URL", () => {
     const store = new ContentStore(() => {});
     const tool = createWebFetchTool(store);
     const ctx = makeCtx();
-    const result = await tool.execute(
-      "call-m7",
-      { urls },
-      undefined,
-      undefined,
-      ctx,
-    );
+    const result = await tool.execute("call-m7", { urls }, undefined, undefined, ctx);
     expect(result.details.urlResults).toHaveLength(6);
     // All should have contentIds for full retrieval
     for (const ur of result.details.urlResults!) {
@@ -741,7 +723,7 @@ describe("web_fetch raw mode", () => {
     );
     const text = (result.content[0] as { type: "text"; text: string }).text;
     // Raw mode preserves HTML tags that would normally be stripped
-    expect(text).toContain("<div class=\"sidebar\">");
+    expect(text).toContain('<div class="sidebar">');
     expect(text).toContain("Sidebar nav content");
   });
 
@@ -770,7 +752,7 @@ describe("web_fetch raw mode", () => {
     const text = (result.content[0] as { type: "text"; text: string }).text;
     // Normal mode strips nav/sidebar via Readability
     expect(text).toContain("Article");
-    expect(text).not.toContain("<div class=\"sidebar\">");
+    expect(text).not.toContain('<div class="sidebar">');
   });
 
   it("raw mode works with multi-URL", async () => {

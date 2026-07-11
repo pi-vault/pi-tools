@@ -22,10 +22,7 @@ function createStore(): ContentStore {
 
 describe("web_docs_fetch tool", () => {
   it("has correct tool metadata", () => {
-    const tool = createWebDocsFetchTool(
-      () => mockDocsProvider(),
-      createStore(),
-    );
+    const tool = createWebDocsFetchTool(() => mockDocsProvider(), createStore());
     expect(tool.name).toBe("web_docs_fetch");
     expect(tool.label).toBe("Docs Fetch");
   });
@@ -42,18 +39,20 @@ describe("web_docs_fetch tool", () => {
     const tool = createWebDocsFetchTool(() => mockDocsProvider(), createStore());
     const ctx = makeCtx();
     await expect(
-      tool.execute("call-1", { libraryId: "/facebook/react", query: "" }, undefined, undefined, ctx),
+      tool.execute(
+        "call-1",
+        { libraryId: "/facebook/react", query: "" },
+        undefined,
+        undefined,
+        ctx,
+      ),
     ).rejects.toThrow("query");
   });
 
   it("returns documentation content on success", async () => {
-    const content =
-      "### useState\n\n```typescript\nconst [s, setS] = useState(0);\n```";
+    const content = "### useState\n\n```typescript\nconst [s, setS] = useState(0);\n```";
     const onUpdate = vi.fn();
-    const tool = createWebDocsFetchTool(
-      () => mockDocsProvider(content),
-      createStore(),
-    );
+    const tool = createWebDocsFetchTool(() => mockDocsProvider(content), createStore());
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-1",
@@ -88,10 +87,7 @@ describe("web_docs_fetch tool", () => {
   it("truncates and stores large content", async () => {
     const largeContent = "x".repeat(20_000);
     const store = createStore();
-    const tool = createWebDocsFetchTool(
-      () => mockDocsProvider(largeContent),
-      store,
-    );
+    const tool = createWebDocsFetchTool(() => mockDocsProvider(largeContent), store);
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-2",
@@ -119,10 +115,7 @@ describe("web_docs_fetch tool", () => {
   it("does not store small content", async () => {
     const smallContent = "Short docs";
     const store = createStore();
-    const tool = createWebDocsFetchTool(
-      () => mockDocsProvider(smallContent),
-      store,
-    );
+    const tool = createWebDocsFetchTool(() => mockDocsProvider(smallContent), store);
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-2b",
@@ -158,9 +151,7 @@ describe("web_docs_fetch tool", () => {
       searchLibrary: vi.fn(),
       getContext: vi
         .fn()
-        .mockResolvedValue(
-          "Library is being processed. Try again in a few minutes.",
-        ),
+        .mockResolvedValue("Library is being processed. Try again in a few minutes."),
     };
     const tool = createWebDocsFetchTool(() => provider, createStore());
     const ctx = makeCtx();
@@ -181,9 +172,7 @@ describe("web_docs_fetch tool", () => {
       name: "context7",
       label: "Context7",
       searchLibrary: vi.fn(),
-      getContext: vi
-        .fn()
-        .mockRejectedValue(new Context7Error("Library not found.")),
+      getContext: vi.fn().mockRejectedValue(new Context7Error("Library not found.")),
     };
     const tool = createWebDocsFetchTool(() => failing, createStore());
     const ctx = makeCtx();
@@ -213,10 +202,6 @@ describe("web_docs_fetch tool", () => {
       ctx,
     );
 
-    expect(provider.getContext).toHaveBeenCalledWith(
-      "/facebook/react",
-      "hooks",
-      controller.signal,
-    );
+    expect(provider.getContext).toHaveBeenCalledWith("/facebook/react", "hooks", controller.signal);
   });
 });

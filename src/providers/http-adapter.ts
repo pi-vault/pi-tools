@@ -15,10 +15,7 @@ export interface HttpSearchConfig {
   extractResults: (data: unknown) => Array<{ title: string; url: string; snippet: string }>;
 }
 
-export function createHttpSearchProvider(
-  apiKey: string,
-  config: HttpSearchConfig,
-): SearchProvider {
+export function createHttpSearchProvider(apiKey: string, config: HttpSearchConfig): SearchProvider {
   return {
     name: config.name,
     label: config.label,

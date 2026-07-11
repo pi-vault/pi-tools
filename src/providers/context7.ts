@@ -120,9 +120,7 @@ export class Context7DocsProvider implements DocsProvider {
       } catch {
         // Fall through to error
       }
-      throw new Context7Error(
-        "Library has moved but no redirect URL provided.",
-      );
+      throw new Context7Error("Library has moved but no redirect URL provided.");
     }
 
     if (!response.ok) {

@@ -53,13 +53,12 @@ describe("extractContent", () => {
       body: "binary",
       headers: { "content-type": "image/png" },
     });
-    await expect(
-      extractContent("https://example.com/image.png"),
-    ).rejects.toThrow(/binary/i);
+    await expect(extractContent("https://example.com/image.png")).rejects.toThrow(/binary/i);
   });
 
   it("falls back to raw-text when Readability returns thin content", async () => {
-    const thinHtml = "<html><body><p>Short content that is too thin for Readability</p></body></html>";
+    const thinHtml =
+      "<html><body><p>Short content that is too thin for Readability</p></body></html>";
     fetchStub.addResponse("example.com/thin", {
       body: thinHtml,
       headers: { "content-type": "text/html" },
@@ -76,9 +75,7 @@ describe("extractContent", () => {
       body: "Not Found",
       headers: { "content-type": "text/html" },
     });
-    await expect(
-      extractContent("https://example.com/missing"),
-    ).rejects.toThrow(/HTTP 404/);
+    await expect(extractContent("https://example.com/missing")).rejects.toThrow(/HTTP 404/);
   });
 
   it("handles responses without content-type header", async () => {
@@ -228,11 +225,7 @@ describe("extractContent raw mode", () => {
       headers: { "content-type": "text/html" },
     });
 
-    const result = await extractContent(
-      "https://example.com/raw",
-      undefined,
-      { raw: true },
-    );
+    const result = await extractContent("https://example.com/raw", undefined, { raw: true });
     expect(result.text).toBe(rawHtml);
     expect(result.extractionChain).toContain("raw");
     expect(result.chars).toBe(rawHtml.length);
@@ -262,11 +255,7 @@ describe("extractContent raw mode", () => {
       headers: { "content-type": "application/json" },
     });
 
-    const result = await extractContent(
-      "https://example.com/api",
-      undefined,
-      { raw: true },
-    );
+    const result = await extractContent("https://example.com/api", undefined, { raw: true });
     expect(result.text).toBe(jsonBody);
     expect(result.extractionChain).toContain("raw");
   });
@@ -296,17 +285,12 @@ describe("GitHub URL interception in extractContent", () => {
   });
 
   it("intercepts blob URL and returns raw file content", async () => {
-    fetchStub.addResponse(
-      "raw.githubusercontent.com/facebook/react/main/README.md",
-      {
-        body: "# React\n\nA library for building UIs.",
-        headers: { "content-type": "text/plain" },
-      },
-    );
+    fetchStub.addResponse("raw.githubusercontent.com/facebook/react/main/README.md", {
+      body: "# React\n\nA library for building UIs.",
+      headers: { "content-type": "text/plain" },
+    });
 
-    const result = await extractContent(
-      "https://github.com/facebook/react/blob/main/README.md",
-    );
+    const result = await extractContent("https://github.com/facebook/react/blob/main/README.md");
     expect(result.text).toContain("React");
     expect(result.extractionChain).toContain("github:raw");
     // Should NOT have gone through the normal HTTP pipeline
@@ -314,13 +298,10 @@ describe("GitHub URL interception in extractContent", () => {
   });
 
   it("intercepts raw.githubusercontent.com URL directly", async () => {
-    fetchStub.addResponse(
-      "raw.githubusercontent.com/owner/repo/main/config.json",
-      {
-        body: '{"setting": true}',
-        headers: { "content-type": "text/plain" },
-      },
-    );
+    fetchStub.addResponse("raw.githubusercontent.com/owner/repo/main/config.json", {
+      body: '{"setting": true}',
+      headers: { "content-type": "text/plain" },
+    });
 
     const result = await extractContent(
       "https://raw.githubusercontent.com/owner/repo/main/config.json",
@@ -341,9 +322,7 @@ describe("GitHub URL interception in extractContent", () => {
       headers: { "content-type": "text/html" },
     });
 
-    const result = await extractContent(
-      "https://github.com/facebook/react/issues/123",
-    );
+    const result = await extractContent("https://github.com/facebook/react/issues/123");
     // Should go through normal extraction (Readability, etc.)
     expect(result.extractionChain).toContain("readability");
     expect(result.extractionChain).not.toContain("github:raw");
@@ -363,28 +342,23 @@ describe("GitHub URL interception in extractContent", () => {
       headers: { "content-type": "text/html" },
     });
 
-    const result = await extractContent(
-      "https://github.com/facebook/react/pull/456",
-    );
+    const result = await extractContent("https://github.com/facebook/react/pull/456");
     expect(result.extractionChain).toContain("readability");
   });
 
   it("falls through to normal pipeline when GitHub interceptor returns null", async () => {
     // Tier 1: raw fetch fails
-    fetchStub.addResponse(
-      "raw.githubusercontent.com/owner/repo/main/missing.ts",
-      { status: 404, body: "Not Found" },
-    );
+    fetchStub.addResponse("raw.githubusercontent.com/owner/repo/main/missing.ts", {
+      status: 404,
+      body: "Not Found",
+    });
 
     // Tier 3 (API) mock added before less-specific repo mock
-    fetchStub.addResponse(
-      "api.github.com/repos/owner/repo/contents/missing.ts",
-      {
-        status: 404,
-        body: { message: "Not Found" },
-        headers: { "content-type": "application/json" },
-      },
-    );
+    fetchStub.addResponse("api.github.com/repos/owner/repo/contents/missing.ts", {
+      status: 404,
+      body: { message: "Not Found" },
+      headers: { "content-type": "application/json" },
+    });
 
     // Tier 2: repo size check fails (API returns error)
     fetchStub.addResponse("api.github.com/repos/owner/repo", {
@@ -405,9 +379,7 @@ describe("GitHub URL interception in extractContent", () => {
       headers: { "content-type": "text/html" },
     });
 
-    const result = await extractContent(
-      "https://github.com/owner/repo/blob/main/missing.ts",
-    );
+    const result = await extractContent("https://github.com/owner/repo/blob/main/missing.ts");
     // Falls through to normal pipeline
     expect(result.extractionChain).toContain("readability");
   });
@@ -433,11 +405,7 @@ describe("GitHub URL interception in extractContent", () => {
       headers: { "content-type": "application/json" },
     });
 
-    const result = await extractContent(
-      "https://example.com/api/data",
-      undefined,
-      { raw: true },
-    );
+    const result = await extractContent("https://example.com/api/data", undefined, { raw: true });
     expect(result.text).toContain('"raw": true');
     expect(result.extractionChain).toContain("raw");
   });

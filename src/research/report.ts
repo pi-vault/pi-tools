@@ -4,9 +4,7 @@ import type { WebResearchInput } from "./prepare.ts";
 
 export function defaultRawOutputPath(outputPath: string): string {
   const ext = extname(outputPath);
-  return ext
-    ? `${outputPath.slice(0, -ext.length)}.raw.json`
-    : `${outputPath}.raw.json`;
+  return ext ? `${outputPath.slice(0, -ext.length)}.raw.json` : `${outputPath}.raw.json`;
 }
 
 export interface RawResearchSidecar {
@@ -59,14 +57,9 @@ function oneLine(value: string, max = 260): string {
   return cleaned.length > max ? `${cleaned.slice(0, max - 1)}\u2026` : cleaned;
 }
 
-function resultSnippet(
-  result: DeepResearchResponse["results"][number],
-  max = 900,
-): string {
+function resultSnippet(result: DeepResearchResponse["results"][number], max = 900): string {
   return oneLine(
-    [result.summary, ...(result.highlights ?? []), result.text]
-      .filter(Boolean)
-      .join(" "),
+    [result.summary, ...(result.highlights ?? []), result.text].filter(Boolean).join(" "),
     max,
   );
 }
@@ -87,9 +80,7 @@ function listMarkdown(value: unknown, fallback: string): string {
 function isGenericNoAnswer(value: string | undefined): boolean {
   return (
     !value?.trim() ||
-    /Exa returned (sources|\d+ sources) but no synthesized answer field/i.test(
-      value,
-    )
+    /Exa returned (sources|\d+ sources) but no synthesized answer field/i.test(value)
   );
 }
 
@@ -106,8 +97,7 @@ function fallbackSummary(response: DeepResearchResponse): string {
 
 function keyFindings(response: DeepResearchResponse): string {
   if (!isGenericNoAnswer(response.answer)) return response.answer!.trim();
-  if (response.results.length === 0)
-    return "- No source-backed findings were returned.";
+  if (response.results.length === 0) return "- No source-backed findings were returned.";
   return response.results
     .slice(0, 8)
     .map(
@@ -128,10 +118,7 @@ function bulletSources(response: DeepResearchResponse): string {
 }
 
 export function renderFindingsReport(
-  input: Pick<
-    WebResearchInput,
-    "query" | "reportTitle" | "researchMode" | "type"
-  >,
+  input: Pick<WebResearchInput, "query" | "reportTitle" | "researchMode" | "type">,
   response: DeepResearchResponse,
   options: { rawOutputPath?: string } = {},
 ): string {
@@ -154,8 +141,7 @@ export function renderFindingsReport(
   );
 
   const recommendation =
-    typeof structured?.recommendation === "string" &&
-    structured.recommendation.trim()
+    typeof structured?.recommendation === "string" && structured.recommendation.trim()
       ? structured.recommendation.trim()
       : answer;
 
@@ -181,9 +167,7 @@ export function renderFindingsReport(
     `- Exa type: ${response.metadata.type ?? input.type ?? "deep-reasoning"}`,
     `- Queries: ${response.metadata.queryCount ?? 1}`,
     `- Sources: ${response.metadata.uniqueSourceCount ?? response.results.length} unique${response.metadata.sourceCount && response.metadata.sourceCount !== response.results.length ? ` (${response.metadata.sourceCount} returned before dedupe)` : ""}`,
-    options.rawOutputPath
-      ? `- Raw metadata sidecar: ${options.rawOutputPath}`
-      : undefined,
+    options.rawOutputPath ? `- Raw metadata sidecar: ${options.rawOutputPath}` : undefined,
   ]
     .filter(Boolean)
     .join("\n");

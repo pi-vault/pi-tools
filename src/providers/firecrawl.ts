@@ -1,5 +1,12 @@
 // src/providers/firecrawl.ts
-import type { FetchProvider, FetchResult, ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type {
+  FetchProvider,
+  FetchResult,
+  ProviderMeta,
+  SearchFilters,
+  SearchProvider,
+  SearchResult,
+} from "./types.ts";
 
 interface FirecrawlSearchResponse {
   data: Array<{ title: string; url: string; markdown?: string; description?: string }>;
@@ -25,17 +32,25 @@ export class FirecrawlProvider implements SearchProvider, FetchProvider {
     };
   }
 
-  async search(query: string, maxResults: number, signal?: AbortSignal, _filters?: SearchFilters): Promise<SearchResult[]> {
+  async search(
+    query: string,
+    maxResults: number,
+    signal?: AbortSignal,
+    _filters?: SearchFilters,
+  ): Promise<SearchResult[]> {
     const response = await fetch("https://api.firecrawl.dev/v1/search", {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({ query, limit: maxResults }),
       signal,
     });
-    if (!response.ok) throw new Error(`Firecrawl search error: ${response.status} ${response.statusText}`);
+    if (!response.ok)
+      throw new Error(`Firecrawl search error: ${response.status} ${response.statusText}`);
     const data = (await response.json()) as FirecrawlSearchResponse;
     return (data.data ?? []).slice(0, maxResults).map((r) => ({
-      title: r.title, url: r.url, snippet: r.description ?? r.markdown?.slice(0, 200) ?? "",
+      title: r.title,
+      url: r.url,
+      snippet: r.description ?? r.markdown?.slice(0, 200) ?? "",
     }));
   }
 
@@ -46,7 +61,8 @@ export class FirecrawlProvider implements SearchProvider, FetchProvider {
       body: JSON.stringify({ url, formats: ["markdown"] }),
       signal,
     });
-    if (!response.ok) throw new Error(`Firecrawl scrape error: ${response.status} ${response.statusText}`);
+    if (!response.ok)
+      throw new Error(`Firecrawl scrape error: ${response.status} ${response.statusText}`);
     const data = (await response.json()) as FirecrawlScrapeResponse;
     return { text: data.data?.markdown ?? "" };
   }

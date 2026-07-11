@@ -1,10 +1,7 @@
 import * as fs from "node:fs";
 import type { ExecFileFn } from "../src/providers/duckduckgo.ts";
 import { vi } from "vitest";
-import type {
-  ExtensionContext,
-  ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 // Simplified mock interface — avoids inheriting ExtensionAPI's 30+ overloaded
 // `on()` signatures which cannot be satisfied by a generic implementation.
@@ -12,18 +9,27 @@ type EventHandler = (...args: unknown[]) => unknown;
 
 export interface MockPi {
   tools: ToolDefinition[];
-  commands: Array<{ name: string; options: { description?: string; handler: (...args: unknown[]) => unknown } }>;
+  commands: Array<{
+    name: string;
+    options: { description?: string; handler: (...args: unknown[]) => unknown };
+  }>;
   events: Map<string, EventHandler[]>;
   entries: Array<{ customType: string; data: unknown }>;
   registerTool(tool: ToolDefinition): void;
-  registerCommand(name: string, options: { description?: string; handler: (...args: unknown[]) => unknown }): void;
+  registerCommand(
+    name: string,
+    options: { description?: string; handler: (...args: unknown[]) => unknown },
+  ): void;
   on(event: string, handler: EventHandler): void;
   appendEntry(customType: string, data?: unknown): void;
 }
 
 export function createMockPi(): MockPi {
   const tools: ToolDefinition[] = [];
-  const commands: Array<{ name: string; options: { description?: string; handler: (...args: unknown[]) => unknown } }> = [];
+  const commands: Array<{
+    name: string;
+    options: { description?: string; handler: (...args: unknown[]) => unknown };
+  }> = [];
   const events = new Map<string, EventHandler[]>();
   const entries: Array<{ customType: string; data: unknown }> = [];
 
@@ -35,7 +41,10 @@ export function createMockPi(): MockPi {
     registerTool(tool: ToolDefinition) {
       tools.push(tool);
     },
-    registerCommand(name: string, options: { description?: string; handler: (...args: unknown[]) => unknown }) {
+    registerCommand(
+      name: string,
+      options: { description?: string; handler: (...args: unknown[]) => unknown },
+    ) {
       commands.push({ name, options });
     },
     on(event: string, handler: EventHandler) {
@@ -100,9 +109,7 @@ export function stubFetch(): FetchStub {
     const url = input instanceof URL ? input.href : input;
     for (const route of routes) {
       const matches =
-        typeof route.pattern === "string"
-          ? url.includes(route.pattern)
-          : route.pattern.test(url);
+        typeof route.pattern === "string" ? url.includes(route.pattern) : route.pattern.test(url);
       if (matches) {
         return new Response(route.response.body, {
           status: route.response.status,
@@ -173,10 +180,9 @@ export function stubExec(): ExecStub {
     }
 
     if (errorConfig) {
-      const err = Object.assign(
-        new Error(errorConfig.message ?? "ddgs failed"),
-        { code: errorConfig.code ?? 1 },
-      );
+      const err = Object.assign(new Error(errorConfig.message ?? "ddgs failed"), {
+        code: errorConfig.code ?? 1,
+      });
       callback(err, "", errorConfig.message ?? "");
       return { kill: vi.fn() };
     }

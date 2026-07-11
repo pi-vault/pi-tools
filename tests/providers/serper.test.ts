@@ -9,8 +9,12 @@ const makeProvider = (key = "key") => providerMeta.create(key).search!;
 describe("SerperProvider", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
 
-  beforeEach(() => { fetchStub = stubFetch(); });
-  afterEach(() => { fetchStub.restore(); });
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+  afterEach(() => {
+    fetchStub.restore();
+  });
 
   it("has correct name and label", () => {
     const p = makeProvider();
@@ -21,9 +25,7 @@ describe("SerperProvider", () => {
   it("returns normalized search results", async () => {
     fetchStub.addResponse("google.serper.dev", {
       body: {
-        organic: [
-          { title: "Serper Result", link: "https://serper.dev", snippet: "A snippet" },
-        ],
+        organic: [{ title: "Serper Result", link: "https://serper.dev", snippet: "A snippet" }],
       },
     });
     const results = await makeProvider().search("test", 5);
@@ -157,9 +159,7 @@ describe("SerperProvider", () => {
     it("works normally without filters", async () => {
       fetchStub.addResponse("google.serper.dev", {
         body: {
-          organic: [
-            { title: "Result", link: "https://example.com", snippet: "A snippet" },
-          ],
+          organic: [{ title: "Result", link: "https://example.com", snippet: "A snippet" }],
         },
       });
 

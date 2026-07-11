@@ -16,9 +16,7 @@ const WebSearchParams = Type.Object({
       description: "Number of results (1-20, default 5)",
     }),
   ),
-  provider: Type.Optional(
-    Type.String({ description: "Provider name or 'auto' (default)" }),
-  ),
+  provider: Type.Optional(Type.String({ description: "Provider name or 'auto' (default)" })),
   includeDomains: Type.Optional(
     Type.Array(Type.String(), {
       description: "Only return results from these domains",
@@ -41,7 +39,8 @@ const WebSearchParams = Type.Object({
   ),
   compact: Type.Optional(
     Type.Boolean({
-      description: "When true, return results in compact single-line format (title -- URL, no snippets)",
+      description:
+        "When true, return results in compact single-line format (title -- URL, no snippets)",
     }),
   ),
   combine: Type.Optional(
@@ -64,16 +63,12 @@ interface WebSearchDetails {
 
 function formatResults(results: SearchResult[]): string {
   if (results.length === 0) return "No results found.";
-  return results
-    .map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${r.snippet}`)
-    .join("\n\n");
+  return results.map((r, i) => `${i + 1}. [${r.title}](${r.url})\n   ${r.snippet}`).join("\n\n");
 }
 
 function formatResultsCompact(results: SearchResult[]): string {
   if (results.length === 0) return "No results found.";
-  return results
-    .map((r, i) => `${i + 1}. ${r.title} -- ${r.url}`)
-    .join("\n");
+  return results.map((r, i) => `${i + 1}. ${r.title} -- ${r.url}`).join("\n");
 }
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -86,10 +81,12 @@ function buildFilters(params: {
 }): SearchFilters | undefined {
   const includeDomains = params.includeDomains?.filter((d) => d.trim().length > 0);
   const excludeDomains = params.excludeDomains?.filter((d) => d.trim().length > 0);
-  const startDate = params.startDate && ISO_DATE_RE.test(params.startDate) ? params.startDate : undefined;
+  const startDate =
+    params.startDate && ISO_DATE_RE.test(params.startDate) ? params.startDate : undefined;
   const endDate = params.endDate && ISO_DATE_RE.test(params.endDate) ? params.endDate : undefined;
 
-  if (!includeDomains?.length && !excludeDomains?.length && !startDate && !endDate) return undefined;
+  if (!includeDomains?.length && !excludeDomains?.length && !startDate && !endDate)
+    return undefined;
 
   return {
     includeDomains: includeDomains?.length ? includeDomains : undefined,
@@ -132,7 +129,7 @@ export function createWebSearchTool(
     ],
     parameters: WebSearchParams,
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-      const combineActive = params.combine ?? (combineConfig?.enabled === true);
+      const combineActive = params.combine ?? combineConfig?.enabled === true;
       const candidates = resolveCandidates(params.provider, combineActive);
 
       if (candidates.length === 0) {
@@ -215,9 +212,7 @@ export function createWebSearchTool(
 
         onResult?.(providerName, results.length, maxResults);
 
-        const text = params.compact
-          ? formatResultsCompact(results)
-          : formatResults(results);
+        const text = params.compact ? formatResultsCompact(results) : formatResults(results);
 
         return {
           content: [{ type: "text" as const, text }],
@@ -232,7 +227,8 @@ export function createWebSearchTool(
       }
     },
     renderCall(args, theme: Theme, context) {
-      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      const text =
+        context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
       if (!context.argsComplete) {
         text.setText(theme.fg("warning", "Searching..."));
         return text;
@@ -244,7 +240,8 @@ export function createWebSearchTool(
       return text;
     },
     renderResult(result, options, theme: Theme, context) {
-      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      const text =
+        context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
       if (context.isPartial) {
         text.setText(theme.fg("warning", "Searching..."));
         return text;
@@ -258,16 +255,18 @@ export function createWebSearchTool(
         : `${count} results via ${provider}`;
 
       if (options.expanded) {
-        const raw =
-          result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
+        const raw = result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
 
         if (meta) {
           const header = theme.fg(meta.degraded ? "warning" : "toolOutput", label);
-          const resultLines = raw.split("\n").slice(0, 15).map((line) => {
-            const match = meta.results.find((r) => line.includes(r.url));
-            if (match) return theme.fg("toolOutput", `${line}  [${match.providers.join(", ")}]`);
-            return theme.fg("toolOutput", line);
-          });
+          const resultLines = raw
+            .split("\n")
+            .slice(0, 15)
+            .map((line) => {
+              const match = meta.results.find((r) => line.includes(r.url));
+              if (match) return theme.fg("toolOutput", `${line}  [${match.providers.join(", ")}]`);
+              return theme.fg("toolOutput", line);
+            });
           text.setText([header, ...resultLines].join("\n"));
         } else {
           const lines = raw.split("\n").slice(0, 15);

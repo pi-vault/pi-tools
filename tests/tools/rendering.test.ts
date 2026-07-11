@@ -62,7 +62,12 @@ describe("web_search rendering", () => {
       content: [{ type: "text" as const, text: "1. [Title](https://example.com)\n   snippet" }],
       details: { provider: "duckduckgo", resultCount: 3 },
     };
-    const component = tool.renderResult!(result, { expanded: false, isPartial: false }, mockTheme, makeContext());
+    const component = tool.renderResult!(
+      result,
+      { expanded: false, isPartial: false },
+      mockTheme,
+      makeContext(),
+    );
     expect(component).toBeInstanceOf(Text);
     const output = component.render(120).join("");
     expect(output).toContain("3");
@@ -71,10 +76,17 @@ describe("web_search rendering", () => {
 
   it("renderResult shows content preview when expanded", () => {
     const result = {
-      content: [{ type: "text" as const, text: "1. [My Result Title](https://ex.com)\n   snippet" }],
+      content: [
+        { type: "text" as const, text: "1. [My Result Title](https://ex.com)\n   snippet" },
+      ],
       details: { provider: "duckduckgo", resultCount: 1 },
     };
-    const component = tool.renderResult!(result, { expanded: true, isPartial: false }, mockTheme, makeContext({ expanded: true }));
+    const component = tool.renderResult!(
+      result,
+      { expanded: true, isPartial: false },
+      mockTheme,
+      makeContext({ expanded: true }),
+    );
     const output = component.render(120).join("\n");
     expect(output).toContain("My Result Title");
   });
@@ -84,7 +96,11 @@ describe("web_fetch rendering", () => {
   const tool = createWebFetchTool(new ContentStore(() => {}));
 
   it("renderCall shows tool name and URL", () => {
-    const component = tool.renderCall!({ url: "https://example.com/page" }, mockTheme, makeContext());
+    const component = tool.renderCall!(
+      { url: "https://example.com/page" },
+      mockTheme,
+      makeContext(),
+    );
     expect(component).toBeInstanceOf(Text);
     const output = component.render(120).join("");
     expect(output).toContain("web_fetch");
@@ -92,7 +108,11 @@ describe("web_fetch rendering", () => {
   });
 
   it("renderCall shows streaming placeholder when args are incomplete", () => {
-    const component = tool.renderCall!({ url: "" }, mockTheme, makeContext({ argsComplete: false }));
+    const component = tool.renderCall!(
+      { url: "" },
+      mockTheme,
+      makeContext({ argsComplete: false }),
+    );
     const output = component.render(120).join("");
     expect(output).toContain("Fetching");
     expect(output).not.toContain("web_fetch");
@@ -101,9 +121,19 @@ describe("web_fetch rendering", () => {
   it("renderResult shows char count when collapsed", () => {
     const result = {
       content: [{ type: "text" as const, text: "page content" }],
-      details: { url: "https://example.com", chars: 4200, truncated: false, extractionChain: ["readability"] },
+      details: {
+        url: "https://example.com",
+        chars: 4200,
+        truncated: false,
+        extractionChain: ["readability"],
+      },
     };
-    const component = tool.renderResult!(result, { expanded: false, isPartial: false }, mockTheme, makeContext());
+    const component = tool.renderResult!(
+      result,
+      { expanded: false, isPartial: false },
+      mockTheme,
+      makeContext(),
+    );
     expect(component).toBeInstanceOf(Text);
     const output = component.render(120).join("");
     expect(output).toContain("4200");
@@ -113,9 +143,19 @@ describe("web_fetch rendering", () => {
   it("renderResult notes truncation in result", () => {
     const result = {
       content: [{ type: "text" as const, text: "..." }],
-      details: { url: "https://example.com", chars: 20000, truncated: true, extractionChain: ["readability"] },
+      details: {
+        url: "https://example.com",
+        chars: 20000,
+        truncated: true,
+        extractionChain: ["readability"],
+      },
     };
-    const component = tool.renderResult!(result, { expanded: false, isPartial: false }, mockTheme, makeContext());
+    const component = tool.renderResult!(
+      result,
+      { expanded: false, isPartial: false },
+      mockTheme,
+      makeContext(),
+    );
     const output = component.render(120).join("");
     expect(output).toContain("20000");
     expect(output).toContain("truncated");
@@ -126,7 +166,11 @@ describe("code_search rendering", () => {
   const tool = createCodeSearchTool(() => undefined);
 
   it("renderCall shows tool name and query", () => {
-    const component = tool.renderCall!({ query: "async iterator typescript" }, mockTheme, makeContext());
+    const component = tool.renderCall!(
+      { query: "async iterator typescript" },
+      mockTheme,
+      makeContext(),
+    );
     expect(component).toBeInstanceOf(Text);
     const output = component.render(120).join("");
     expect(output).toContain("code_search");
@@ -138,7 +182,12 @@ describe("code_search rendering", () => {
       content: [{ type: "text" as const, text: "results..." }],
       details: { provider: "exa", resultCount: 5 },
     };
-    const component = tool.renderResult!(result, { expanded: false, isPartial: false }, mockTheme, makeContext());
+    const component = tool.renderResult!(
+      result,
+      { expanded: false, isPartial: false },
+      mockTheme,
+      makeContext(),
+    );
     expect(component).toBeInstanceOf(Text);
     const output = component.render(120).join("");
     expect(output).toContain("5");
@@ -161,7 +210,12 @@ describe("web_read rendering", () => {
       content: [{ type: "text" as const, text: "x".repeat(500) }],
       details: undefined,
     };
-    const component = tool.renderResult!(result, { expanded: false, isPartial: false }, mockTheme, makeContext());
+    const component = tool.renderResult!(
+      result,
+      { expanded: false, isPartial: false },
+      mockTheme,
+      makeContext(),
+    );
     expect(component).toBeInstanceOf(Text);
     const output = component.render(120).join("");
     expect(output).toContain("500");

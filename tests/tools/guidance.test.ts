@@ -20,7 +20,9 @@ describe("prompt guidance overrides", () => {
       promptSnippet: "Custom search snippet",
     };
     const tool = createWebSearchTool(
-      () => { throw new Error("not called"); },
+      () => {
+        throw new Error("not called");
+      },
       undefined,
       guidance,
     );
@@ -32,7 +34,9 @@ describe("prompt guidance overrides", () => {
       promptGuidelines: ["Guideline A", "Guideline B"],
     };
     const tool = createWebSearchTool(
-      () => { throw new Error("not called"); },
+      () => {
+        throw new Error("not called");
+      },
       undefined,
       guidance,
     );
@@ -40,25 +44,23 @@ describe("prompt guidance overrides", () => {
   });
 
   it("web_search uses defaults when no guidance provided", () => {
-    const tool = createWebSearchTool(
-      () => { throw new Error("not called"); },
-    );
-    expect(tool.promptSnippet).toBe(
-      "Search the web for up-to-date information.",
-    );
+    const tool = createWebSearchTool(() => {
+      throw new Error("not called");
+    });
+    expect(tool.promptSnippet).toBe("Search the web for up-to-date information.");
     expect(tool.promptGuidelines!.length).toBeGreaterThan(0);
   });
 
   it("web_search uses defaults when guidance fields are undefined", () => {
     const guidance: GuidanceOverride = {};
     const tool = createWebSearchTool(
-      () => { throw new Error("not called"); },
+      () => {
+        throw new Error("not called");
+      },
       undefined,
       guidance,
     );
-    expect(tool.promptSnippet).toBe(
-      "Search the web for up-to-date information.",
-    );
+    expect(tool.promptSnippet).toBe("Search the web for up-to-date information.");
   });
 
   it("web_fetch uses custom promptSnippet when provided", () => {
@@ -96,11 +98,7 @@ describe("prompt guidance overrides", () => {
     const guidance: GuidanceOverride = {
       promptGuidelines: ["Custom code guideline"],
     };
-    const tool = createCodeSearchTool(
-      () => undefined,
-      undefined,
-      guidance,
-    );
+    const tool = createCodeSearchTool(() => undefined, undefined, guidance);
     expect(tool.promptGuidelines).toEqual(["Custom code guideline"]);
   });
 

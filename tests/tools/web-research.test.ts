@@ -9,8 +9,7 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    withFileMutationQueue: async (_path: string, fn: () => Promise<void>) =>
-      fn(),
+    withFileMutationQueue: async (_path: string, fn: () => Promise<void>) => fn(),
   };
 });
 
@@ -31,11 +30,7 @@ describe("createWebResearchTool", () => {
   });
 
   function makeTool() {
-    return createWebResearchTool(
-      "test-exa-key",
-      { enabled: true },
-      appendEntry,
-    );
+    return createWebResearchTool("test-exa-key", { enabled: true }, appendEntry);
   }
 
   it("has correct name and description", () => {
@@ -47,9 +42,7 @@ describe("createWebResearchTool", () => {
   it("executes research and returns inline report when no outputPath", async () => {
     fetchStub.addResponse("api.exa.ai/search", {
       body: {
-        results: [
-          { title: "Source", url: "https://example.com", text: "content" },
-        ],
+        results: [{ title: "Source", url: "https://example.com", text: "content" }],
         answer: "The answer is X.",
       },
     });
@@ -62,10 +55,7 @@ describe("createWebResearchTool", () => {
       vi.fn(),
       makeCtx(),
     );
-    const text =
-      result.content[0] && "text" in result.content[0]
-        ? result.content[0].text
-        : "";
+    const text = result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
     expect(text).toContain("Findings:");
     expect(text).toContain("The answer is X.");
   });
@@ -136,13 +126,7 @@ describe("createWebResearchTool", () => {
     });
 
     const tool = makeTool();
-    await tool.execute(
-      "call-5",
-      { query: "test" },
-      undefined,
-      vi.fn(),
-      makeCtx(),
-    );
+    await tool.execute("call-5", { query: "test" }, undefined, vi.fn(), makeCtx());
 
     expect(appendEntry).toHaveBeenCalledWith(
       "pi-tools-research",
@@ -162,8 +146,8 @@ describe("createWebResearchTool", () => {
 
   it("throws when query is missing", async () => {
     const tool = makeTool();
-    await expect(
-      tool.execute("call-7", {}, undefined, vi.fn(), makeCtx()),
-    ).rejects.toThrow(/requires query/);
+    await expect(tool.execute("call-7", {}, undefined, vi.fn(), makeCtx())).rejects.toThrow(
+      /requires query/,
+    );
   });
 });

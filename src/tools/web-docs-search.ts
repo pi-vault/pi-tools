@@ -10,8 +10,7 @@ const MAX_VERSION_COUNT = 5;
 
 const WebDocsSearchParams = Type.Object({
   libraryName: Type.String({
-    description:
-      "Library name to search for (e.g. 'react', 'next.js', 'express')",
+    description: "Library name to search for (e.g. 'react', 'next.js', 'express')",
   }),
   query: Type.String({
     description: "What you are trying to do — used for relevance ranking",
@@ -25,11 +24,7 @@ interface WebDocsSearchDetails {
 }
 
 function escapeMd(text: string): string {
-  return text
-    .replace(/\\/g, "\\\\")
-    .replace(/`/g, "\\`")
-    .replace(/\|/g, "\\|")
-    .replace(/\n/g, " ");
+  return text.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\|/g, "\\|").replace(/\n/g, " ");
 }
 
 function truncateCell(text: string, maxChars: number): string {
@@ -45,10 +40,7 @@ function formatVersions(versions?: string[]): string {
   return `${visible.join(", ")}${hidden > 0 ? `, +${hidden}` : ""}`;
 }
 
-function formatResultsTable(
-  libraryName: string,
-  results: DocsSearchResult[],
-): string {
+function formatResultsTable(libraryName: string, results: DocsSearchResult[]): string {
   if (results.length === 0) {
     return `No libraries found for "${libraryName}". Try a different search term.`;
   }
@@ -138,11 +130,7 @@ export function createWebDocsSearchTool(
 
       // API errors propagate as throws — Pi marks the tool result as failed.
       // This differs from code-search which catches and returns errors as text.
-      const results = await provider.searchLibrary(
-        libraryName,
-        query,
-        signal ?? undefined,
-      );
+      const results = await provider.searchLibrary(libraryName, query, signal ?? undefined);
       const text = formatResultsTable(libraryName, results);
 
       return {
@@ -152,17 +140,13 @@ export function createWebDocsSearchTool(
     },
     renderCall(args, theme: Theme, context) {
       const text =
-        context.lastComponent instanceof Text
-          ? context.lastComponent
-          : new Text("", 0, 0);
+        context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
       if (!context.argsComplete) {
         text.setText(theme.fg("warning", "Searching docs..."));
         return text;
       }
       const lib =
-        args.libraryName.length > 40
-          ? `${args.libraryName.slice(0, 37)}...`
-          : args.libraryName;
+        args.libraryName.length > 40 ? `${args.libraryName.slice(0, 37)}...` : args.libraryName;
       text.setText(
         `${theme.fg("toolTitle", theme.bold("web_docs_search"))} ${theme.fg("accent", `"${lib}"`)}`,
       );
@@ -170,27 +154,19 @@ export function createWebDocsSearchTool(
     },
     renderResult(result, options, theme: Theme, context) {
       const text =
-        context.lastComponent instanceof Text
-          ? context.lastComponent
-          : new Text("", 0, 0);
+        context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
       if (context.isPartial) {
         text.setText(theme.fg("warning", "Searching docs..."));
         return text;
       }
       const count = result.details?.resultCount ?? 0;
       if (options.expanded) {
-        const raw =
-          result.content[0] && "text" in result.content[0]
-            ? result.content[0].text
-            : "";
+        const raw = result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
         const lines = raw.split("\n").slice(0, 12);
         text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));
       } else {
         text.setText(
-          theme.fg(
-            "toolOutput",
-            `${count} ${count === 1 ? "library" : "libraries"} found`,
-          ),
+          theme.fg("toolOutput", `${count} ${count === 1 ? "library" : "libraries"} found`),
         );
       }
       return text;

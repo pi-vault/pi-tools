@@ -9,8 +9,12 @@ const makeProvider = (key = "key") => providerMeta.create(key).search!;
 describe("PerplexityProvider", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
 
-  beforeEach(() => { fetchStub = stubFetch(); });
-  afterEach(() => { fetchStub.restore(); });
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+  afterEach(() => {
+    fetchStub.restore();
+  });
 
   it("has correct name and label", () => {
     const p = makeProvider();

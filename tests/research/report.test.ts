@@ -8,15 +8,11 @@ import type { DeepResearchResponse } from "../../src/research/types.ts";
 
 describe("defaultRawOutputPath", () => {
   it("replaces extension with .raw.json", () => {
-    expect(defaultRawOutputPath("/out/findings.md")).toBe(
-      "/out/findings.raw.json",
-    );
+    expect(defaultRawOutputPath("/out/findings.md")).toBe("/out/findings.raw.json");
   });
 
   it("appends .raw.json when no extension", () => {
-    expect(defaultRawOutputPath("/out/findings")).toBe(
-      "/out/findings.raw.json",
-    );
+    expect(defaultRawOutputPath("/out/findings")).toBe("/out/findings.raw.json");
   });
 });
 
@@ -78,9 +74,7 @@ describe("renderFindingsReport", () => {
   it("includes evidence and sources section", () => {
     const report = renderFindingsReport({ query: "test" }, baseResponse);
     expect(report).toContain("## Evidence and Sources");
-    expect(report).toContain(
-      "- [1] Source One \u2014 https://example.com/1 (2025-06-15)",
-    );
+    expect(report).toContain("- [1] Source One \u2014 https://example.com/1 (2025-06-15)");
     expect(report).toContain("- [2] Source Two \u2014 https://example.com/2");
   });
 
@@ -172,10 +166,7 @@ describe("renderFindingsReport", () => {
       ...baseResponse,
       metadata: {},
     };
-    const report = renderFindingsReport(
-      { query: "test", researchMode: "lite" },
-      noModeResponse,
-    );
+    const report = renderFindingsReport({ query: "test", researchMode: "lite" }, noModeResponse);
     expect(report).toContain("Mode: lite");
   });
 });

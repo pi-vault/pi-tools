@@ -4,9 +4,7 @@ import { SSRFError } from "../../src/utils/ssrf.ts";
 
 describe("extractContent SSRF with allowRanges", () => {
   it("blocks a private IP by default", async () => {
-    await expect(extractContent("http://198.18.1.1/page")).rejects.toThrow(
-      SSRFError,
-    );
+    await expect(extractContent("http://198.18.1.1/page")).rejects.toThrow(SSRFError);
   });
 
   it("allows a private IP when in allowRanges", async () => {
@@ -17,8 +15,6 @@ describe("extractContent SSRF with allowRanges", () => {
       allowRanges: ["198.18.0.0/15"],
     });
     // Should reject with a network/abort error, never SSRFError
-    await expect(result).rejects.toSatisfy(
-      (err) => !(err instanceof SSRFError),
-    );
+    await expect(result).rejects.toSatisfy((err) => !(err instanceof SSRFError));
   }, 2000);
 });

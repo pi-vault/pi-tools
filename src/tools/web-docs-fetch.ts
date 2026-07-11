@@ -10,12 +10,10 @@ const INLINE_LIMIT = 15_000;
 
 const WebDocsFetchParams = Type.Object({
   libraryId: Type.String({
-    description:
-      "Context7 library ID (e.g. '/facebook/react', '/vercel/next.js@v15.1.8')",
+    description: "Context7 library ID (e.g. '/facebook/react', '/vercel/next.js@v15.1.8')",
   }),
   query: Type.String({
-    description:
-      "Specific question about the library (drives relevance ranking)",
+    description: "Specific question about the library (drives relevance ranking)",
   }),
 });
 
@@ -35,8 +33,7 @@ export function createWebDocsFetchTool(
   return {
     name: "web_docs_fetch",
     label: "Docs Fetch",
-    description:
-      "Retrieve up-to-date documentation for a specific library via Context7.",
+    description: "Retrieve up-to-date documentation for a specific library via Context7.",
     promptSnippet:
       guidance?.promptSnippet ??
       "Retrieve focused documentation for a library. Use web_docs_search first to find the library ID.",
@@ -112,19 +109,13 @@ export function createWebDocsFetchTool(
     },
     renderCall(args, theme: Theme, context) {
       const text =
-        context.lastComponent instanceof Text
-          ? context.lastComponent
-          : new Text("", 0, 0);
+        context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
       if (!context.argsComplete) {
         text.setText(theme.fg("warning", "Fetching docs..."));
         return text;
       }
-      const lib =
-        args.libraryId.length > 30
-          ? `${args.libraryId.slice(0, 27)}...`
-          : args.libraryId;
-      const q =
-        args.query.length > 40 ? `${args.query.slice(0, 37)}...` : args.query;
+      const lib = args.libraryId.length > 30 ? `${args.libraryId.slice(0, 27)}...` : args.libraryId;
+      const q = args.query.length > 40 ? `${args.query.slice(0, 37)}...` : args.query;
       text.setText(
         `${theme.fg("toolTitle", theme.bold("web_docs_fetch"))} ${theme.fg("accent", lib)} ${theme.fg("dim", `"${q}"`)}`,
       );
@@ -132,19 +123,14 @@ export function createWebDocsFetchTool(
     },
     renderResult(result, options, theme: Theme, context) {
       const text =
-        context.lastComponent instanceof Text
-          ? context.lastComponent
-          : new Text("", 0, 0);
+        context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
       if (context.isPartial) {
         text.setText(theme.fg("warning", "Fetching docs..."));
         return text;
       }
       const chars = result.details?.chars ?? 0;
       if (options.expanded) {
-        const raw =
-          result.content[0] && "text" in result.content[0]
-            ? result.content[0].text
-            : "";
+        const raw = result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
         const lines = raw.split("\n").slice(0, 15);
         text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));
       } else {

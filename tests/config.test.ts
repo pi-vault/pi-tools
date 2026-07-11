@@ -1,6 +1,11 @@
 import * as fs from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadConfig, resolveApiKey, findProjectConfigPath, loadMergedConfig } from "../src/config.ts";
+import {
+  loadConfig,
+  resolveApiKey,
+  findProjectConfigPath,
+  loadMergedConfig,
+} from "../src/config.ts";
 import * as path from "node:path";
 
 vi.mock("node:fs");
@@ -182,9 +187,7 @@ describe("findProjectConfigPath", () => {
       return p === path.join("/projects/my-app", ".pi", "pi-tools.json");
     });
     const result = findProjectConfigPath("/projects/my-app");
-    expect(result).toBe(
-      path.join("/projects/my-app", ".pi", "pi-tools.json"),
-    );
+    expect(result).toBe(path.join("/projects/my-app", ".pi", "pi-tools.json"));
   });
 
   it("walks up to find .pi/pi-tools.json in ancestor", () => {
@@ -442,10 +445,7 @@ describe("config types — selectionStrategy and guidance", () => {
     );
     const config = loadConfig();
     expect(config.guidance?.web_search?.promptSnippet).toBe("Custom search snippet");
-    expect(config.guidance?.web_search?.promptGuidelines).toEqual([
-      "Guideline A",
-      "Guideline B",
-    ]);
+    expect(config.guidance?.web_search?.promptGuidelines).toEqual(["Guideline A", "Guideline B"]);
   });
 
   it("defaults guidance to undefined when not specified", () => {
@@ -489,9 +489,7 @@ describe("CombineConfig", () => {
   });
 
   it("provides default combine config when combine not in config file", () => {
-    vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ defaultProvider: "brave" }),
-    );
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ defaultProvider: "brave" }));
     const config = loadConfig();
     expect(config.combine).toEqual({
       enabled: false,
@@ -513,14 +511,10 @@ describe("CombineConfig", () => {
   });
 
   it("validates combine.mode and falls back to default for unknown values", () => {
-    vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ combine: { mode: "invalid" } }),
-    );
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ combine: { mode: "invalid" } }));
     expect(loadConfig().combine.mode).toBe("targeted");
 
-    vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ combine: { mode: "all" } }),
-    );
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ combine: { mode: "all" } }));
     expect(loadConfig().combine.mode).toBe("all");
   });
 
@@ -534,9 +528,7 @@ describe("CombineConfig", () => {
   });
 
   it("ignores non-boolean enabled values", () => {
-    vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ combine: { enabled: "yes" } }),
-    );
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ combine: { enabled: "yes" } }));
     const config = loadConfig();
     expect(config.combine.enabled).toBe(false); // default
   });

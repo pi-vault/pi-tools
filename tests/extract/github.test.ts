@@ -41,9 +41,7 @@ describe("parseGitHubUrl", () => {
 
   describe("tree URLs", () => {
     it("parses tree URL with ref only", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/facebook/react/tree/main",
-      );
+      const result = parseGitHubUrl("https://github.com/facebook/react/tree/main");
       expect(result).toEqual({
         owner: "facebook",
         repo: "react",
@@ -54,9 +52,7 @@ describe("parseGitHubUrl", () => {
     });
 
     it("parses tree URL with ref and path", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/facebook/react/tree/main/packages/react",
-      );
+      const result = parseGitHubUrl("https://github.com/facebook/react/tree/main/packages/react");
       expect(result).toEqual({
         owner: "facebook",
         repo: "react",
@@ -67,9 +63,7 @@ describe("parseGitHubUrl", () => {
     });
 
     it("handles refs with slashes (tag-like)", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/owner/repo/tree/v1.0.0/src",
-      );
+      const result = parseGitHubUrl("https://github.com/owner/repo/tree/v1.0.0/src");
       expect(result).toEqual({
         owner: "owner",
         repo: "repo",
@@ -82,9 +76,7 @@ describe("parseGitHubUrl", () => {
 
   describe("blob URLs", () => {
     it("parses blob URL", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/facebook/react/blob/main/README.md",
-      );
+      const result = parseGitHubUrl("https://github.com/facebook/react/blob/main/README.md");
       expect(result).toEqual({
         owner: "facebook",
         repo: "react",
@@ -108,9 +100,7 @@ describe("parseGitHubUrl", () => {
     });
 
     it("parses blob URL with commit SHA ref", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/facebook/react/blob/abc123def/README.md",
-      );
+      const result = parseGitHubUrl("https://github.com/facebook/react/blob/abc123def/README.md");
       expect(result).toEqual({
         owner: "facebook",
         repo: "react",
@@ -151,9 +141,7 @@ describe("parseGitHubUrl", () => {
 
   describe("non-content URLs (unknown type)", () => {
     it("returns unknown for issues URL", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/facebook/react/issues/123",
-      );
+      const result = parseGitHubUrl("https://github.com/facebook/react/issues/123");
       expect(result).toEqual({
         owner: "facebook",
         repo: "react",
@@ -164,9 +152,7 @@ describe("parseGitHubUrl", () => {
     });
 
     it("returns unknown for pull request URL", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/facebook/react/pull/456",
-      );
+      const result = parseGitHubUrl("https://github.com/facebook/react/pull/456");
       expect(result).toEqual({
         owner: "facebook",
         repo: "react",
@@ -177,9 +163,7 @@ describe("parseGitHubUrl", () => {
     });
 
     it("returns unknown for actions URL", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/facebook/react/actions",
-      );
+      const result = parseGitHubUrl("https://github.com/facebook/react/actions");
       expect(result).toEqual({
         owner: "facebook",
         repo: "react",
@@ -190,9 +174,7 @@ describe("parseGitHubUrl", () => {
     });
 
     it("returns unknown for wiki URL", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/facebook/react/wiki",
-      );
+      const result = parseGitHubUrl("https://github.com/facebook/react/wiki");
       expect(result).toEqual({
         owner: "facebook",
         repo: "react",
@@ -203,9 +185,7 @@ describe("parseGitHubUrl", () => {
     });
 
     it("returns unknown for settings URL", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/facebook/react/settings",
-      );
+      const result = parseGitHubUrl("https://github.com/facebook/react/settings");
       expect(result).toEqual({
         owner: "facebook",
         repo: "react",
@@ -216,9 +196,7 @@ describe("parseGitHubUrl", () => {
     });
 
     it("returns unknown for discussions URL", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/facebook/react/discussions",
-      );
+      const result = parseGitHubUrl("https://github.com/facebook/react/discussions");
       expect(result).toEqual({
         owner: "facebook",
         repo: "react",
@@ -229,9 +207,7 @@ describe("parseGitHubUrl", () => {
     });
 
     it("returns unknown for releases URL", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/facebook/react/releases",
-      );
+      const result = parseGitHubUrl("https://github.com/facebook/react/releases");
       expect(result).toEqual({
         owner: "facebook",
         repo: "react",
@@ -242,9 +218,7 @@ describe("parseGitHubUrl", () => {
     });
 
     it("returns unknown for compare URL", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/facebook/react/compare/main...dev",
-      );
+      const result = parseGitHubUrl("https://github.com/facebook/react/compare/main...dev");
       expect(result).toEqual({
         owner: "facebook",
         repo: "react",
@@ -255,9 +229,7 @@ describe("parseGitHubUrl", () => {
     });
 
     it("returns unknown for commits URL", () => {
-      const result = parseGitHubUrl(
-        "https://github.com/facebook/react/commits/main",
-      );
+      const result = parseGitHubUrl("https://github.com/facebook/react/commits/main");
       expect(result).toEqual({
         owner: "facebook",
         repo: "react",
@@ -392,17 +364,12 @@ describe("fetchRaw", () => {
   });
 
   it("rewrites blob URL to raw.githubusercontent.com and fetches content", async () => {
-    fetchStub.addResponse(
-      "raw.githubusercontent.com/facebook/react/main/README.md",
-      {
-        body: "# React\n\nA JavaScript library for building UIs.",
-        headers: { "content-type": "text/plain" },
-      },
-    );
+    fetchStub.addResponse("raw.githubusercontent.com/facebook/react/main/README.md", {
+      body: "# React\n\nA JavaScript library for building UIs.",
+      headers: { "content-type": "text/plain" },
+    });
 
-    const parsed = parseGitHubUrl(
-      "https://github.com/facebook/react/blob/main/README.md",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/facebook/react/blob/main/README.md")!;
     const result = await fetchRaw(parsed);
     expect(result).not.toBeNull();
     expect(result!.text).toContain("React");
@@ -416,31 +383,24 @@ describe("fetchRaw", () => {
   });
 
   it("returns null when raw fetch fails (non-2xx)", async () => {
-    fetchStub.addResponse(
-      "raw.githubusercontent.com/facebook/react/main/missing.md",
-      { status: 404, body: "Not Found" },
-    );
+    fetchStub.addResponse("raw.githubusercontent.com/facebook/react/main/missing.md", {
+      status: 404,
+      body: "Not Found",
+    });
 
-    const parsed = parseGitHubUrl(
-      "https://github.com/facebook/react/blob/main/missing.md",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/facebook/react/blob/main/missing.md")!;
     const result = await fetchRaw(parsed);
     expect(result).toBeNull();
   });
 
   it("truncates content at 100,000 chars", async () => {
     const longContent = "x".repeat(150_000);
-    fetchStub.addResponse(
-      "raw.githubusercontent.com/owner/repo/main/big.txt",
-      {
-        body: longContent,
-        headers: { "content-type": "text/plain" },
-      },
-    );
+    fetchStub.addResponse("raw.githubusercontent.com/owner/repo/main/big.txt", {
+      body: longContent,
+      headers: { "content-type": "text/plain" },
+    });
 
-    const parsed = parseGitHubUrl(
-      "https://github.com/owner/repo/blob/main/big.txt",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/owner/repo/blob/main/big.txt")!;
     const result = await fetchRaw(parsed);
     expect(result).not.toBeNull();
     expect(result!.chars).toBe(150_000);
@@ -449,17 +409,12 @@ describe("fetchRaw", () => {
   });
 
   it("returns binary placeholder for binary files", async () => {
-    fetchStub.addResponse(
-      "raw.githubusercontent.com/owner/repo/main/logo.png",
-      {
-        body: "fake-binary-data",
-        headers: { "content-type": "image/png" },
-      },
-    );
+    fetchStub.addResponse("raw.githubusercontent.com/owner/repo/main/logo.png", {
+      body: "fake-binary-data",
+      headers: { "content-type": "image/png" },
+    });
 
-    const parsed = parseGitHubUrl(
-      "https://github.com/owner/repo/blob/main/logo.png",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/owner/repo/blob/main/logo.png")!;
     const result = await fetchRaw(parsed);
     expect(result).not.toBeNull();
     expect(result!.text).toContain("Binary file");
@@ -467,13 +422,10 @@ describe("fetchRaw", () => {
   });
 
   it("handles raw.githubusercontent.com URLs directly", async () => {
-    fetchStub.addResponse(
-      "raw.githubusercontent.com/facebook/react/main/README.md",
-      {
-        body: "# React\n\nContent here.",
-        headers: { "content-type": "text/plain" },
-      },
-    );
+    fetchStub.addResponse("raw.githubusercontent.com/facebook/react/main/README.md", {
+      body: "# React\n\nContent here.",
+      headers: { "content-type": "text/plain" },
+    });
 
     const parsed = parseGitHubUrl(
       "https://raw.githubusercontent.com/facebook/react/main/README.md",
@@ -496,26 +448,19 @@ describe("fetchViaApi", () => {
   });
 
   it("fetches file content via /contents/ endpoint (base64 response)", async () => {
-    const content = Buffer.from("# Hello World\n\nSome content.").toString(
-      "base64",
-    );
-    fetchStub.addResponse(
-      "api.github.com/repos/owner/repo/contents/README.md",
-      {
-        body: {
-          type: "file",
-          name: "README.md",
-          content,
-          encoding: "base64",
-          size: 28,
-        },
-        headers: { "content-type": "application/json" },
+    const content = Buffer.from("# Hello World\n\nSome content.").toString("base64");
+    fetchStub.addResponse("api.github.com/repos/owner/repo/contents/README.md", {
+      body: {
+        type: "file",
+        name: "README.md",
+        content,
+        encoding: "base64",
+        size: 28,
       },
-    );
+      headers: { "content-type": "application/json" },
+    });
 
-    const parsed = parseGitHubUrl(
-      "https://github.com/owner/repo/blob/main/README.md",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/owner/repo/blob/main/README.md")!;
     const result = await fetchViaApi(parsed);
     expect(result).not.toBeNull();
     expect(result!.text).toContain("Hello World");
@@ -523,21 +468,16 @@ describe("fetchViaApi", () => {
   });
 
   it("fetches directory listing via /contents/ endpoint", async () => {
-    fetchStub.addResponse(
-      "api.github.com/repos/owner/repo/contents/src",
-      {
-        body: [
-          { name: "index.ts", type: "file", size: 1200 },
-          { name: "utils", type: "dir", size: 0 },
-          { name: "config.ts", type: "file", size: 450 },
-        ],
-        headers: { "content-type": "application/json" },
-      },
-    );
+    fetchStub.addResponse("api.github.com/repos/owner/repo/contents/src", {
+      body: [
+        { name: "index.ts", type: "file", size: 1200 },
+        { name: "utils", type: "dir", size: 0 },
+        { name: "config.ts", type: "file", size: 450 },
+      ],
+      headers: { "content-type": "application/json" },
+    });
 
-    const parsed = parseGitHubUrl(
-      "https://github.com/owner/repo/tree/main/src",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/owner/repo/tree/main/src")!;
     const result = await fetchViaApi(parsed);
     expect(result).not.toBeNull();
     expect(result!.text).toContain("index.ts");
@@ -546,17 +486,14 @@ describe("fetchViaApi", () => {
   });
 
   it("fetches root tree listing for root URLs", async () => {
-    fetchStub.addResponse(
-      "api.github.com/repos/owner/repo/contents/",
-      {
-        body: [
-          { name: "README.md", type: "file", size: 5000 },
-          { name: "src", type: "dir", size: 0 },
-          { name: "package.json", type: "file", size: 800 },
-        ],
-        headers: { "content-type": "application/json" },
-      },
-    );
+    fetchStub.addResponse("api.github.com/repos/owner/repo/contents/", {
+      body: [
+        { name: "README.md", type: "file", size: 5000 },
+        { name: "src", type: "dir", size: 0 },
+        { name: "package.json", type: "file", size: 800 },
+      ],
+      headers: { "content-type": "application/json" },
+    });
 
     const parsed = parseGitHubUrl("https://github.com/owner/repo")!;
     const result = await fetchViaApi(parsed);
@@ -566,41 +503,31 @@ describe("fetchViaApi", () => {
   });
 
   it("returns null on API error (rate limited)", async () => {
-    fetchStub.addResponse(
-      "api.github.com/repos/owner/repo/contents/README.md",
-      {
-        status: 403,
-        body: { message: "API rate limit exceeded" },
-        headers: { "content-type": "application/json" },
-      },
-    );
+    fetchStub.addResponse("api.github.com/repos/owner/repo/contents/README.md", {
+      status: 403,
+      body: { message: "API rate limit exceeded" },
+      headers: { "content-type": "application/json" },
+    });
 
-    const parsed = parseGitHubUrl(
-      "https://github.com/owner/repo/blob/main/README.md",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/owner/repo/blob/main/README.md")!;
     const result = await fetchViaApi(parsed);
     expect(result).toBeNull();
   });
 
   it("returns binary placeholder for binary files", async () => {
     const content = Buffer.from("\x00\x01\x02binary").toString("base64");
-    fetchStub.addResponse(
-      "api.github.com/repos/owner/repo/contents/image.png",
-      {
-        body: {
-          type: "file",
-          name: "image.png",
-          content,
-          encoding: "base64",
-          size: 10240,
-        },
-        headers: { "content-type": "application/json" },
+    fetchStub.addResponse("api.github.com/repos/owner/repo/contents/image.png", {
+      body: {
+        type: "file",
+        name: "image.png",
+        content,
+        encoding: "base64",
+        size: 10240,
       },
-    );
+      headers: { "content-type": "application/json" },
+    });
 
-    const parsed = parseGitHubUrl(
-      "https://github.com/owner/repo/blob/main/image.png",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/owner/repo/blob/main/image.png")!;
     const result = await fetchViaApi(parsed);
     expect(result).not.toBeNull();
     expect(result!.text).toContain("Binary file");
@@ -610,23 +537,18 @@ describe("fetchViaApi", () => {
   it("uses GITHUB_TOKEN header when env var is set", async () => {
     process.env.GITHUB_TOKEN = "ghp_test123";
 
-    fetchStub.addResponse(
-      "api.github.com/repos/owner/repo/contents/README.md",
-      {
-        body: {
-          type: "file",
-          name: "README.md",
-          content: Buffer.from("# Auth Test").toString("base64"),
-          encoding: "base64",
-          size: 11,
-        },
-        headers: { "content-type": "application/json" },
+    fetchStub.addResponse("api.github.com/repos/owner/repo/contents/README.md", {
+      body: {
+        type: "file",
+        name: "README.md",
+        content: Buffer.from("# Auth Test").toString("base64"),
+        encoding: "base64",
+        size: 11,
       },
-    );
+      headers: { "content-type": "application/json" },
+    });
 
-    const parsed = parseGitHubUrl(
-      "https://github.com/owner/repo/blob/main/README.md",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/owner/repo/blob/main/README.md")!;
     await fetchViaApi(parsed);
 
     // Verify the token was sent (check the mock's call args)
@@ -649,9 +571,7 @@ describe("fetchViaApi", () => {
       headers: { "content-type": "application/json" },
     });
 
-    const parsed = parseGitHubUrl(
-      "https://github.com/owner/repo/tree/main/src",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/owner/repo/tree/main/src")!;
     const result = await fetchViaApi(parsed);
     expect(result).not.toBeNull();
     // Count the number of file entries in the output
@@ -679,9 +599,7 @@ describe("fetchViaClone", () => {
   });
 
   it("returns null for unknown URL types", async () => {
-    const parsed = parseGitHubUrl(
-      "https://github.com/owner/repo/issues/123",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/owner/repo/issues/123")!;
     const result = await fetchViaClone(parsed);
     expect(result).toBeNull();
   });
@@ -725,10 +643,7 @@ describe("fetchViaClone", () => {
   it("reads file content from clone for blob URLs", async () => {
     const cloneDir = path.join(testCacheDir, "owner", "repo@main");
     fs.mkdirSync(path.join(cloneDir, "src"), { recursive: true });
-    fs.writeFileSync(
-      path.join(cloneDir, "src", "index.ts"),
-      'export const hello = "world";',
-    );
+    fs.writeFileSync(path.join(cloneDir, "src", "index.ts"), 'export const hello = "world";');
 
     const { readCloneFile } = await import("../../src/extract/github.ts");
     const content = readCloneFile(cloneDir, "src/index.ts");
@@ -809,25 +724,18 @@ describe("extractGitHub", () => {
   });
 
   it("returns null for unknown URL type", async () => {
-    const parsed = parseGitHubUrl(
-      "https://github.com/owner/repo/issues/123",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/owner/repo/issues/123")!;
     const result = await extractGitHub(parsed);
     expect(result).toBeNull();
   });
 
   it("uses Tier 1 (raw rewrite) for blob URLs when available", async () => {
-    fetchStub.addResponse(
-      "raw.githubusercontent.com/owner/repo/main/src/index.ts",
-      {
-        body: "export const x = 1;",
-        headers: { "content-type": "text/plain" },
-      },
-    );
+    fetchStub.addResponse("raw.githubusercontent.com/owner/repo/main/src/index.ts", {
+      body: "export const x = 1;",
+      headers: { "content-type": "text/plain" },
+    });
 
-    const parsed = parseGitHubUrl(
-      "https://github.com/owner/repo/blob/main/src/index.ts",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/owner/repo/blob/main/src/index.ts")!;
     const result = await extractGitHub(parsed);
     expect(result).not.toBeNull();
     expect(result!.text).toContain("export const x = 1");
@@ -864,26 +772,23 @@ describe("extractGitHub", () => {
 
   it("falls back to Tier 3 when Tier 1 fails for blob URL", async () => {
     // Tier 1 fails (404 from raw)
-    fetchStub.addResponse(
-      "raw.githubusercontent.com/owner/repo/main/secret.ts",
-      { status: 404, body: "Not Found" },
-    );
+    fetchStub.addResponse("raw.githubusercontent.com/owner/repo/main/secret.ts", {
+      status: 404,
+      body: "Not Found",
+    });
 
     // Tier 3 mock added BEFORE the less-specific repo mock so it wins
     const content = Buffer.from('const secret = "tier3";').toString("base64");
-    fetchStub.addResponse(
-      "api.github.com/repos/owner/repo/contents/secret.ts",
-      {
-        body: {
-          type: "file",
-          name: "secret.ts",
-          content,
-          encoding: "base64",
-          size: 23,
-        },
-        headers: { "content-type": "application/json" },
+    fetchStub.addResponse("api.github.com/repos/owner/repo/contents/secret.ts", {
+      body: {
+        type: "file",
+        name: "secret.ts",
+        content,
+        encoding: "base64",
+        size: 23,
       },
-    );
+      headers: { "content-type": "application/json" },
+    });
 
     // Tier 2 skipped (repo too large) - added after contents mock
     fetchStub.addResponse("api.github.com/repos/owner/repo", {
@@ -891,9 +796,7 @@ describe("extractGitHub", () => {
       headers: { "content-type": "application/json" },
     });
 
-    const parsed = parseGitHubUrl(
-      "https://github.com/owner/repo/blob/main/secret.ts",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/owner/repo/blob/main/secret.ts")!;
     const result = await extractGitHub(parsed);
     expect(result).not.toBeNull();
     expect(result!.text).toContain("tier3");
@@ -901,42 +804,32 @@ describe("extractGitHub", () => {
   });
 
   it("returns null when all tiers fail", async () => {
-    fetchStub.addResponse(
-      "raw.githubusercontent.com/owner/repo/main/gone.ts",
-      { status: 404, body: "Not Found" },
-    );
+    fetchStub.addResponse("raw.githubusercontent.com/owner/repo/main/gone.ts", {
+      status: 404,
+      body: "Not Found",
+    });
     fetchStub.addResponse("api.github.com/repos/owner/repo", {
       body: { size: 500 * 1024 },
       headers: { "content-type": "application/json" },
     });
-    fetchStub.addResponse(
-      "api.github.com/repos/owner/repo/contents/gone.ts",
-      {
-        status: 404,
-        body: { message: "Not Found" },
-        headers: { "content-type": "application/json" },
-      },
-    );
+    fetchStub.addResponse("api.github.com/repos/owner/repo/contents/gone.ts", {
+      status: 404,
+      body: { message: "Not Found" },
+      headers: { "content-type": "application/json" },
+    });
 
-    const parsed = parseGitHubUrl(
-      "https://github.com/owner/repo/blob/main/gone.ts",
-    )!;
+    const parsed = parseGitHubUrl("https://github.com/owner/repo/blob/main/gone.ts")!;
     const result = await extractGitHub(parsed);
     expect(result).toBeNull();
   });
 
   it("handles raw.githubusercontent.com URLs via Tier 1", async () => {
-    fetchStub.addResponse(
-      "raw.githubusercontent.com/owner/repo/main/data.json",
-      {
-        body: '{"key": "value"}',
-        headers: { "content-type": "text/plain" },
-      },
-    );
+    fetchStub.addResponse("raw.githubusercontent.com/owner/repo/main/data.json", {
+      body: '{"key": "value"}',
+      headers: { "content-type": "text/plain" },
+    });
 
-    const parsed = parseGitHubUrl(
-      "https://raw.githubusercontent.com/owner/repo/main/data.json",
-    )!;
+    const parsed = parseGitHubUrl("https://raw.githubusercontent.com/owner/repo/main/data.json")!;
     const result = await extractGitHub(parsed);
     expect(result).not.toBeNull();
     expect(result!.text).toContain('"key": "value"');

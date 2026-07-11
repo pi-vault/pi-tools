@@ -30,10 +30,7 @@ export function reciprocalRankFusion(
   maxResults: number,
   k: number = DEFAULT_K,
 ): FusedResult[] {
-  const urlMap = new Map<
-    string,
-    { rrfScore: number; result: SearchResult; providers: string[] }
-  >();
+  const urlMap = new Map<string, { rrfScore: number; result: SearchResult; providers: string[] }>();
 
   for (const { providerName, results } of providerResults) {
     for (let rank = 0; rank < results.length; rank++) {
@@ -91,18 +88,8 @@ export interface FusionResult {
   degraded: boolean;
 }
 
-export async function executeWithFusion(
-  options: FusionOptions,
-): Promise<FusionResult> {
-  const {
-    candidates,
-    maxResults,
-    mode,
-    targetBackends,
-    k,
-    onSuccess,
-    onFailure,
-  } = options;
+export async function executeWithFusion(options: FusionOptions): Promise<FusionResult> {
+  const { candidates, maxResults, mode, targetBackends, k, onSuccess, onFailure } = options;
 
   if (candidates.length === 0) {
     throw new AggregateProviderError("search", [

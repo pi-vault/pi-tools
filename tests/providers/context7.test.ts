@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  Context7DocsProvider,
-  Context7Error,
-  providerMeta,
-} from "../../src/providers/context7.ts";
+import { Context7DocsProvider, Context7Error, providerMeta } from "../../src/providers/context7.ts";
 import { stubFetch } from "../helpers.ts";
 
 describe("Context7DocsProvider", () => {
@@ -80,24 +76,21 @@ describe("Context7DocsProvider", () => {
       });
 
       const provider = new Context7DocsProvider("bad_key");
-      await expect(provider.searchLibrary("react", "hooks")).rejects.toThrow(
-        Context7Error,
-      );
-      await expect(provider.searchLibrary("react", "hooks")).rejects.toThrow(
-        /API key/i,
-      );
+      await expect(provider.searchLibrary("react", "hooks")).rejects.toThrow(Context7Error);
+      await expect(provider.searchLibrary("react", "hooks")).rejects.toThrow(/API key/i);
     });
 
     it("throws Context7Error on 429", async () => {
       fetchStub.addResponse("context7.com/api/v2/libs/search", {
         status: 429,
-        body: { error: "rate_limit_exceeded", message: "Rate limit exceeded. Please try again later." },
+        body: {
+          error: "rate_limit_exceeded",
+          message: "Rate limit exceeded. Please try again later.",
+        },
       });
 
       const provider = new Context7DocsProvider("ctx7sk_test");
-      await expect(provider.searchLibrary("react", "hooks")).rejects.toThrow(
-        Context7Error,
-      );
+      await expect(provider.searchLibrary("react", "hooks")).rejects.toThrow(Context7Error);
     });
 
     it("passes abort signal to fetch", async () => {
@@ -122,10 +115,7 @@ describe("Context7DocsProvider", () => {
       });
 
       const provider = new Context7DocsProvider("ctx7sk_test");
-      const result = await provider.getContext(
-        "/facebook/react",
-        "How to use useState",
-      );
+      const result = await provider.getContext("/facebook/react", "How to use useState");
 
       expect(result).toContain("useState Hook");
       expect(result).toContain("```typescript");
@@ -138,10 +128,7 @@ describe("Context7DocsProvider", () => {
       });
 
       const provider = new Context7DocsProvider("ctx7sk_test");
-      await provider.getContext(
-        "/vercel/next.js@v15.1.8",
-        "app router middleware",
-      );
+      await provider.getContext("/vercel/next.js@v15.1.8", "app router middleware");
 
       const fetchCall = (globalThis.fetch as any).mock.calls[0];
       const url = fetchCall[0] as string;
@@ -171,9 +158,9 @@ describe("Context7DocsProvider", () => {
       });
 
       const provider = new Context7DocsProvider("ctx7sk_test");
-      await expect(
-        provider.getContext("/nonexistent/lib", "anything"),
-      ).rejects.toThrow(Context7Error);
+      await expect(provider.getContext("/nonexistent/lib", "anything")).rejects.toThrow(
+        Context7Error,
+      );
     });
 
     it("throws Context7Error on 402 (spending limit)", async () => {
@@ -186,12 +173,10 @@ describe("Context7DocsProvider", () => {
       });
 
       const provider = new Context7DocsProvider("ctx7sk_test");
-      await expect(
-        provider.getContext("/facebook/react", "hooks"),
-      ).rejects.toThrow(Context7Error);
-      await expect(
-        provider.getContext("/facebook/react", "hooks"),
-      ).rejects.toThrow(/spending limit/i);
+      await expect(provider.getContext("/facebook/react", "hooks")).rejects.toThrow(Context7Error);
+      await expect(provider.getContext("/facebook/react", "hooks")).rejects.toThrow(
+        /spending limit/i,
+      );
     });
 
     it("follows 301 redirect", async () => {
@@ -227,24 +212,23 @@ describe("Context7DocsProvider", () => {
       });
 
       const provider = new Context7DocsProvider("ctx7sk_test");
-      await expect(
-        provider.getContext("/lib-a", "anything"),
-      ).rejects.toThrow(Context7Error);
-      await expect(
-        provider.getContext("/lib-a", "anything"),
-      ).rejects.toThrow(/too many redirects/i);
+      await expect(provider.getContext("/lib-a", "anything")).rejects.toThrow(Context7Error);
+      await expect(provider.getContext("/lib-a", "anything")).rejects.toThrow(
+        /too many redirects/i,
+      );
     });
 
     it("throws Context7Error on 500 (generic fallback)", async () => {
       fetchStub.addResponse("context7.com/api/v2/context", {
         status: 500,
-        body: { error: "internal_error", message: "An error occurred while processing your request" },
+        body: {
+          error: "internal_error",
+          message: "An error occurred while processing your request",
+        },
       });
 
       const provider = new Context7DocsProvider("ctx7sk_test");
-      await expect(
-        provider.getContext("/facebook/react", "hooks"),
-      ).rejects.toThrow(Context7Error);
+      await expect(provider.getContext("/facebook/react", "hooks")).rejects.toThrow(Context7Error);
     });
   });
 

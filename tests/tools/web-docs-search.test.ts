@@ -1,10 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createWebDocsSearchTool } from "../../src/tools/web-docs-search.ts";
 import { makeCtx } from "../helpers.ts";
-import type {
-  DocsProvider,
-  DocsSearchResult,
-} from "../../src/providers/types.ts";
+import type { DocsProvider, DocsSearchResult } from "../../src/providers/types.ts";
 import { Context7Error } from "../../src/providers/context7.ts";
 
 function mockDocsProvider(results: DocsSearchResult[] = []): DocsProvider {
@@ -75,9 +72,9 @@ describe("web_docs_search tool", () => {
 
     expect(text).toContain("/facebook/react");
     expect(text).toContain("React");
-    expect(text).toContain("10");      // trustScore
-    expect(text).toContain("95.5");    // benchmarkScore
-    expect(text).toContain("2500");    // totalSnippets
+    expect(text).toContain("10"); // trustScore
+    expect(text).toContain("95.5"); // benchmarkScore
+    expect(text).toContain("2500"); // totalSnippets
     expect(text).toContain("v18.2.0"); // versions
     expect(text).toContain("/preactjs/preact");
     expect(text).toContain("web_docs_fetch"); // footer guidance
@@ -134,22 +131,14 @@ describe("web_docs_search tool", () => {
     const failing: DocsProvider = {
       name: "context7",
       label: "Context7",
-      searchLibrary: vi
-        .fn()
-        .mockRejectedValue(new Context7Error("Rate limited.")),
+      searchLibrary: vi.fn().mockRejectedValue(new Context7Error("Rate limited.")),
       getContext: vi.fn(),
     };
     const tool = createWebDocsSearchTool(() => failing);
     const ctx = makeCtx();
 
     await expect(
-      tool.execute(
-        "call-4",
-        { libraryName: "react", query: "hooks" },
-        undefined,
-        undefined,
-        ctx,
-      ),
+      tool.execute("call-4", { libraryName: "react", query: "hooks" }, undefined, undefined, ctx),
     ).rejects.toThrow(Context7Error);
   });
 
@@ -167,11 +156,7 @@ describe("web_docs_search tool", () => {
       ctx,
     );
 
-    expect(provider.searchLibrary).toHaveBeenCalledWith(
-      "react",
-      "hooks",
-      controller.signal,
-    );
+    expect(provider.searchLibrary).toHaveBeenCalledWith("react", "hooks", controller.signal);
   });
 
   it("limits visible results to 10 and shows overflow note", async () => {

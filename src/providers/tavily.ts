@@ -1,5 +1,12 @@
 // src/providers/tavily.ts
-import type { FetchProvider, FetchResult, ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type {
+  FetchProvider,
+  FetchResult,
+  ProviderMeta,
+  SearchFilters,
+  SearchProvider,
+  SearchResult,
+} from "./types.ts";
 
 interface TavilySearchResponse {
   results: Array<{ title: string; url: string; content: string }>;
@@ -44,10 +51,13 @@ export class TavilyProvider implements SearchProvider, FetchProvider {
       body: JSON.stringify(body),
       signal,
     });
-    if (!response.ok) throw new Error(`Tavily API error: ${response.status} ${response.statusText}`);
+    if (!response.ok)
+      throw new Error(`Tavily API error: ${response.status} ${response.statusText}`);
     const data = (await response.json()) as TavilySearchResponse;
     return (data.results ?? []).slice(0, maxResults).map((r) => ({
-      title: r.title, url: r.url, snippet: r.content,
+      title: r.title,
+      url: r.url,
+      snippet: r.content,
     }));
   }
 
@@ -58,7 +68,8 @@ export class TavilyProvider implements SearchProvider, FetchProvider {
       body: JSON.stringify({ api_key: this.apiKey, urls: [url] }),
       signal,
     });
-    if (!response.ok) throw new Error(`Tavily extract error: ${response.status} ${response.statusText}`);
+    if (!response.ok)
+      throw new Error(`Tavily extract error: ${response.status} ${response.statusText}`);
     const data = (await response.json()) as TavilyExtractResponse;
     const content = data.results?.[0]?.raw_content ?? "";
     return { text: content };

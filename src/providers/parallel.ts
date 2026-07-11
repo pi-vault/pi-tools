@@ -62,9 +62,7 @@ export class ParallelProvider implements SearchProvider, FetchProvider {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Parallel search error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`Parallel search error: ${response.status} ${response.statusText}`);
     }
 
     const data = (await response.json()) as ParallelSearchResponse;
@@ -84,9 +82,7 @@ export class ParallelProvider implements SearchProvider, FetchProvider {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Parallel extract error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`Parallel extract error: ${response.status} ${response.statusText}`);
     }
 
     const data = (await response.json()) as ParallelExtractResponse;

@@ -46,17 +46,13 @@ export class ExaMcpProvider implements SearchProvider {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Exa MCP error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`Exa MCP error: ${response.status} ${response.statusText}`);
     }
 
     const data = (await response.json()) as JsonRpcResponse;
 
     if (data.error) {
-      throw new Error(
-        `Exa MCP JSON-RPC error: ${data.error.message}`,
-      );
+      throw new Error(`Exa MCP JSON-RPC error: ${data.error.message}`);
     }
 
     const textContent = data.result?.content?.[0]?.text;

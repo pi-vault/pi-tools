@@ -9,10 +9,7 @@ export function extractRsc(html: string): string | null {
 
   for (const match of html.matchAll(pattern)) {
     try {
-      const decoded = match[1]
-        .replace(/\\"/g, '"')
-        .replace(/\\\\/g, "\\")
-        .replace(/\\n/g, "\n");
+      const decoded = match[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\").replace(/\\n/g, "\n");
       chunks.push(decoded);
     } catch {
       // Skip malformed chunks

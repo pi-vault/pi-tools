@@ -3,7 +3,11 @@ import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { ContentStore } from "../storage.ts";
 import type { FetchProvider } from "../providers/types.ts";
-import { extractContent, RetryableExtractionError, type ExtractedContent } from "../extract/pipeline.ts";
+import {
+  extractContent,
+  RetryableExtractionError,
+  type ExtractedContent,
+} from "../extract/pipeline.ts";
 import { truncateContent } from "../utils/truncate.ts";
 import { sanitizeError } from "../utils/errors.ts";
 import { executeWithFallback } from "../providers/execute.ts";
@@ -25,9 +29,7 @@ const WebFetchParams = Type.Object({
   raw: Type.Optional(
     Type.Boolean({ default: false, description: "Return raw HTTP body without extraction" }),
   ),
-  fresh: Type.Optional(
-    Type.Boolean({ default: false, description: "Bypass content cache" }),
-  ),
+  fresh: Type.Optional(Type.Boolean({ default: false, description: "Bypass content cache" })),
 });
 
 interface UrlResult {
@@ -49,7 +51,11 @@ interface WebFetchDetails {
 }
 
 function perUrlCap(count: number): number {
-  return count <= 1 ? INLINE_LIMIT : count <= 5 ? Math.floor(INLINE_LIMIT / count) : MANIFEST_PREVIEW_CHARS;
+  return count <= 1
+    ? INLINE_LIMIT
+    : count <= 5
+      ? Math.floor(INLINE_LIMIT / count)
+      : MANIFEST_PREVIEW_CHARS;
 }
 
 async function fetchWithConcurrencyLimit<T>(
@@ -71,10 +77,7 @@ async function fetchWithConcurrencyLimit<T>(
     }
   }
 
-  const workers = Array.from(
-    { length: Math.min(maxConcurrent, tasks.length) },
-    () => runNext(),
-  );
+  const workers = Array.from({ length: Math.min(maxConcurrent, tasks.length) }, () => runNext());
   await Promise.all(workers);
   return results;
 }
@@ -87,7 +90,6 @@ export function createWebFetchTool(
   githubConfig?: GitHubConfig,
   ssrfAllowRanges?: string[],
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
-
   async function executeSingleUrl(
     url: string,
     params: { raw?: boolean; fresh?: boolean },
@@ -102,11 +104,11 @@ export function createWebFetchTool(
         }
       }
 
-      const extracted = await extractContent(
-        url,
-        signal,
-        { raw: params.raw, github: githubConfig, allowRanges: ssrfAllowRanges },
-      );
+      const extracted = await extractContent(url, signal, {
+        raw: params.raw,
+        github: githubConfig,
+        allowRanges: ssrfAllowRanges,
+      });
 
       // Write to cache
       cache?.set(url, extracted);
@@ -147,7 +149,8 @@ export function createWebFetchTool(
         cache?.set(url, extracted);
         return buildResult(extracted, url, store);
       } catch (fallbackError) {
-        const providerMsg = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+        const providerMsg =
+          fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
         return errorResult(url, `Fetch error (pipeline: ${pipelineError.message}): ${providerMsg}`);
       }
     }
@@ -156,9 +159,9 @@ export function createWebFetchTool(
   return {
     name: "web_fetch",
     label: "Web Fetch",
-    description:
-      "Fetch a URL and extract readable content as markdown. Supports HTML pages.",
-    promptSnippet: guidance?.promptSnippet ??
+    description: "Fetch a URL and extract readable content as markdown. Supports HTML pages.",
+    promptSnippet:
+      guidance?.promptSnippet ??
       "Fetch a URL and extract readable content as markdown. Supports HTML pages.",
     promptGuidelines: guidance?.promptGuidelines ?? [
       "Use web_fetch when you have a specific URL to read.",
@@ -178,10 +181,7 @@ export function createWebFetchTool(
       }
 
       if (hasUrls && params.urls!.length > 20) {
-        return errorResult(
-          "",
-          "Fetch error: `urls` accepts at most 20 URLs.",
-        );
+        return errorResult("", "Fetch error: `urls` accepts at most 20 URLs.");
       }
 
       // Single-URL path
@@ -202,11 +202,11 @@ export function createWebFetchTool(
           if (cached) return cached;
         }
 
-        const extracted = await extractContent(
-          u,
-          signal ?? undefined,
-          { raw: params.raw, github: githubConfig, allowRanges: ssrfAllowRanges },
-        );
+        const extracted = await extractContent(u, signal ?? undefined, {
+          raw: params.raw,
+          github: githubConfig,
+          allowRanges: ssrfAllowRanges,
+        });
 
         cache?.set(u, extracted);
         return extracted;
@@ -226,9 +226,8 @@ export function createWebFetchTool(
       for (const u of urls) {
         const outcome = resultByUrl.get(u)!;
         if (outcome.status === "rejected") {
-          const errMsg = outcome.reason instanceof Error
-            ? outcome.reason.message
-            : String(outcome.reason);
+          const errMsg =
+            outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason);
           urlResults.push({ url: u, chars: 0, error: errMsg });
           outputParts.push(`## ${u}\n\nError: ${errMsg}\n`);
           continue;
@@ -244,9 +243,8 @@ export function createWebFetchTool(
           source: "web_fetch",
         });
 
-        const preview = extracted.chars > cap
-          ? truncateContent(extracted.text, cap)
-          : extracted.text;
+        const preview =
+          extracted.chars > cap ? truncateContent(extracted.text, cap) : extracted.text;
 
         urlResults.push({
           url: extracted.url,
@@ -276,7 +274,8 @@ export function createWebFetchTool(
       };
     },
     renderCall(args, theme: Theme, context) {
-      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      const text =
+        context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
       if (!context.argsComplete) {
         text.setText(theme.fg("warning", "Fetching..."));
         return text;
@@ -286,7 +285,8 @@ export function createWebFetchTool(
           `${theme.fg("toolTitle", theme.bold("web_fetch"))} ${theme.fg("accent", `${args.urls.length} URLs`)}`,
         );
       } else {
-        const u = (args.url ?? "").length > 70 ? `${(args.url ?? "").slice(0, 67)}...` : (args.url ?? "");
+        const u =
+          (args.url ?? "").length > 70 ? `${(args.url ?? "").slice(0, 67)}...` : (args.url ?? "");
         text.setText(
           `${theme.fg("toolTitle", theme.bold("web_fetch"))} ${theme.fg("accent", `"${u}"`)}`,
         );
@@ -294,7 +294,8 @@ export function createWebFetchTool(
       return text;
     },
     renderResult(result, options, theme: Theme, context) {
-      const text = context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+      const text =
+        context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
       if (context.isPartial) {
         text.setText(theme.fg("warning", "Fetching..."));
         return text;
@@ -305,8 +306,7 @@ export function createWebFetchTool(
         return text;
       }
       if (options.expanded) {
-        const raw =
-          result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
+        const raw = result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
         const lines = raw.split("\n").slice(0, 20);
         text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));
       } else {

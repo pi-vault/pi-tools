@@ -37,9 +37,7 @@ describe("DeepResearchConfig — loadConfig", () => {
     );
     const config = loadConfig();
     expect(config.deepResearch.modeDefaults?.standard?.numResults).toBe(60);
-    expect(config.deepResearch.modeDefaults?.standard?.textMaxCharacters).toBe(
-      20000,
-    );
+    expect(config.deepResearch.modeDefaults?.standard?.textMaxCharacters).toBe(20000);
   });
 
   it("parses outputSchema override", () => {
@@ -81,9 +79,7 @@ describe("DeepResearchConfig — loadConfig", () => {
   });
 
   it("returns default when deepResearch is not an object", () => {
-    vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ deepResearch: "invalid" }),
-    );
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ deepResearch: "invalid" }));
     const config = loadConfig();
     expect(config.deepResearch).toEqual({ enabled: true });
   });

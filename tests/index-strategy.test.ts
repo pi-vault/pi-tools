@@ -25,10 +25,7 @@ describe("selectionStrategy routing", () => {
     const byPerformanceSpy = vi
       .spyOn(ProviderRegistry.prototype, "selectSearchByPerformance")
       .mockReturnValue(undefined);
-    const candidatesSpy = vi.spyOn(
-      ProviderRegistry.prototype,
-      "selectSearchCandidates",
-    );
+    const candidatesSpy = vi.spyOn(ProviderRegistry.prototype, "selectSearchCandidates");
 
     const pi = createMockPi();
     createExtension(pi as unknown as ExtensionAPI);
@@ -45,10 +42,7 @@ describe("selectionStrategy routing", () => {
 
   it("uses selectSearchCandidates when selectionStrategy is auto", async () => {
     // Default config (no file) uses selectionStrategy: "auto"
-    const byPerformanceSpy = vi.spyOn(
-      ProviderRegistry.prototype,
-      "selectSearchByPerformance",
-    );
+    const byPerformanceSpy = vi.spyOn(ProviderRegistry.prototype, "selectSearchByPerformance");
     const candidatesSpy = vi
       .spyOn(ProviderRegistry.prototype, "selectSearchCandidates")
       .mockReturnValue([]);

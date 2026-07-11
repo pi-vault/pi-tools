@@ -5,8 +5,12 @@ import { stubFetch } from "../helpers.ts";
 describe("extractViaJinaReader", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
 
-  beforeEach(() => { fetchStub = stubFetch(); });
-  afterEach(() => { fetchStub.restore(); });
+  beforeEach(() => {
+    fetchStub = stubFetch();
+  });
+  afterEach(() => {
+    fetchStub.restore();
+  });
 
   it("returns markdown from Jina Reader", async () => {
     fetchStub.addResponse("r.jina.ai", {
