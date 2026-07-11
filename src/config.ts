@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { deepMerge } from "./utils/deep-merge.ts";
 import { parseAllowRanges } from "./utils/ssrf.ts";
+import type { ResearchMode, ResearchModeDefaults } from "./research/types.ts";
 
 export interface ProviderConfigEntry {
   enabled: boolean;
@@ -37,6 +38,13 @@ export interface CombineConfig {
   k: number;
 }
 
+export interface DeepResearchConfig {
+  enabled: boolean;
+  modeDefaults?: Partial<Record<ResearchMode, Partial<ResearchModeDefaults>>>;
+  outputSchema?: Record<string, unknown> | null;
+  guidance?: GuidanceOverride;
+}
+
 export interface PiToolsConfig {
   defaultProvider: string;
   selectionStrategy: SelectionStrategy;
@@ -45,6 +53,7 @@ export interface PiToolsConfig {
   guidance?: Record<string, GuidanceOverride>;
   ssrf: SsrfConfig;
   combine: CombineConfig;
+  deepResearch: DeepResearchConfig;
 }
 
 const ENV_VAR_PATTERN = /^[A-Z][A-Z0-9_]+$/;
@@ -62,6 +71,10 @@ export const DEFAULT_COMBINE_CONFIG: CombineConfig = {
   mode: "targeted",
   targetBackends: 3,
   k: 60,
+};
+
+export const DEFAULT_DEEP_RESEARCH_CONFIG: DeepResearchConfig = {
+  enabled: true,
 };
 
 const DEFAULT_CONFIG: PiToolsConfig = {
@@ -86,6 +99,7 @@ const DEFAULT_CONFIG: PiToolsConfig = {
   github: DEFAULT_GITHUB_CONFIG,
   ssrf: { allowRanges: [] },
   combine: DEFAULT_COMBINE_CONFIG,
+  deepResearch: DEFAULT_DEEP_RESEARCH_CONFIG,
 };
 
 export function getConfigPath(): string {
@@ -124,6 +138,32 @@ function validateCombineConfig(parsed: unknown): CombineConfig {
   };
 }
 
+function validateDeepResearchConfig(parsed: unknown): DeepResearchConfig {
+  if (!parsed || typeof parsed !== "object")
+    return { ...DEFAULT_DEEP_RESEARCH_CONFIG };
+  const raw = parsed as Record<string, unknown>;
+  return {
+    enabled:
+      typeof raw.enabled === "boolean"
+        ? raw.enabled
+        : DEFAULT_DEEP_RESEARCH_CONFIG.enabled,
+    modeDefaults:
+      raw.modeDefaults && typeof raw.modeDefaults === "object"
+        ? (raw.modeDefaults as DeepResearchConfig["modeDefaults"])
+        : undefined,
+    outputSchema:
+      raw.outputSchema === null
+        ? null
+        : raw.outputSchema && typeof raw.outputSchema === "object"
+          ? (raw.outputSchema as Record<string, unknown>)
+          : undefined,
+    guidance:
+      raw.guidance && typeof raw.guidance === "object"
+        ? (raw.guidance as GuidanceOverride)
+        : undefined,
+  };
+}
+
 function parseConfigFile(raw: string): PiToolsConfig {
   const parsed = JSON.parse(raw);
 
@@ -146,6 +186,7 @@ function parseConfigFile(raw: string): PiToolsConfig {
     guidance: parsed.guidance,
     ssrf: validateSsrfConfig(parsed.ssrf),
     combine: validateCombineConfig(parsed.combine),
+    deepResearch: validateDeepResearchConfig(parsed.deepResearch),
   };
 }
 

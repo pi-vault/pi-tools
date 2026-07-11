@@ -28,6 +28,7 @@ function makeConfig(overrides: Partial<PiToolsConfig> = {}): PiToolsConfig {
     github: { enabled: true, maxRepoSizeMB: 350, cloneTimeoutSeconds: 30 },
     ssrf: { allowRanges: [] },
     combine: { enabled: false, mode: "targeted", targetBackends: 3, k: 60 },
+    deepResearch: { enabled: true },
     ...overrides,
   };
 }
