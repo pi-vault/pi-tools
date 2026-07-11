@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { SelectionStrategy } from "../config.ts";
 import type {
   CodeSearchProvider,
   DocsProvider,
@@ -91,6 +92,64 @@ export class ProviderRegistry {
     if (!m) return undefined;
     if (Date.now() - m.windowStart > METRICS_WINDOW_MS) return undefined;
     return m;
+  }
+
+  /**
+   * Score all eligible (non-exhausted) providers by composite metric.
+   *
+   * Score = (success_rate * 0.5) + (speed_score * 0.3) + (quality_score * 0.2)
+   *
+   * Providers with no active metrics get a neutral score of 0.5.
+   * Returns the full sorted array (descending by score).
+   */
+  private scoreEligibleProviders(): Array<{ provider: SearchProvider; score: number }> {
+    const eligible = [...this.searchProviders.values()].filter((r) => {
+      if (r.monthlyQuota === null) return true;
+      return (this.counts[r.provider.name] ?? 0) < r.monthlyQuota;
+    });
+
+    if (eligible.length === 0) return [];
+
+    const metricsEntries: Array<{
+      provider: SearchProvider;
+      successRate: number;
+      avgLatency: number;
+      qualityScore: number;
+    }> = [];
+    const neutralEntries: Array<{ provider: SearchProvider; score: number }> = [];
+
+    for (const r of eligible) {
+      const m = this.getActiveMetrics(r.provider.name);
+      if (!m || m.successes + m.failures === 0) {
+        neutralEntries.push({ provider: r.provider, score: 0.5 });
+      } else {
+        const total = m.successes + m.failures;
+        metricsEntries.push({
+          provider: r.provider,
+          successRate: m.successes / total,
+          avgLatency: m.latencySamples > 0 ? m.avgLatency : Infinity,
+          qualityScore: m.resultSamples > 0 ? m.avgResultRatio : 0.5,
+        });
+      }
+    }
+
+    const finiteLatencies = metricsEntries
+      .map((e) => e.avgLatency)
+      .filter((l) => l !== Infinity);
+    const maxLatency = finiteLatencies.length > 0 ? Math.max(...finiteLatencies) : 1;
+
+    const scoredEntries = metricsEntries.map((e) => {
+      const speedScore =
+        e.avgLatency === Infinity
+          ? 0
+          : Math.max(0, 1 - e.avgLatency / (maxLatency || 1));
+      return {
+        provider: e.provider,
+        score: e.successRate * 0.5 + speedScore * 0.3 + e.qualityScore * 0.2,
+      };
+    });
+
+    return [...scoredEntries, ...neutralEntries].sort((a, b) => b.score - a.score);
   }
 
   private loadUsage(): void {
@@ -208,46 +267,22 @@ export class ProviderRegistry {
     if (name && name !== "auto") {
       return this.searchProviders.get(name)?.provider;
     }
+    return this.scoreEligibleProviders()[0]?.provider;
+  }
 
-    const eligible = [...this.searchProviders.values()].filter((r) => {
-      if (r.monthlyQuota === null) return true;
-      return (this.counts[r.provider.name] ?? 0) < r.monthlyQuota;
-    });
+  selectSearchByPerformanceAll(): SearchProvider[] {
+    return this.scoreEligibleProviders().map((s) => s.provider);
+  }
 
-    if (eligible.length === 0) return undefined;
-
-    const scored = eligible.map((r) => {
-      const m = this.getActiveMetrics(r.provider.name);
-
-      if (!m || m.successes + m.failures === 0) {
-        return { provider: r.provider, score: 0.5 };
-      }
-
-      const total = m.successes + m.failures;
-      const successRate = m.successes / total;
-      const avgLatency = m.latencySamples > 0 ? m.avgLatency : Infinity;
-      const qualityScore = m.resultSamples > 0 ? m.avgResultRatio : 0.5;
-
-      return { provider: r.provider, score: 0, avgLatency, successRate, qualityScore };
-    });
-
-    const latencies = scored
-      .filter((s) => "avgLatency" in s && s.avgLatency !== Infinity)
-      .map((s) => (s as { avgLatency: number }).avgLatency);
-    const maxLatency = latencies.length > 0 ? Math.max(...latencies) : 1;
-
-    for (const s of scored) {
-      if ("successRate" in s && s.successRate !== undefined) {
-        const speedScore =
-          s.avgLatency === Infinity ? 0 : Math.max(0, 1 - s.avgLatency / (maxLatency || 1));
-        s.score = s.successRate * 0.5 + speedScore * 0.3 + s.qualityScore! * 0.2;
-      }
+  selectSearchForFusion(strategy: SelectionStrategy, name?: string): SearchProvider[] {
+    if (name && name !== "auto") {
+      const provider = this.searchProviders.get(name)?.provider;
+      return provider ? [provider] : [];
     }
-
-    // Sort by score descending
-    scored.sort((a, b) => b.score - a.score);
-
-    return scored[0]?.provider;
+    if (strategy === "best-performing") {
+      return this.selectSearchByPerformanceAll();
+    }
+    return this.selectSearchCandidates();
   }
 
   selectFetchCandidates(): FetchProvider[] {

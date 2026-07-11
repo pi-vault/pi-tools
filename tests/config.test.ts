@@ -469,3 +469,75 @@ describe("config types — selectionStrategy and guidance", () => {
     expect(config.selectionStrategy).toBe("auto");
   });
 });
+
+describe("CombineConfig", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("provides default combine config when config file is missing", () => {
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+    const config = loadConfig();
+    expect(config.combine).toEqual({
+      enabled: false,
+      mode: "targeted",
+      targetBackends: 3,
+      k: 60,
+    });
+  });
+
+  it("provides default combine config when combine not in config file", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ defaultProvider: "brave" }),
+    );
+    const config = loadConfig();
+    expect(config.combine).toEqual({
+      enabled: false,
+      mode: "targeted",
+      targetBackends: 3,
+      k: 60,
+    });
+  });
+
+  it("merges partial combine config with defaults", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ combine: { enabled: true, targetBackends: 5 } }),
+    );
+    const config = loadConfig();
+    expect(config.combine.enabled).toBe(true);
+    expect(config.combine.mode).toBe("targeted"); // default preserved
+    expect(config.combine.targetBackends).toBe(5);
+    expect(config.combine.k).toBe(60); // default preserved
+  });
+
+  it("validates combine.mode and falls back to default for unknown values", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ combine: { mode: "invalid" } }),
+    );
+    expect(loadConfig().combine.mode).toBe("targeted");
+
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ combine: { mode: "all" } }),
+    );
+    expect(loadConfig().combine.mode).toBe("all");
+  });
+
+  it("clamps combine.targetBackends and k to minimum of 1", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ combine: { targetBackends: 0, k: -5 } }),
+    );
+    const config = loadConfig();
+    expect(config.combine.targetBackends).toBe(1);
+    expect(config.combine.k).toBe(1);
+  });
+
+  it("ignores non-boolean enabled values", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({ combine: { enabled: "yes" } }),
+    );
+    const config = loadConfig();
+    expect(config.combine.enabled).toBe(false); // default
+  });
+});

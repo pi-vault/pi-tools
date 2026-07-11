@@ -30,6 +30,13 @@ export interface SsrfConfig {
   allowRanges: string[];
 }
 
+export interface CombineConfig {
+  enabled: boolean;
+  mode: "targeted" | "all";
+  targetBackends: number;
+  k: number;
+}
+
 export interface PiToolsConfig {
   defaultProvider: string;
   selectionStrategy: SelectionStrategy;
@@ -37,6 +44,7 @@ export interface PiToolsConfig {
   github: GitHubConfig;
   guidance?: Record<string, GuidanceOverride>;
   ssrf: SsrfConfig;
+  combine: CombineConfig;
 }
 
 const ENV_VAR_PATTERN = /^[A-Z][A-Z0-9_]+$/;
@@ -47,6 +55,13 @@ export const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
   enabled: true,
   maxRepoSizeMB: 350,
   cloneTimeoutSeconds: 30,
+};
+
+export const DEFAULT_COMBINE_CONFIG: CombineConfig = {
+  enabled: false,
+  mode: "targeted",
+  targetBackends: 3,
+  k: 60,
 };
 
 const DEFAULT_CONFIG: PiToolsConfig = {
@@ -70,6 +85,7 @@ const DEFAULT_CONFIG: PiToolsConfig = {
   },
   github: DEFAULT_GITHUB_CONFIG,
   ssrf: { allowRanges: [] },
+  combine: DEFAULT_COMBINE_CONFIG,
 };
 
 export function getConfigPath(): string {
@@ -85,6 +101,27 @@ function validateSsrfConfig(parsed: unknown): SsrfConfig {
   // Eagerly validate so malformed config fails at load time, not on first URL fetch.
   parseAllowRanges(ssrf.allowRanges);
   return ssrf as SsrfConfig;
+}
+
+function validateCombineConfig(parsed: unknown): CombineConfig {
+  const raw = (parsed ?? {}) as Record<string, unknown>;
+  const mode =
+    raw.mode === "targeted" || raw.mode === "all"
+      ? (raw.mode as CombineConfig["mode"])
+      : DEFAULT_COMBINE_CONFIG.mode;
+
+  return {
+    enabled: typeof raw.enabled === "boolean" ? raw.enabled : DEFAULT_COMBINE_CONFIG.enabled,
+    mode,
+    targetBackends: Math.max(
+      1,
+      typeof raw.targetBackends === "number" ? raw.targetBackends : DEFAULT_COMBINE_CONFIG.targetBackends,
+    ),
+    k: Math.max(
+      1,
+      typeof raw.k === "number" ? raw.k : DEFAULT_COMBINE_CONFIG.k,
+    ),
+  };
 }
 
 function parseConfigFile(raw: string): PiToolsConfig {
@@ -108,6 +145,7 @@ function parseConfigFile(raw: string): PiToolsConfig {
     },
     guidance: parsed.guidance,
     ssrf: validateSsrfConfig(parsed.ssrf),
+    combine: validateCombineConfig(parsed.combine),
   };
 }
 
