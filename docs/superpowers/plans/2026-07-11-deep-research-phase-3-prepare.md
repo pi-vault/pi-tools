@@ -33,6 +33,8 @@ The `applyResearchMode` function merges mode defaults from three layers:
 
 Path resolution: all paths can be absolute or relative to `ctx.cwd`. A leading `@` character is stripped (convention from pi-web-tools for file references).
 
+**Deviation from pi-web-tools reference:** `expandSimpleGlob` checks for multiple `*` wildcards on the full normalized path (before splitting into dir/base), not just the base pattern. The reference only checks the filename portion, which misses cases like `"docs/*/*.md"` where the first `*` is in a directory segment.
+
 ---
 
 ### Task 3: Prepare research input
@@ -300,15 +302,16 @@ export async function expandSimpleGlob(
   if (!cleaned.includes("*")) return [resolveOutputPath(cwd, cleaned)];
 
   const normalized = cleaned.replace(/\\/g, "/");
-  const slash = normalized.lastIndexOf("/");
-  const dirPart = slash >= 0 ? normalized.slice(0, slash) : ".";
-  const basePattern = slash >= 0 ? normalized.slice(slash + 1) : normalized;
 
-  if (basePattern.split("*").length > 2) {
+  if (normalized.split("*").length > 2) {
     throw new Error(
       `contextGlob supports one '*' wildcard in the file name: ${rawGlob}`,
     );
   }
+
+  const slash = normalized.lastIndexOf("/");
+  const dirPart = slash >= 0 ? normalized.slice(0, slash) : ".";
+  const basePattern = slash >= 0 ? normalized.slice(slash + 1) : normalized;
 
   const [prefix, suffix] = basePattern.split("*") as [string, string];
   const dir = resolveOutputPath(cwd, dirPart);
