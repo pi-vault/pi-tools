@@ -3,7 +3,8 @@ import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { SearchFilters, SearchProvider, SearchResult } from "../providers/types.ts";
 import { executeWithFallback } from "../providers/execute.ts";
-import type { GuidanceOverride } from "../config.ts";
+import type { GuidanceOverride, CombineConfig } from "../config.ts";
+import { executeWithFusion } from "../providers/fusion.ts";
 
 const WebSearchParams = Type.Object({
   query: Type.String({ description: "Search query" }),
@@ -43,11 +44,22 @@ const WebSearchParams = Type.Object({
       description: "When true, return results in compact single-line format (title -- URL, no snippets)",
     }),
   ),
+  combine: Type.Optional(
+    Type.Boolean({
+      description:
+        "Override fusion setting: true to fuse multiple providers, false for single-provider fallback",
+    }),
+  ),
 });
 
 interface WebSearchDetails {
   provider: string;
   resultCount: number;
+  fusionMeta?: {
+    providersUsed: string[];
+    degraded: boolean;
+    results: Array<{ url: string; providers: string[] }>;
+  };
 }
 
 function formatResults(results: SearchResult[]): string {
@@ -87,12 +99,26 @@ function buildFilters(params: {
   };
 }
 
+function formatFusionOutput(
+  results: SearchResult[],
+  degraded: boolean,
+  providerCount: number,
+  compact: boolean,
+): string {
+  const warn = degraded
+    ? `Warning: Only ${providerCount} of target providers responded (quota exhaustion)\n`
+    : "";
+  if (results.length === 0) return `${warn}No results found.`;
+  return `${warn}${compact ? formatResultsCompact(results) : formatResults(results)}`;
+}
+
 export function createWebSearchTool(
-  resolveCandidates: (name?: string) => SearchProvider[],
+  resolveCandidates: (name?: string, combine?: boolean) => SearchProvider[],
   onSuccess?: (providerName: string, latencyMs: number) => void,
   guidance?: GuidanceOverride,
   onFailure?: (providerName: string) => void,
   onResult?: (providerName: string, resultCount: number, requestedCount: number) => void,
+  combineConfig?: CombineConfig,
 ): ToolDefinition<typeof WebSearchParams, WebSearchDetails> {
   return {
     name: "web_search",
@@ -106,7 +132,8 @@ export function createWebSearchTool(
     ],
     parameters: WebSearchParams,
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-      const candidates = resolveCandidates(params.provider);
+      const combineActive = params.combine ?? (combineConfig?.enabled === true);
+      const candidates = resolveCandidates(params.provider, combineActive);
 
       if (candidates.length === 0) {
         return {
@@ -118,6 +145,63 @@ export function createWebSearchTool(
       const maxResults = params.numResults ?? 5;
       const filters = buildFilters(params);
 
+      // Fusion path
+      if (combineActive && candidates.length > 1 && combineConfig) {
+        try {
+          const fusionResult = await executeWithFusion({
+            candidates: candidates.map((provider) => ({
+              name: provider.name,
+              execute: (n: number) =>
+                provider.search(params.query, n, signal ?? undefined, filters),
+            })),
+            maxResults,
+            mode: combineConfig.mode,
+            targetBackends: combineConfig.targetBackends,
+            k: combineConfig.k,
+            onSuccess,
+            onFailure,
+          });
+
+          for (const pr of fusionResult.providersUsed) {
+            const providerResultCount = fusionResult.results.filter((f) =>
+              f.providers.includes(pr),
+            ).length;
+            onResult?.(pr, providerResultCount, maxResults);
+          }
+
+          const searchResults = fusionResult.results.map((f) => f.result);
+          const text = formatFusionOutput(
+            searchResults,
+            fusionResult.degraded,
+            fusionResult.providersUsed.length,
+            params.compact ?? false,
+          );
+
+          return {
+            content: [{ type: "text" as const, text }],
+            details: {
+              provider: "fusion",
+              resultCount: fusionResult.results.length,
+              fusionMeta: {
+                providersUsed: fusionResult.providersUsed,
+                degraded: fusionResult.degraded,
+                results: fusionResult.results.map((f) => ({
+                  url: f.result.url,
+                  providers: f.providers,
+                })),
+              },
+            },
+          };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          return {
+            content: [{ type: "text" as const, text: `Search error: ${msg}` }],
+            details: { provider: "none", resultCount: 0 },
+          };
+        }
+      }
+
+      // Fallback path
       try {
         const { result: results, providerName } = await executeWithFallback({
           candidates: candidates.map((provider) => ({
@@ -167,13 +251,30 @@ export function createWebSearchTool(
       }
       const count = result.details?.resultCount ?? 0;
       const provider = result.details?.provider ?? "unknown";
+
+      const meta = result.details?.fusionMeta;
+      const label = meta
+        ? `${count} results fused${meta.degraded ? " (degraded)" : ""} from ${meta.providersUsed.join(", ")}`
+        : `${count} results via ${provider}`;
+
       if (options.expanded) {
         const raw =
           result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
-        const lines = raw.split("\n").slice(0, 15);
-        text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));
+
+        if (meta) {
+          const header = theme.fg(meta.degraded ? "warning" : "toolOutput", label);
+          const resultLines = raw.split("\n").slice(0, 15).map((line) => {
+            const match = meta.results.find((r) => line.includes(r.url));
+            if (match) return theme.fg("toolOutput", `${line}  [${match.providers.join(", ")}]`);
+            return theme.fg("toolOutput", line);
+          });
+          text.setText([header, ...resultLines].join("\n"));
+        } else {
+          const lines = raw.split("\n").slice(0, 15);
+          text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));
+        }
       } else {
-        text.setText(theme.fg("toolOutput", `${count} results via ${provider}`));
+        text.setText(theme.fg("toolOutput", label));
       }
       return text;
     },

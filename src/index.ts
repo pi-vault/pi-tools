@@ -44,9 +44,15 @@ export default function createExtension(pi: ExtensionAPI): void {
     }
   });
 
-  const resolveCandidates = (name?: string) => {
+  const resolveCandidates = (name?: string, combine?: boolean) => {
     configManager.refresh();
     const resolved = name ?? configManager.current.defaultProvider;
+    const combineActive = combine ?? configManager.current.combine.enabled;
+
+    if (combineActive) {
+      return registry.selectSearchForFusion(configManager.current.selectionStrategy, resolved);
+    }
+
     if (configManager.current.selectionStrategy === "best-performing") {
       const provider = registry.selectSearchByPerformance(resolved);
       return provider ? [provider] : [];
@@ -67,6 +73,7 @@ export default function createExtension(pi: ExtensionAPI): void {
       (providerName, resultCount, requestedCount) => {
         registry.recordResultQuality(providerName, resultCount, requestedCount);
       },
+      configManager.current.combine,
     ),
   );
   const fetchCache = new ContentCache(200, 5 * 60_000);
