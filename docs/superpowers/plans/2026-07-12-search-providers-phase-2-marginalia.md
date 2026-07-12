@@ -185,7 +185,7 @@ export const providerMeta: ProviderMeta = {
       method: "GET",
       buildHeaders: (apiKey) => ({
         Accept: "application/json",
-        "Api-Key": apiKey,
+        "API-Key": apiKey,
       }),
       extractResults: parseMarginaliaResults,
     }),
@@ -302,7 +302,7 @@ describe("MarginaliaProvider", () => {
     expect(url).toContain("count=100");
   });
 
-  it("sends Api-Key header", async () => {
+  it("sends API-Key header", async () => {
     fetchStub.addResponse("api2.marginalia-search.com", {
       body: { results: [] },
     });
@@ -310,11 +310,11 @@ describe("MarginaliaProvider", () => {
     await makeProvider("my-api-key").search("test", 5);
 
     const fetchCall = (globalThis.fetch as any).mock.calls[0];
-    expect(fetchCall[1].headers["Api-Key"]).toBe("my-api-key");
+    expect(fetchCall[1].headers["API-Key"]).toBe("my-api-key");
     expect(fetchCall[1].headers["Accept"]).toBe("application/json");
   });
 
-  it("uses 'public' as Api-Key when no key provided", async () => {
+  it("uses 'public' as API-Key when no key provided", async () => {
     fetchStub.addResponse("api2.marginalia-search.com", {
       body: { results: [] },
     });
@@ -322,7 +322,7 @@ describe("MarginaliaProvider", () => {
     await makeProvider().search("test", 5);
 
     const fetchCall = (globalThis.fetch as any).mock.calls[0];
-    expect(fetchCall[1].headers["Api-Key"]).toBe("public");
+    expect(fetchCall[1].headers["API-Key"]).toBe("public");
   });
 
   it("throws on non-200 response", async () => {

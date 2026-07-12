@@ -6,6 +6,7 @@ import { providerMeta as exa } from "./exa.ts";
 import { providerMeta as exaMcp } from "./exa-mcp.ts";
 import { providerMeta as firecrawl } from "./firecrawl.ts";
 import { providerMeta as jina } from "./jina.ts";
+import { providerMeta as marginalia } from "./marginalia.ts";
 import { providerMeta as openaiNative } from "./openai-native.ts";
 import { providerMeta as parallel } from "./parallel.ts";
 import { providerMeta as perplexity } from "./perplexity.ts";
@@ -22,6 +23,7 @@ export const allProviders: ProviderMeta[] = [
   exaMcp,
   firecrawl,
   jina,
+  marginalia,
   openaiNative,
   parallel,
   perplexity,
