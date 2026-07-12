@@ -10,6 +10,10 @@
 
 **Parent plan:** `docs/superpowers/plans/2026-07-12-search-providers.md`
 
+**Reference implementations:**
+- `ronnieops-pi-search-hub/extensions/credentials.ts` — `resolveConfigValue`, `resolveBackendKey`, `FALLBACK_ENV_MAP`
+- `pi/packages/coding-agent/src/core/resolve-config-value.ts` — command caching pattern
+
 ---
 
 ## Task 1 — Write failing tests for credential caching and safety checks
@@ -20,16 +24,24 @@
 
 ### Steps
 
-- [ ] **1.1** Add the following test block at the end of `tests/config.test.ts`:
+- [ ] **1.1** Update the import block at the top of `tests/config.test.ts` to include new exports. Replace the existing import from `../src/config.ts`:
 
 ```typescript
-// --- Phase 1: Credential caching, safety checks, resolveProviderKey ---
-
 import {
+  loadConfig,
+  resolveApiKey,
   clearCredentialCache,
   resolveProviderKey,
   FALLBACK_ENV_MAP,
+  findProjectConfigPath,
+  loadMergedConfig,
 } from "../src/config.ts";
+```
+
+- [ ] **1.2** Add the `node:child_process` mock immediately after the existing `vi.mock("node:fs")` on line 11:
+
+```typescript
+vi.mock("node:fs");
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
@@ -40,6 +52,33 @@ vi.mock("node:child_process", async (importOriginal) => {
 });
 
 import { execSync } from "node:child_process";
+```
+
+**Note:** `vi.mock` is hoisted by Vitest regardless of placement. The spy wraps the real `execSync` implementation — existing tests that call `resolveApiKey("!echo test-key")` continue to work because the spy delegates to the real function when no mock return value is configured.
+
+- [ ] **1.3** Update the existing `describe("resolveApiKey")` block to clear the credential cache in `beforeEach`, preventing cache leakage between tests:
+
+```typescript
+describe("resolveApiKey", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    clearCredentialCache();
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  // ... existing tests unchanged ...
+});
+```
+
+- [ ] **1.4** Add the following test blocks at the end of `tests/config.test.ts`:
+
+```typescript
+// --- Phase 1: Credential caching, safety checks, resolveProviderKey ---
 
 describe("resolveApiKey — shell command caching", () => {
   beforeEach(() => {
@@ -94,7 +133,6 @@ describe("resolveApiKey — safety checks", () => {
   });
 
   it('returns undefined for "NONE" (case-insensitive)', () => {
-    // "NONE" matches ENV_VAR_PATTERN but should still be caught by safety check
     expect(resolveApiKey("NONE")).toBeUndefined();
   });
 });
@@ -220,7 +258,7 @@ describe("FALLBACK_ENV_MAP", () => {
 });
 ```
 
-- [ ] **1.2** Run tests to confirm they fail (exports don't exist yet):
+- [ ] **1.5** Run tests to confirm they fail (exports don't exist yet):
 
 ```bash
 pnpm vitest run tests/config.test.ts
@@ -238,7 +276,7 @@ Expected: Compilation/import errors — `clearCredentialCache`, `resolveProvider
 
 ### Steps
 
-- [ ] **2.1** Add the command value cache and `clearCredentialCache` export after line 61 (after `SHELL_TIMEOUT_MS`):
+- [ ] **2.1** Add the sentinel set, command cache, and `clearCredentialCache` export after `SHELL_TIMEOUT_MS` (after line 61, before `DEFAULT_GITHUB_CONFIG`):
 
 ```typescript
 const SENTINEL_VALUES = new Set(["null", "undefined", "none"]);
@@ -324,9 +362,20 @@ export function resolveApiKey(apiKey: string | undefined): string | undefined {
 }
 ```
 
-- [ ] **2.4** Add the `resolveProviderKey` function after `resolveApiKey`:
+- [ ] **2.4** Add the `resolveProviderKey` function immediately after `resolveApiKey`:
 
 ```typescript
+/**
+ * Resolve an API key for a named provider.
+ *
+ * Resolution order:
+ * 1. Explicit config key (passed through resolveApiKey)
+ * 2. Fallback env var from FALLBACK_ENV_MAP
+ *
+ * Note: When configKey is an unset env var, resolveApiKey will log a warning
+ * before falling through to the fallback. This is acceptable — the warning
+ * helps users notice misconfigurations even when a fallback exists.
+ */
 export function resolveProviderKey(
   providerName: string,
   configKey?: string,
@@ -352,7 +401,7 @@ export function resolveProviderKey(
 pnpm vitest run tests/config.test.ts
 ```
 
-Expected: All tests pass including the new Phase 1 tests.
+Expected: All tests pass including the new Phase 1 tests and all existing tests.
 
 ---
 
@@ -367,14 +416,10 @@ Expected: All tests pass including the new Phase 1 tests.
 - [ ] **3.1** Update the import from `config.ts` to include `clearCredentialCache`:
 
 ```typescript
-import {
-  loadMergedConfig,
-  resolveApiKey,
-  clearCredentialCache,
-} from "./config.ts";
+import { loadMergedConfig, resolveApiKey, clearCredentialCache } from "./config.ts";
 ```
 
-- [ ] **3.2** Add `clearCredentialCache()` call at the start of the `refresh()` method body, before `loadMergedConfig`:
+- [ ] **3.2** Add `clearCredentialCache()` call at the start of the `refresh()` method body, after the TTL guard but before `loadMergedConfig`:
 
 ```typescript
   refresh(force = false): void {
@@ -453,8 +498,42 @@ Phase 1 of search providers expansion:
 - Safety: reject 'null', 'undefined', 'none' sentinel values
 - Warning: log when ALL_CAPS env var reference is unset
 - Wire clearCredentialCache() into ConfigManager.refresh()
-- Add comprehensive tests for all new behavior"
+- Add comprehensive tests for all new behavior
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>"
 ```
+
+---
+
+## Implementation Notes
+
+### vi.mock hoisting safety
+
+The `vi.mock("node:child_process")` is hoisted to file-level scope and wraps `execSync` with `vi.fn(actual.execSync)`. This is safe for existing tests because:
+
+1. The spy **delegates to real `execSync`** when no mock override is active
+2. Only the caching tests call `mockReturnValue()`/`mockImplementation()` in their `beforeEach`
+3. Those tests call `mockRestore()` in `afterEach`, which restores the spy to its original implementation (the real `execSync` passed to `vi.fn()` in the factory)
+4. The existing `resolveApiKey("!echo test-key")` test runs before the caching tests and uses the real shell
+
+### Caching and test isolation
+
+With caching added to `resolveApiKey`, the existing `resolveApiKey` describe block must call `clearCredentialCache()` in its `beforeEach` to prevent cross-test cache pollution. Without this, a cached shell command result from one test could leak into another.
+
+### Known limitation: warning on fallback path
+
+When `resolveProviderKey("exa", "NONEXISTENT_KEY")` is called and `NONEXISTENT_KEY` is unset, `resolveApiKey` logs a warning before `resolveProviderKey` tries the fallback. This is acceptable — the warning helps users notice typos in their config even when a fallback exists. Suppressing it would require changing `resolveApiKey`'s signature (adding a `quiet` flag), which is out of scope for Phase 1.
+
+### Design decisions diverging from pi-search-hub
+
+| Topic | pi-search-hub | This plan | Rationale |
+|-------|--------------|-----------|-----------|
+| Env var naming | `SEARCH_BRAVE_API_KEY` (namespaced) | `BRAVE_API_KEY` (standard) | More user-friendly for standalone tool |
+| Shell error handling | Throws (caches error, re-throws) | Returns `undefined` (caches error) | Matches existing pi-tools behavior |
+| Auto-enable from env | Auto-registers providers if env set | Not implemented (Phase 2+) | Default config already lists all providers |
+| Sentinel check order | After env var lookup | Before env var lookup | Catches `"NONE"` safely |
 
 ---
 
@@ -464,4 +543,4 @@ Phase 1 of search providers expansion:
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/config.ts`         | Add `SENTINEL_VALUES`, `commandValueCache`, `clearCredentialCache()`, `FALLBACK_ENV_MAP`, safety checks in `resolveApiKey`, env-var warning, caching in shell branch, `resolveProviderKey()` |
 | `src/config-manager.ts` | Import `clearCredentialCache`, call it in `refresh()`                                                                                                                                        |
-| `tests/config.test.ts`  | Add tests for caching, cache clearing, safety checks, env-var warnings, `resolveProviderKey`, `FALLBACK_ENV_MAP`                                                                             |
+| `tests/config.test.ts`  | Add `node:child_process` mock at top, update imports, add `clearCredentialCache()` to existing tests, add new test blocks for caching, safety, warnings, `resolveProviderKey`, `FALLBACK_ENV_MAP` |

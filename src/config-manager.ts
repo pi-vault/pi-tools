@@ -1,5 +1,5 @@
 import type { PiToolsConfig, ProviderConfigEntry } from "./config.ts";
-import { loadMergedConfig, resolveApiKey } from "./config.ts";
+import { loadMergedConfig, resolveApiKey, clearCredentialCache } from "./config.ts";
 import type { ProviderRegistry } from "./providers/registry.ts";
 import type { ProviderMeta } from "./providers/types.ts";
 
@@ -76,6 +76,8 @@ export class ConfigManager {
   refresh(force = false): void {
     const now = Date.now();
     if (!force && now - this.cacheTime < CONFIG_TTL_MS) return;
+
+    clearCredentialCache();
 
     let nextConfig: PiToolsConfig;
     try {

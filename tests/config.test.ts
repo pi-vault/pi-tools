@@ -3,12 +3,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   loadConfig,
   resolveApiKey,
+  clearCredentialCache,
+  resolveProviderKey,
+  FALLBACK_ENV_MAP,
   findProjectConfigPath,
   loadMergedConfig,
 } from "../src/config.ts";
 import * as path from "node:path";
 
 vi.mock("node:fs");
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    execSync: vi.fn(actual.execSync),
+  };
+});
+
+import { execSync } from "node:child_process";
 
 describe("loadConfig", () => {
   beforeEach(() => {
@@ -90,6 +103,7 @@ describe("resolveApiKey", () => {
 
   beforeEach(() => {
     process.env = { ...originalEnv };
+    clearCredentialCache();
   });
 
   afterEach(() => {
@@ -531,5 +545,185 @@ describe("CombineConfig", () => {
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ combine: { enabled: "yes" } }));
     const config = loadConfig();
     expect(config.combine.enabled).toBe(false); // default
+  });
+});
+
+// --- Phase 1: Credential caching, safety checks, resolveProviderKey ---
+
+describe("resolveApiKey — shell command caching", () => {
+  beforeEach(() => {
+    vi.mocked(execSync).mockClear();
+    vi.mocked(execSync).mockReturnValue("cached-secret\n");
+    clearCredentialCache();
+  });
+
+  afterEach(() => {
+    vi.mocked(execSync).mockRestore();
+  });
+
+  it("caches shell command results (execSync called only once for same command)", () => {
+    const result1 = resolveApiKey("!echo cached-secret");
+    const result2 = resolveApiKey("!echo cached-secret");
+    expect(result1).toBe("cached-secret");
+    expect(result2).toBe("cached-secret");
+    expect(vi.mocked(execSync)).toHaveBeenCalledTimes(1);
+  });
+
+  it("clearCredentialCache causes re-execution on next call", () => {
+    resolveApiKey("!echo cached-secret");
+    expect(vi.mocked(execSync)).toHaveBeenCalledTimes(1);
+
+    clearCredentialCache();
+    resolveApiKey("!echo cached-secret");
+    expect(vi.mocked(execSync)).toHaveBeenCalledTimes(2);
+  });
+
+  it("caches errors — does not retry failed commands", () => {
+    vi.mocked(execSync).mockImplementation(() => {
+      throw new Error("command failed");
+    });
+    const result1 = resolveApiKey("!bad-command");
+    const result2 = resolveApiKey("!bad-command");
+    expect(result1).toBeUndefined();
+    expect(result2).toBeUndefined();
+    expect(vi.mocked(execSync)).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("resolveApiKey — safety checks", () => {
+  it('returns undefined for "null"', () => {
+    expect(resolveApiKey("null")).toBeUndefined();
+  });
+
+  it('returns undefined for "undefined"', () => {
+    expect(resolveApiKey("undefined")).toBeUndefined();
+  });
+
+  it('returns undefined for "none"', () => {
+    expect(resolveApiKey("none")).toBeUndefined();
+  });
+
+  it('returns undefined for "NONE" (case-insensitive)', () => {
+    expect(resolveApiKey("NONE")).toBeUndefined();
+  });
+});
+
+describe("resolveApiKey — env var warning", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    vi.mocked(console.warn).mockRestore();
+  });
+
+  it("logs warning when ALL_CAPS env var is not set", () => {
+    delete process.env.MISSING_PROVIDER_KEY;
+    resolveApiKey("MISSING_PROVIDER_KEY");
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining("MISSING_PROVIDER_KEY"),
+    );
+  });
+
+  it("does not warn when env var is set", () => {
+    process.env.BRAVE_API_KEY = "some-value";
+    resolveApiKey("BRAVE_API_KEY");
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveProviderKey", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    clearCredentialCache();
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it("resolves config key when provided and valid", () => {
+    process.env.MY_CUSTOM_KEY = "custom-value";
+    const result = resolveProviderKey("brave", "MY_CUSTOM_KEY");
+    expect(result).toBe("custom-value");
+  });
+
+  it("config key takes priority over fallback env", () => {
+    process.env.MY_CUSTOM_KEY = "custom-value";
+    process.env.BRAVE_API_KEY = "fallback-value";
+    const result = resolveProviderKey("brave", "MY_CUSTOM_KEY");
+    expect(result).toBe("custom-value");
+  });
+
+  it("falls back to FALLBACK_ENV_MAP when config key is undefined", () => {
+    process.env.BRAVE_API_KEY = "fallback-value";
+    const result = resolveProviderKey("brave", undefined);
+    expect(result).toBe("fallback-value");
+  });
+
+  it("falls back to FALLBACK_ENV_MAP when config key does not resolve", () => {
+    delete process.env.NONEXISTENT_KEY;
+    process.env.EXA_API_KEY = "exa-fallback";
+    const result = resolveProviderKey("exa", "NONEXISTENT_KEY");
+    expect(result).toBe("exa-fallback");
+  });
+
+  it("returns undefined when neither config key nor fallback resolves", () => {
+    delete process.env.BRAVE_API_KEY;
+    const result = resolveProviderKey("brave", undefined);
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined for unknown provider with no config key", () => {
+    const result = resolveProviderKey("unknown-provider", undefined);
+    expect(result).toBeUndefined();
+  });
+
+  it("ignores empty/whitespace fallback env values", () => {
+    process.env.BRAVE_API_KEY = "   ";
+    const result = resolveProviderKey("brave", undefined);
+    expect(result).toBeUndefined();
+  });
+});
+
+describe("FALLBACK_ENV_MAP", () => {
+  it("contains expected provider mappings", () => {
+    expect(FALLBACK_ENV_MAP.brave).toBe("BRAVE_API_KEY");
+    expect(FALLBACK_ENV_MAP.exa).toBe("EXA_API_KEY");
+    expect(FALLBACK_ENV_MAP.tavily).toBe("TAVILY_API_KEY");
+    expect(FALLBACK_ENV_MAP["openai-native"]).toBe("OPENAI_API_KEY");
+    expect(FALLBACK_ENV_MAP["openai-codex"]).toBe("OPENAI_API_KEY");
+  });
+
+  it("maps all expected providers", () => {
+    const expected = [
+      "brave",
+      "exa",
+      "jina",
+      "tavily",
+      "serper",
+      "firecrawl",
+      "perplexity",
+      "langsearch",
+      "linkup",
+      "youcom",
+      "fastcrw",
+      "sofya",
+      "websearchapi",
+      "marginalia",
+      "context7",
+      "parallel",
+      "openai-native",
+      "openai-codex",
+    ];
+    for (const name of expected) {
+      expect(FALLBACK_ENV_MAP[name]).toBeDefined();
+    }
   });
 });

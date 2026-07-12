@@ -60,6 +60,38 @@ const ENV_VAR_PATTERN = /^[A-Z][A-Z0-9_]+$/;
 const SHELL_CMD_PREFIX = "!";
 const SHELL_TIMEOUT_MS = 5000;
 
+const SENTINEL_VALUES = new Set(["null", "undefined", "none"]);
+
+const commandValueCache = new Map<
+  string,
+  { value?: string; errorMessage?: string }
+>();
+
+export function clearCredentialCache(): void {
+  commandValueCache.clear();
+}
+
+export const FALLBACK_ENV_MAP: Record<string, string> = {
+  brave: "BRAVE_API_KEY",
+  exa: "EXA_API_KEY",
+  jina: "JINA_API_KEY",
+  tavily: "TAVILY_API_KEY",
+  serper: "SERPER_API_KEY",
+  firecrawl: "FIRECRAWL_API_KEY",
+  perplexity: "PERPLEXITY_API_KEY",
+  langsearch: "LANGSEARCH_API_KEY",
+  linkup: "LINKUP_API_KEY",
+  youcom: "YOUCOM_API_KEY",
+  fastcrw: "FASTCRW_API_KEY",
+  sofya: "SOFYA_API_KEY",
+  websearchapi: "WEBSEARCHAPI_API_KEY",
+  marginalia: "MARGINALIA_API_KEY",
+  context7: "CONTEXT7_API_KEY",
+  parallel: "PARALLEL_API_KEY",
+  "openai-native": "OPENAI_API_KEY",
+  "openai-codex": "OPENAI_API_KEY",
+};
+
 export const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
   enabled: true,
   maxRepoSizeMB: 350,
@@ -208,26 +240,72 @@ export function loadConfig(configPath?: string): PiToolsConfig {
 export function resolveApiKey(apiKey: string | undefined): string | undefined {
   if (!apiKey) return undefined;
 
+  // Safety check: reject sentinel string values
+  if (SENTINEL_VALUES.has(apiKey.toLowerCase())) return undefined;
+
   // Shell command: starts with !
   if (apiKey.startsWith(SHELL_CMD_PREFIX)) {
+    const cmd = apiKey.slice(SHELL_CMD_PREFIX.length);
+    const cached = commandValueCache.get(cmd);
+    if (cached !== undefined) {
+      return cached.value;
+    }
     try {
-      const cmd = apiKey.slice(SHELL_CMD_PREFIX.length);
-      return execSync(cmd, {
+      const value = execSync(cmd, {
         timeout: SHELL_TIMEOUT_MS,
         encoding: "utf-8",
       }).trim();
-    } catch {
+      commandValueCache.set(cmd, { value });
+      return value;
+    } catch (e) {
+      const errorMessage = e instanceof Error ? e.message : "unknown error";
+      commandValueCache.set(cmd, { errorMessage });
       return undefined;
     }
   }
 
   // Env var name: all uppercase with underscores
   if (ENV_VAR_PATTERN.test(apiKey)) {
-    return process.env[apiKey] ?? undefined;
+    const value = process.env[apiKey] ?? undefined;
+    if (!value) {
+      console.warn(
+        `[pi-tools] Environment variable ${apiKey} is referenced but not set`,
+      );
+    }
+    return value;
   }
 
   // Literal key value
   return apiKey;
+}
+
+/**
+ * Resolve an API key for a named provider.
+ *
+ * Resolution order:
+ * 1. Explicit config key (passed through resolveApiKey)
+ * 2. Fallback env var from FALLBACK_ENV_MAP
+ *
+ * Note: When configKey is an unset env var, resolveApiKey will log a warning
+ * before falling through to the fallback. This is acceptable — the warning
+ * helps users notice misconfigurations even when a fallback exists.
+ */
+export function resolveProviderKey(
+  providerName: string,
+  configKey?: string,
+): string | undefined {
+  if (configKey) {
+    const resolved = resolveApiKey(configKey);
+    if (resolved) return resolved;
+  }
+
+  const fallbackEnv = FALLBACK_ENV_MAP[providerName];
+  if (fallbackEnv) {
+    const envValue = process.env[fallbackEnv];
+    if (envValue && envValue.trim().length > 0) return envValue.trim();
+  }
+
+  return undefined;
 }
 
 const MAX_WALK_DEPTH = 10;
