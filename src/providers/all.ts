@@ -16,6 +16,7 @@ import { providerMeta as parallel } from "./parallel.ts";
 import { providerMeta as perplexity } from "./perplexity.ts";
 import { providerMeta as searxng } from "./searxng.ts";
 import { providerMeta as serper } from "./serper.ts";
+import { providerMeta as sofya } from "./sofya.ts";
 import { providerMeta as tavily } from "./tavily.ts";
 import { providerMeta as websearchapi } from "./websearchapi.ts";
 import { providerMeta as youcom } from "./youcom.ts";
@@ -38,6 +39,7 @@ export const allProviders: ProviderMeta[] = [
   perplexity,
   searxng,
   serper,
+  sofya,
   tavily,
   websearchapi,
   youcom,

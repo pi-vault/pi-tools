@@ -89,6 +89,22 @@ export function parseYouComResults(data: unknown): SearchResult[] {
   });
 }
 
+export function parseSofyaResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as { results?: unknown[] };
+  const results = Array.isArray(d.results) ? d.results : [];
+  return results.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    const content =
+      (item.content as string) || (item.description as string) || "";
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.description as string) || content).slice(0, 500),
+    };
+  });
+}
+
 export function parseLangSearchResults(data: unknown): SearchResult[] {
   if (!data || typeof data !== "object") return [];
   const d = data as Record<string, unknown>;
