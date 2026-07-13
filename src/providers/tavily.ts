@@ -7,6 +7,7 @@ import type {
   SearchProvider,
   SearchResult,
 } from "./types.ts";
+import { parseTavilyResults } from "./parsers.ts";
 
 interface TavilySearchResponse {
   results: Array<{ title: string; url: string; content: string }>;
@@ -53,12 +54,8 @@ export class TavilyProvider implements SearchProvider, FetchProvider {
     });
     if (!response.ok)
       throw new Error(`Tavily API error: ${response.status} ${response.statusText}`);
-    const data = (await response.json()) as TavilySearchResponse;
-    return (data.results ?? []).slice(0, maxResults).map((r) => ({
-      title: r.title,
-      url: r.url,
-      snippet: r.content,
-    }));
+    const data: unknown = await response.json();
+    return parseTavilyResults(data).slice(0, maxResults);
   }
 
   async fetch(url: string, signal?: AbortSignal): Promise<FetchResult> {
