@@ -1,4 +1,5 @@
 import { createHttpSearchProvider } from "./http-adapter.ts";
+import { parseWebSearchApiResults } from "./parsers.ts";
 import type { ProviderMeta } from "./types.ts";
 
 export const providerMeta: ProviderMeta = {
@@ -14,14 +15,7 @@ export const providerMeta: ProviderMeta = {
       method: "POST",
       authPrefix: "Bearer ",
       buildBody: (query, maxResults) => ({ query, maxResults }),
-      extractResults: (data) => {
-        const d = data as { organic?: Array<{ title: string; url: string; description: string }> };
-        return (d.organic ?? []).map((r) => ({
-          title: r.title,
-          url: r.url,
-          snippet: r.description,
-        }));
-      },
+      extractResults: parseWebSearchApiResults,
     }),
   }),
 };

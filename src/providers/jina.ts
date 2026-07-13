@@ -7,14 +7,7 @@ import type {
   SearchProvider,
   SearchResult,
 } from "./types.ts";
-
-interface JinaSearchResponse {
-  data: Array<{
-    title: string;
-    url: string;
-    description: string;
-  }>;
-}
+import { parseJinaResults } from "./parsers.ts";
 
 export class JinaProvider implements SearchProvider, FetchProvider {
   readonly name = "jina";
@@ -51,12 +44,8 @@ export class JinaProvider implements SearchProvider, FetchProvider {
       throw new Error(`Jina search error: ${response.status} ${response.statusText}`);
     }
 
-    const data = (await response.json()) as JinaSearchResponse;
-    return (data.data ?? []).slice(0, maxResults).map((item) => ({
-      title: item.title,
-      url: item.url,
-      snippet: item.description,
-    }));
+    const data: unknown = await response.json();
+    return parseJinaResults(data).slice(0, maxResults);
   }
 
   async fetch(url: string, signal?: AbortSignal): Promise<FetchResult> {

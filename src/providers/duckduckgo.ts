@@ -5,12 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 import { applyDomainFilters } from "../utils/filters.ts";
-
-interface DDGSResult {
-  title: string;
-  href: string;
-  body: string;
-}
+import { parseDuckDuckGoResults } from "./parsers.ts";
 
 // Narrow type covering only the execFile overload we actually call.
 // Using typeof defaultExecFile would require __promisify__, making mocks complex.
@@ -59,20 +54,15 @@ export class DuckDuckGoProvider implements SearchProvider {
         throw new Error("Failed to parse ddgs output: output file not created");
       }
 
-      let data: DDGSResult[];
+      let data: unknown;
       try {
-        const parsed: unknown = JSON.parse(raw);
-        if (!Array.isArray(parsed)) throw new Error("not an array");
-        data = parsed as DDGSResult[];
+        data = JSON.parse(raw);
+        if (!Array.isArray(data)) throw new Error("not an array");
       } catch {
         throw new Error("Failed to parse ddgs output: malformed JSON");
       }
 
-      return data.slice(0, maxResults).map((r) => ({
-        title: r.title,
-        url: r.href,
-        snippet: r.body,
-      }));
+      return parseDuckDuckGoResults(data).slice(0, maxResults);
     } finally {
       await fs.unlink(tmpFile).catch(() => {});
     }

@@ -9,6 +9,7 @@ import type {
   SearchProvider,
   SearchResult,
 } from "./types.ts";
+import { parseExaResults } from "./parsers.ts";
 
 interface ExaSearchResponse {
   results: Array<{ title: string; url: string; text?: string }>;
@@ -67,12 +68,8 @@ export class ExaProvider implements SearchProvider, FetchProvider, CodeSearchPro
       signal,
     });
     if (!response.ok) throw new Error(`Exa API error: ${response.status} ${response.statusText}`);
-    const data = (await response.json()) as ExaSearchResponse;
-    return (data.results ?? []).slice(0, maxResults).map((r) => ({
-      title: r.title,
-      url: r.url,
-      snippet: r.text ?? "",
-    }));
+    const data: unknown = await response.json();
+    return parseExaResults(data).slice(0, maxResults);
   }
 
   async codeSearch(

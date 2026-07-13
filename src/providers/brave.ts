@@ -1,5 +1,6 @@
 import { createHttpSearchProvider } from "./http-adapter.ts";
 import { applyDomainFilters } from "../utils/filters.ts";
+import { parseBraveResults } from "./parsers.ts";
 import type { ProviderMeta, SearchFilters } from "./types.ts";
 
 function buildFreshness(filters?: SearchFilters): string | null {
@@ -31,16 +32,7 @@ export const providerMeta: ProviderMeta = {
         Accept: "application/json",
         "X-Subscription-Token": apiKey,
       }),
-      extractResults: (data) => {
-        const d = data as {
-          web?: { results: Array<{ title: string; url: string; description: string }> };
-        };
-        return (d.web?.results ?? []).map((r) => ({
-          title: r.title,
-          url: r.url,
-          snippet: r.description,
-        }));
-      },
+      extractResults: parseBraveResults,
     }),
   }),
 };

@@ -1,5 +1,6 @@
 import { createHttpSearchProvider } from "./http-adapter.ts";
 import { applyDomainFilters } from "../utils/filters.ts";
+import { parseSerperResults } from "./parsers.ts";
 import type { ProviderMeta, SearchFilters } from "./types.ts";
 
 /** Converts "YYYY-MM-DD" to "MM/DD/YYYY" for Google's tbs format. */
@@ -41,14 +42,7 @@ export const providerMeta: ProviderMeta = {
         if (tbs) body.tbs = tbs;
         return body;
       },
-      extractResults: (data) => {
-        const d = data as { organic?: Array<{ title: string; link: string; snippet: string }> };
-        return (d.organic ?? []).map((r) => ({
-          title: r.title,
-          url: r.link,
-          snippet: r.snippet,
-        }));
-      },
+      extractResults: parseSerperResults,
     }),
   }),
 };

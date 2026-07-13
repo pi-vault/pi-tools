@@ -103,6 +103,121 @@ export function parseSofyaResults(data: unknown): SearchResult[] {
   });
 }
 
+export function parseOpenAINativeResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const output = d.output;
+  if (!Array.isArray(output)) return [];
+
+  const messageOutput = output.find(
+    (item: unknown) =>
+      item && typeof item === "object" && (item as Record<string, unknown>).type === "message",
+  ) as Record<string, unknown> | undefined;
+  if (!messageOutput) return [];
+
+  const content = messageOutput.content;
+  if (!Array.isArray(content)) return [];
+
+  const textContent = content.find(
+    (c: unknown) =>
+      c && typeof c === "object" && (c as Record<string, unknown>).type === "output_text",
+  ) as Record<string, unknown> | undefined;
+  if (!textContent) return [];
+
+  const annotations = textContent.annotations;
+  if (!Array.isArray(annotations) || annotations.length === 0) return [];
+
+  const seen = new Set<string>();
+  const results: SearchResult[] = [];
+  for (const ann of annotations) {
+    if (!ann || typeof ann !== "object") continue;
+    const a = ann as Record<string, unknown>;
+    if (a.type !== "url_citation") continue;
+    const url = (a.url as string) || "";
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    results.push({ title: (a.title as string) || "", url, snippet: "" });
+  }
+  return results;
+}
+
+export function parsePerplexityResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const choices = d.choices as Array<Record<string, unknown>> | undefined;
+  const message = choices?.[0]?.message as Record<string, unknown> | undefined;
+  const answer = (message?.content as string) || "";
+  const citations = Array.isArray(d.citations) ? (d.citations as string[]) : [];
+  if (!answer) return [];
+  return [
+    { title: "Perplexity Answer", url: "", snippet: answer.slice(0, 500) },
+    ...citations.map((url) => ({
+      title: (url as string) || "",
+      url: (url as string) || "",
+      snippet: "",
+    })),
+  ];
+}
+
+export function parseWebSearchApiResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = d.organic;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.description as string) || "").slice(0, 500),
+    };
+  });
+}
+
+export function parseSerperResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = d.organic;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.link as string) || "",
+      snippet: ((item.snippet as string) || "").slice(0, 500),
+    };
+  });
+}
+
+export function parseDuckDuckGoResults(data: unknown): SearchResult[] {
+  if (!Array.isArray(data)) return [];
+  return data.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.href as string) || "",
+      snippet: ((item.body as string) || "").slice(0, 500),
+    };
+  });
+}
+
+export function parseBraveResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const web = d.web;
+  if (!web || typeof web !== "object") return [];
+  const rawResults = (web as Record<string, unknown>).results;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.description as string) || "").slice(0, 500),
+    };
+  });
+}
+
 export function parseLangSearchResults(data: unknown): SearchResult[] {
   if (!data || typeof data !== "object") return [];
   const d = data as Record<string, unknown>;
@@ -118,3 +233,68 @@ export function parseLangSearchResults(data: unknown): SearchResult[] {
     };
   });
 }
+
+export function parseExaResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = d.results;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.text as string) || "").slice(0, 500),
+    };
+  });
+}
+
+export function parseFirecrawlResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawData = d.data;
+  if (!Array.isArray(rawData)) return [];
+  return rawData.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    const description = (item.description as string) || "";
+    const markdown = (item.markdown as string) || "";
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: (description || markdown.slice(0, 200)).slice(0, 500),
+    };
+  });
+}
+
+export function parseJinaResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawData = d.data;
+  if (!Array.isArray(rawData)) return [];
+  return rawData.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.description as string) || "").slice(0, 500),
+    };
+  });
+}
+
+export function parseTavilyResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = d.results;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.content as string) || "").slice(0, 500),
+    };
+  });
+}
+
+// SearXNG response shape is identical to Tavily (results[].title/url/content)
+export const parseSearxngResults = parseTavilyResults;
