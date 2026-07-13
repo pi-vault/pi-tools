@@ -196,8 +196,19 @@ export class ProviderRegistry {
 
   recordOutcome(providerName: string, result: { success: boolean; latencyMs?: number }): void {
     // Increment usage count (both success and failure count as a "use")
-    this.counts[providerName] = (this.counts[providerName] ?? 0) + 1;
+    const prevCount = this.counts[providerName] ?? 0;
+    this.counts[providerName] = prevCount + 1;
     this.saveUsage();
+
+    // Emit quota warning when crossing the threshold
+    const reg = this.searchProviders.get(providerName);
+    if (reg?.monthlyQuota !== null && reg?.monthlyQuota !== undefined) {
+      const threshold = Math.floor(reg.monthlyQuota * ProviderRegistry.QUOTA_WARN_RATIO);
+      if (prevCount < threshold && this.counts[providerName] >= threshold) {
+        const warning = this.getQuotaWarning(providerName);
+        if (warning) console.warn(warning);
+      }
+    }
 
     // Update performance metrics (with rolling window)
     const m = this.getOrCreateMetrics(providerName);
@@ -300,6 +311,28 @@ export class ProviderRegistry {
 
   getSearchProviderNames(): string[] {
     return [...this.searchProviders.keys()];
+  }
+
+  private static readonly QUOTA_WARN_RATIO = 0.8;
+
+  /**
+   * Returns a warning string if a provider's usage is approaching its monthly quota.
+   * Returns null if no warning is needed (no quota, below threshold, or unknown provider).
+   */
+  getQuotaWarning(providerName: string): string | null {
+    const reg = this.searchProviders.get(providerName);
+    if (!reg || reg.monthlyQuota === null) return null;
+
+    const used = this.counts[providerName] ?? 0;
+    const threshold = Math.floor(reg.monthlyQuota * ProviderRegistry.QUOTA_WARN_RATIO);
+
+    if (used < threshold) return null;
+
+    const remaining = reg.monthlyQuota - used;
+    if (remaining <= 0) {
+      return `[pi-tools] ${providerName}: monthly quota exhausted (${used}/${reg.monthlyQuota}).`;
+    }
+    return `[pi-tools] ${providerName}: monthly usage at ${used}/${reg.monthlyQuota} (${remaining} remaining).`;
   }
 
   getMetrics(providerName: string): ProviderMetrics | undefined {
