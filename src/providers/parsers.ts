@@ -52,6 +52,24 @@ export function parseLinkupResults(data: unknown): SearchResult[] {
   });
 }
 
+export function parseYouComResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawHits = (d.hits ?? d.results) as unknown[];
+  if (!Array.isArray(rawHits)) return [];
+  return rawHits.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    const snippets = Array.isArray(item.snippets)
+      ? (item.snippets as string[]).join(" ")
+      : "";
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.description as string) || snippets || "").slice(0, 500),
+    };
+  });
+}
+
 export function parseLangSearchResults(data: unknown): SearchResult[] {
   if (!data || typeof data !== "object") return [];
   const d = data as Record<string, unknown>;

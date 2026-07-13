@@ -17,6 +17,7 @@ import { providerMeta as searxng } from "./searxng.ts";
 import { providerMeta as serper } from "./serper.ts";
 import { providerMeta as tavily } from "./tavily.ts";
 import { providerMeta as websearchapi } from "./websearchapi.ts";
+import { providerMeta as youcom } from "./youcom.ts";
 
 export const allProviders: ProviderMeta[] = [
   brave,
@@ -37,4 +38,5 @@ export const allProviders: ProviderMeta[] = [
   serper,
   tavily,
   websearchapi,
+  youcom,
 ];
