@@ -9,10 +9,6 @@ import type {
 } from "./types.ts";
 import { parseFirecrawlResults } from "./parsers.ts";
 
-interface FirecrawlSearchResponse {
-  data: Array<{ title: string; url: string; markdown?: string; description?: string }>;
-}
-
 interface FirecrawlScrapeResponse {
   data: { markdown: string };
 }

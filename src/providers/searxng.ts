@@ -11,14 +11,6 @@ interface SearXNGOptions {
   apiKey?: string;
 }
 
-interface SearXNGSearchResponse {
-  results: Array<{
-    title: string;
-    url: string;
-    content: string;
-  }>;
-}
-
 export class SearXNGProvider implements SearchProvider {
   readonly name = "searxng";
   readonly label = "SearXNG";

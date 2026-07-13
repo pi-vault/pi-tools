@@ -9,10 +9,6 @@ import type {
 } from "./types.ts";
 import { parseTavilyResults } from "./parsers.ts";
 
-interface TavilySearchResponse {
-  results: Array<{ title: string; url: string; content: string }>;
-}
-
 interface TavilyExtractResponse {
   results: Array<{ raw_content: string }>;
 }

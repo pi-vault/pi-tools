@@ -9,14 +9,6 @@ import type {
 } from "./types.ts";
 import { parseJinaResults } from "./parsers.ts";
 
-interface JinaSearchResponse {
-  data: Array<{
-    title: string;
-    url: string;
-    description: string;
-  }>;
-}
-
 export class JinaProvider implements SearchProvider, FetchProvider {
   readonly name = "jina";
   readonly label = "Jina";
