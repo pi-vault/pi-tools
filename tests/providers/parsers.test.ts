@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parseBraveLlmResults,
+  parseBraveResults,
   parseLangSearchResults,
   parseMarginaliaResults,
 } from "../../src/providers/parsers.ts";
@@ -355,5 +356,48 @@ describe("parseBraveLlmResults", () => {
     };
     const results = parseBraveLlmResults(data);
     expect(results[0].snippet).toBe("");
+  });
+});
+
+describe("parseBraveResults", () => {
+  it("extracts results from valid response", () => {
+    const data = {
+      web: {
+        results: [
+          { title: "Brave Result", url: "https://brave.com", description: "A snippet" },
+          { title: "Second", url: "https://example.com", description: "Another" },
+        ],
+      },
+    };
+    const results = parseBraveResults(data);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({
+      title: "Brave Result",
+      url: "https://brave.com",
+      snippet: "A snippet",
+    });
+  });
+
+  it("returns [] for malformed input", () => {
+    expect(parseBraveResults(null)).toEqual([]);
+    expect(parseBraveResults(undefined)).toEqual([]);
+    expect(parseBraveResults({})).toEqual([]);
+    expect(parseBraveResults({ web: {} })).toEqual([]);
+    expect(parseBraveResults({ web: { results: "not-array" } })).toEqual([]);
+  });
+
+  it("truncates snippets to 500 chars", () => {
+    const long = "x".repeat(600);
+    const data = { web: { results: [{ title: "T", url: "http://u", description: long }] } };
+    const results = parseBraveResults(data);
+    expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = { web: { results: [{ title: "Only Title" }, {}] } };
+    const results = parseBraveResults(data);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
   });
 });
