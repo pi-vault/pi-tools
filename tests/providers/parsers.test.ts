@@ -5,6 +5,7 @@ import {
   parseLangSearchResults,
   parseMarginaliaResults,
   parseSerperResults,
+  parseWebSearchApiResults,
 } from "../../src/providers/parsers.ts";
 
 describe("parseMarginaliaResults", () => {
@@ -436,6 +437,44 @@ describe("parseSerperResults", () => {
   it("handles items with missing fields gracefully", () => {
     const data = { organic: [{ title: "Only Title" }, {}] };
     const results = parseSerperResults(data);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
+  });
+});
+
+describe("parseWebSearchApiResults", () => {
+  it("extracts results from valid response", () => {
+    const data = {
+      organic: [
+        { title: "WebSearch Result", url: "https://example.com", description: "Web snippet" },
+      ],
+    };
+    const results = parseWebSearchApiResults(data);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({
+      title: "WebSearch Result",
+      url: "https://example.com",
+      snippet: "Web snippet",
+    });
+  });
+
+  it("returns [] for malformed input", () => {
+    expect(parseWebSearchApiResults(null)).toEqual([]);
+    expect(parseWebSearchApiResults(undefined)).toEqual([]);
+    expect(parseWebSearchApiResults({})).toEqual([]);
+    expect(parseWebSearchApiResults({ organic: "not-array" })).toEqual([]);
+  });
+
+  it("truncates snippets to 500 chars", () => {
+    const long = "z".repeat(600);
+    const data = { organic: [{ title: "T", url: "http://u", description: long }] };
+    const results = parseWebSearchApiResults(data);
+    expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = { organic: [{ title: "Only Title" }, {}] };
+    const results = parseWebSearchApiResults(data);
     expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
     expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
   });
