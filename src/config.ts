@@ -17,6 +17,10 @@ export interface ProviderConfigEntry {
   baseUrl?: string;
   searchDepth?: "snippets" | "basic";
   topic?: "general" | "news";
+  ddgsBackend?: string;
+  ddgsRegion?: string;
+  ddgsTimelimit?: string;
+  model?: string;
 }
 
 export interface GitHubConfig {
