@@ -200,11 +200,14 @@ export class ProviderRegistry {
     this.counts[providerName] = prevCount + 1;
     this.saveUsage();
 
-    // Emit quota warning when crossing the threshold
+    // Emit quota warning when crossing the 80% threshold or exhaustion point
     const reg = this.searchProviders.get(providerName);
     if (reg?.monthlyQuota !== null && reg?.monthlyQuota !== undefined) {
       const threshold = Math.floor(reg.monthlyQuota * ProviderRegistry.QUOTA_WARN_RATIO);
-      if (prevCount < threshold && this.counts[providerName] >= threshold) {
+      if (
+        (prevCount < threshold && this.counts[providerName] >= threshold) ||
+        (prevCount < reg.monthlyQuota && this.counts[providerName] >= reg.monthlyQuota)
+      ) {
         const warning = this.getQuotaWarning(providerName);
         if (warning) console.warn(warning);
       }

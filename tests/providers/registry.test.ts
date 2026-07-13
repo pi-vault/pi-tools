@@ -829,6 +829,24 @@ describe("quota warning", () => {
     warnSpy.mockRestore();
   });
 
+  it("emits console.warn when quota is exhausted via recordOutcome", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    const registry = new ProviderRegistry({
+      load: () => ({ exa: { count: 999, month } }),
+      save: () => {},
+    });
+    const exa = mockProvider("exa", "Exa");
+    registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
+
+    registry.recordOutcome("exa", { success: true, latencyMs: 100 });
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("exhausted"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("1000/1000"));
+
+    warnSpy.mockRestore();
+  });
+
   it("returns null for unknown provider", () => {
     const registry = mem();
     expect(registry.getQuotaWarning("nonexistent")).toBeNull();
