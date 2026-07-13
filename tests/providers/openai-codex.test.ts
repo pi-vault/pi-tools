@@ -4,14 +4,26 @@ import { stubFetch } from "../helpers.ts";
 
 /**
  * Tests for the OpenAI Codex provider, Mode B (Responses API) behavior.
- * Pi packages will fail to dynamically import in test env, so provider
- * falls back to Mode B when a user key is provided.
+ * Pi packages are mocked to return no auth key, forcing Mode B activation
+ * when a user API key is provided.
  */
 describe("OpenAICodexProvider - Mode B (Responses API)", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
 
   beforeEach(() => {
     vi.resetModules();
+
+    // Mock Pi packages: available but no auth key → falls through to Mode B
+    vi.doMock("@earendil-works/pi-ai", () => ({
+      streamOpenAICodexResponses: vi.fn(),
+      getModel: vi.fn(),
+    }));
+    vi.doMock("@earendil-works/pi-coding-agent", () => ({
+      AuthStorage: {
+        create: () => ({ getApiKey: vi.fn().mockResolvedValue(undefined) }),
+      },
+    }));
+
     fetchStub = stubFetch();
   });
 

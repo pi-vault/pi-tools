@@ -36,7 +36,7 @@ describe("allProviders barrel", () => {
       "langsearch",
       "linkup",
       "marginalia",
-      "openai-native",
+      "openai-codex",
       "parallel",
       "perplexity",
       "searxng",
