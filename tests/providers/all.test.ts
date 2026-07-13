@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { allProviders } from "../../src/providers/all.ts";
 
 describe("allProviders barrel", () => {
-  it("exports exactly 16 providers", () => {
-    expect(allProviders).toHaveLength(16);
+  it("exports exactly 17 providers", () => {
+    expect(allProviders).toHaveLength(17);
   });
 
   it("every entry has required ProviderMeta fields", () => {
@@ -25,6 +25,7 @@ describe("allProviders barrel", () => {
     const names = allProviders.map((m) => m.name).sort();
     expect(names).toEqual([
       "brave",
+      "brave-llm",
       "context7",
       "duckduckgo",
       "exa",

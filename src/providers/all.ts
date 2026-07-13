@@ -1,5 +1,6 @@
 import type { ProviderMeta } from "./types.ts";
 import { providerMeta as brave } from "./brave.ts";
+import { providerMeta as braveLlm } from "./brave-llm.ts";
 import { providerMeta as context7 } from "./context7.ts";
 import { providerMeta as duckduckgo } from "./duckduckgo.ts";
 import { providerMeta as exa } from "./exa.ts";
@@ -18,6 +19,7 @@ import { providerMeta as websearchapi } from "./websearchapi.ts";
 
 export const allProviders: ProviderMeta[] = [
   brave,
+  braveLlm,
   context7,
   duckduckgo,
   exa,
