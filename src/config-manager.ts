@@ -8,15 +8,13 @@ const PROVIDER_ALIASES: Record<string, string> = {
   "openai-native": "openai-codex",
 };
 
-function resolveProviderAlias(name: string): { resolved: string; aliased: boolean } {
+function resolveProviderAlias(name: string): string {
   const resolved = PROVIDER_ALIASES[name];
   if (resolved) {
-    console.warn(
-      `[pi-tools] Provider "${name}" is deprecated. Use "${resolved}" instead.`,
-    );
-    return { resolved, aliased: true };
+    console.warn(`[pi-tools] Provider "${name}" is deprecated. Use "${resolved}" instead.`);
+    return resolved;
   }
-  return { resolved: name, aliased: false };
+  return name;
 }
 
 interface ConfigChangeSet {
@@ -124,7 +122,7 @@ export class ConfigManager {
   }
 
   private registerProvider(name: string, config: PiToolsConfig): void {
-    const { resolved } = resolveProviderAlias(name);
+    const resolved = resolveProviderAlias(name);
     const meta = this.metaByName.get(resolved);
     if (!meta) return;
 

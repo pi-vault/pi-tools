@@ -54,17 +54,6 @@ const SUBMIT_SEARCH_RESULTS_TOOL = {
   },
 } as const;
 
-function buildSystemPrompt(numResults: number): string {
-  return [
-    `Research the user's query with hosted web_search and call submit_search_results exactly once with at most ${numResults} results.`,
-    "Return only real http/https URLs.",
-    "Prefer primary sources.",
-    "For snippet, write a dense 450-500 character, multi-sentence paragraph with the most query-relevant facts.",
-    "Do not invent details or present unsupported text as source content.",
-    "No prose. No internal references.",
-  ].join(" ");
-}
-
 type ResolvedMode = "codex" | "responses-api" | "unavailable";
 
 // Minimal type shapes for dynamically imported Pi packages.
@@ -185,7 +174,7 @@ class OpenAICodexProvider implements SearchProvider {
     if (!model) return [];
 
     const context = {
-      systemPrompt: buildSystemPrompt(maxResults),
+      systemPrompt: `Research the user's query with hosted web_search and call submit_search_results exactly once with at most ${maxResults} results. Return only real http/https URLs. Prefer primary sources. For snippet, write a dense 450-500 character, multi-sentence paragraph with the most query-relevant facts. Do not invent details or present unsupported text as source content. No prose. No internal references.`,
       messages: [{ role: "user" as const, content: query, timestamp: Date.now() }],
       tools: [SUBMIT_SEARCH_RESULTS_TOOL],
     };
@@ -257,23 +246,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  */
 export function injectCodexSearchPayload(payload: unknown): unknown {
   const body = isRecord(payload) ? payload : {};
-  const existingTools = Array.isArray(body.tools) ? body.tools.filter(Boolean) : [];
-  const filteredTools = existingTools.filter((tool) => {
-    if (!isRecord(tool)) return true;
-    return tool.type !== "web_search";
-  });
+  const kept = Array.isArray(body.tools)
+    ? (body.tools as unknown[]).filter((t) => !isRecord(t) || t.type !== "web_search")
+    : [];
 
   body.tools = [
     { type: "web_search", external_web_access: true, search_context_size: DEFAULT_SEARCH_CONTEXT_SIZE },
-    ...filteredTools,
+    ...kept,
   ];
   body.tool_choice = "auto";
   body.parallel_tool_calls = false;
 
-  const include = Array.isArray(body.include)
-    ? body.include.filter((value): value is string => typeof value === "string")
+  const existing = Array.isArray(body.include)
+    ? body.include.filter((v): v is string => typeof v === "string" && v !== "web_search_call.action.sources")
     : [];
-  body.include = Array.from(new Set([...include, "web_search_call.action.sources"]));
+  body.include = [...existing, "web_search_call.action.sources"];
 
   return body;
 }
