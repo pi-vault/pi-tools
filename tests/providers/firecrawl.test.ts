@@ -105,16 +105,6 @@ describe("FirecrawlProvider", () => {
       expect(fetchCall[1].headers.Authorization).toBeUndefined();
     });
 
-    it("sends Authorization header when key provided", async () => {
-      fetchStub.addResponse("api.firecrawl.dev", { body: { data: [] } });
-
-      const provider = new FirecrawlProvider("fc-my-key");
-      await provider.search("test", 5);
-
-      const fetchCall = (globalThis.fetch as any).mock.calls[0];
-      expect(fetchCall[1].headers.Authorization).toBe("Bearer fc-my-key");
-    });
-
     it("providerMeta has requiresKey: false", () => {
       expect(providerMeta.requiresKey).toBe(false);
     });

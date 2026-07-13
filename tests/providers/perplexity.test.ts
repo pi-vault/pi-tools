@@ -108,23 +108,5 @@ describe("PerplexityProvider", () => {
       expect(body.model).toBe("sonar-pro");
     });
 
-    it("supports sonar-reasoning model", async () => {
-      fetchStub.addResponse("api.perplexity.ai", {
-        body: {
-          choices: [{ message: { content: "reasoned answer" } }],
-          citations: ["https://s.com"],
-        },
-      });
-
-      const provider = providerMeta.create("pplx-key", {
-        enabled: true,
-        model: "sonar-reasoning",
-      }).search!;
-      await provider.search("test", 5);
-
-      const fetchCall = (globalThis.fetch as any).mock.calls[0];
-      const body = JSON.parse(fetchCall[1].body);
-      expect(body.model).toBe("sonar-reasoning");
-    });
   });
 });

@@ -2,8 +2,6 @@ import { createHttpSearchProvider } from "./http-adapter.ts";
 import { parsePerplexityResults } from "./parsers.ts";
 import type { ProviderMeta } from "./types.ts";
 
-const DEFAULT_MODEL = "sonar";
-
 export const providerMeta: ProviderMeta = {
   name: "perplexity",
   tier: 2,
@@ -17,7 +15,7 @@ export const providerMeta: ProviderMeta = {
       method: "POST",
       authPrefix: "Bearer ",
       buildBody: (query) => ({
-        model: providerConfig?.model ?? DEFAULT_MODEL,
+        model: providerConfig?.model ?? "sonar",
         messages: [{ role: "user", content: query }],
       }),
       extractResults: parsePerplexityResults,

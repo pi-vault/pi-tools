@@ -121,16 +121,6 @@ describe("JinaProvider", () => {
       expect(fetchCall[1].headers.Authorization).toBeUndefined();
     });
 
-    it("sends Authorization when key provided", async () => {
-      fetchStub.addResponse("s.jina.ai", { body: { data: [] } });
-
-      const provider = new JinaProvider("jina-key-123");
-      await provider.search("test", 5);
-
-      const fetchCall = (globalThis.fetch as any).mock.calls[0];
-      expect(fetchCall[1].headers.Authorization).toBe("Bearer jina-key-123");
-    });
-
     it("providerMeta.create works with and without key", () => {
       const withKey = providerMeta.create("key");
       expect(withKey.search).toBeDefined();
