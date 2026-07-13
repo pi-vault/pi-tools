@@ -13,6 +13,10 @@ export interface ProviderConfigEntry {
   instanceUrl?: string;
   ssrfAllowRanges?: string[];
   tokenBudget?: number;
+  depth?: "standard" | "deep";
+  baseUrl?: string;
+  searchDepth?: "snippets" | "basic";
+  topic?: "general" | "news";
 }
 
 export interface GitHubConfig {
