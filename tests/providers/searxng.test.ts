@@ -1,6 +1,6 @@
 // tests/providers/searxng.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SearXNGProvider } from "../../src/providers/searxng.ts";
+import { SearXNGProvider, providerMeta } from "../../src/providers/searxng.ts";
 import { stubFetch } from "../helpers.ts";
 
 describe("SearXNGProvider", () => {
@@ -166,5 +166,40 @@ describe("SearXNGProvider", () => {
     const provider = new SearXNGProvider({ instanceUrl: "https://searxng.example.com" });
     const results = await provider.search("test", 5);
     expect(results).toHaveLength(1);
+  });
+
+  describe("providerMeta", () => {
+    it("creates provider with instanceUrl from config", () => {
+      const instance = providerMeta.create(undefined, {
+        enabled: true,
+        instanceUrl: "http://my-searx.local:9090",
+      });
+      expect(instance.search).toBeDefined();
+      expect((instance.search as SearXNGProvider).instanceUrl).toBe("http://my-searx.local:9090");
+    });
+
+    it("creates provider with apiKey resolved from config", async () => {
+      fetchStub.addResponse("my-searx.local:9090", { body: { results: [] } });
+
+      const instance = providerMeta.create(undefined, {
+        enabled: true,
+        instanceUrl: "http://my-searx.local:9090",
+        apiKey: "my-token",
+      });
+      await instance.search!.search("test", 5);
+
+      const fetchCall = (globalThis.fetch as any).mock.calls[0];
+      expect(fetchCall[1].headers["Authorization"]).toBe("Bearer my-token");
+    });
+
+    it("creates provider without apiKey when not in config", async () => {
+      fetchStub.addResponse("localhost:8080", { body: { results: [] } });
+
+      const instance = providerMeta.create(undefined, { enabled: true });
+      await instance.search!.search("test", 5);
+
+      const fetchCall = (globalThis.fetch as any).mock.calls[0];
+      expect(fetchCall[1].headers["Authorization"]).toBeUndefined();
+    });
   });
 });
