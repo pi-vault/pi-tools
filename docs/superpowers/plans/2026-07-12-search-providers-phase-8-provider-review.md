@@ -4,7 +4,7 @@
 
 **Goal:** Incorporate targeted improvements from pi-search-hub into 6 existing providers: duckduckgo (config options), exa (quota warning), firecrawl (keyless mode), jina (optional key), perplexity (model config), and searxng (auth header).
 
-**Architecture:** Each improvement is a small, independent change. No changes to provider registration flow or http-adapter. Config type extensions are additive only.
+**Architecture:** Each improvement is a small, independent change. No changes to provider registration flow or http-adapter. Config type extensions are additive only. Quota tracking leverages the existing `ProviderRegistry` persistence layer (`~/.pi/agent/tools-usage.json`) rather than adding in-memory state to providers.
 
 **Tech Stack:** TypeScript, Vitest, pnpm
 
@@ -36,15 +36,30 @@ Before implementing provider changes, add the new config fields.
 
 - [ ] **Step 1:** Add new optional fields to `ProviderConfigEntry` in `src/config.ts`
 
-```typescript
-// In src/config.ts, add to the ProviderConfigEntry interface:
+Add the following fields after the existing ones (`topic`, `searchDepth`, etc.):
 
+```typescript
+// Phase 8 additions (append to existing interface):
+ddgsBackend?: string;
+ddgsRegion?: string;
+ddgsTimelimit?: string;
+model?: string;
+```
+
+The full interface will be:
+
+```typescript
 export interface ProviderConfigEntry {
   enabled: boolean;
   monthlyQuota?: number;
   apiKey?: string;
   instanceUrl?: string;
   ssrfAllowRanges?: string[];
+  tokenBudget?: number;
+  depth?: "standard" | "deep";
+  baseUrl?: string;
+  searchDepth?: "snippets" | "basic";
+  topic?: "general" | "news";
   // Phase 8 additions:
   ddgsBackend?: string;
   ddgsRegion?: string;
@@ -72,40 +87,23 @@ git commit -m "feat(config): add ddgsBackend, ddgsRegion, ddgsTimelimit, model t
 
 **Files:** `src/providers/duckduckgo.ts`, `tests/providers/duckduckgo.test.ts`
 
-**Change:** Pass optional `ddgsBackend`, `ddgsRegion`, `ddgsTimelimit` from provider config as CLI args to the `ddgs` subprocess.
+**Change:** Pass optional `ddgsBackend`, `ddgsRegion`, `ddgsTimelimit` from provider config as CLI args to the `ddgs` subprocess. Update `providerMeta.create` to accept and forward the second `providerConfig` argument.
 
-- [ ] **Step 1:** Update `DuckDuckGoProvider` to accept and use config options
+- [ ] **Step 1:** Add `DDGSOptions` interface and update constructor
 
-Update the constructor and class to accept config:
+Add below the `ExecFileFn` type:
 
 ```typescript
-// src/providers/duckduckgo.ts
-
-import { execFile as defaultExecFile } from "node:child_process";
-import * as crypto from "node:crypto";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
-import type { ProviderConfigEntry } from "../config.ts";
-import type {
-  ProviderMeta,
-  SearchFilters,
-  SearchProvider,
-  SearchResult,
-} from "./types.ts";
-import { applyDomainFilters } from "../utils/filters.ts";
-import { parseDuckDuckGoResults } from "./parsers.ts";
-
-// ... ExecFileFn type unchanged ...
-
 interface DDGSOptions {
   backend?: string;
   region?: string;
   timelimit?: string;
 }
+```
 
-const EXEC_TIMEOUT_MS = 15_000;
+Update the class to accept options:
 
+```typescript
 export class DuckDuckGoProvider implements SearchProvider {
   readonly name = "duckduckgo";
   readonly label = "DuckDuckGo";
@@ -120,119 +118,39 @@ export class DuckDuckGoProvider implements SearchProvider {
     this.execFile = execFileFn;
     this.ddgsOptions = options ?? {};
   }
-
-  async search(
-    query: string,
-    maxResults: number,
-    signal?: AbortSignal,
-    filters?: SearchFilters,
-  ): Promise<SearchResult[]> {
-    if (signal?.aborted) {
-      throw new Error("Search aborted");
-    }
-
-    const effectiveQuery = applyDomainFilters(query, filters);
-    const timelimit = this.ddgsOptions.timelimit ?? computeTimelimit(filters);
-
-    const tmpFile = path.join(os.tmpdir(), `ddgs-${crypto.randomUUID()}.json`);
-
-    try {
-      await this.runDdgs(
-        effectiveQuery,
-        maxResults,
-        tmpFile,
-        signal,
-        timelimit,
-      );
-
-      let raw: string;
-      try {
-        raw = await fs.readFile(tmpFile, "utf-8");
-      } catch {
-        throw new Error("Failed to parse ddgs output: output file not created");
-      }
-
-      let data: unknown;
-      try {
-        const parsed: unknown = JSON.parse(raw);
-        if (!Array.isArray(parsed)) throw new Error("not an array");
-        data = parsed;
-      } catch {
-        throw new Error("Failed to parse ddgs output: malformed JSON");
-      }
-
-      return parseDuckDuckGoResults(data).slice(0, maxResults);
-    } finally {
-      await fs.unlink(tmpFile).catch(() => {});
-    }
-  }
-
-  private runDdgs(
-    query: string,
-    maxResults: number,
-    outPath: string,
-    signal?: AbortSignal,
-    timelimit?: string,
-  ): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const onAbort = () => {
-        child.kill();
-        reject(new Error("Search aborted"));
-      };
-
-      const args = [
-        "text",
-        "-q",
-        query,
-        "-m",
-        String(maxResults),
-        "-o",
-        outPath,
-      ];
-
-      // Config-driven options
-      if (this.ddgsOptions.backend) {
-        args.push("-b", this.ddgsOptions.backend);
-      }
-      if (this.ddgsOptions.region) {
-        args.push("-r", this.ddgsOptions.region);
-      }
-      if (timelimit) {
-        args.push("-t", timelimit);
-      }
-
-      const child = this.execFile(
-        "ddgs",
-        args,
-        { timeout: EXEC_TIMEOUT_MS },
-        (error, _stdout, stderr) => {
-          if (signal) signal.removeEventListener("abort", onAbort);
-          if (error) {
-            if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-              reject(
-                new Error(
-                  "ddgs CLI not found. Install with: pip install ddgs (or: uv tool install ddgs)",
-                ),
-              );
-              return;
-            }
-            const detail = stderr?.trim();
-            reject(detail ? new Error(`ddgs failed: ${detail}`) : error);
-          } else {
-            resolve();
-          }
-        },
-      );
-
-      if (signal) {
-        signal.addEventListener("abort", onAbort, { once: true });
-      }
-    });
-  }
+  // ...
 }
+```
 
-// ... computeTimelimit unchanged ...
+- [ ] **Step 2:** Update `search()` to use config timelimit as override
 
+Change the timelimit computation in `search()`:
+
+```typescript
+const timelimit = this.ddgsOptions.timelimit ?? computeTimelimit(filters);
+```
+
+- [ ] **Step 3:** Update `runDdgs()` to pass backend/region flags
+
+Add config-driven flags to the args array (before the timelimit push):
+
+```typescript
+const args = ["text", "-q", query, "-m", String(maxResults), "-o", outPath];
+
+if (this.ddgsOptions.backend) {
+  args.push("-b", this.ddgsOptions.backend);
+}
+if (this.ddgsOptions.region) {
+  args.push("-r", this.ddgsOptions.region);
+}
+if (timelimit) {
+  args.push("-t", timelimit);
+}
+```
+
+- [ ] **Step 4:** Update `providerMeta.create` to accept `providerConfig`
+
+```typescript
 export const providerMeta: ProviderMeta = {
   name: "duckduckgo",
   tier: 3,
@@ -248,7 +166,7 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 2:** Add tests for new config options
+- [ ] **Step 5:** Add tests for new config options
 
 ```typescript
 // Add to tests/providers/duckduckgo.test.ts
@@ -287,7 +205,6 @@ describe("config options", () => {
 
     const args = execStub.lastArgs()!;
     expect(args).toContain("-t");
-    // Config timelimit "m" should override the computed "y" from startDate
     expect(args[args.indexOf("-t") + 1]).toBe("m");
   });
 
@@ -300,20 +217,19 @@ describe("config options", () => {
     };
     const instance = providerMeta.create(undefined, config as any);
     expect(instance.search).toBeDefined();
-    // Verify it's a DuckDuckGoProvider (duck typing)
     expect(instance.search!.name).toBe("duckduckgo");
   });
 });
 ```
 
-- [ ] **Step 3:** Verify
+- [ ] **Step 6:** Verify
 
 ```bash
 pnpm vitest run tests/providers/duckduckgo.test.ts
 pnpm run typecheck
 ```
 
-- [ ] **Step 4:** Commit
+- [ ] **Step 7:** Commit
 
 ```bash
 git add src/providers/duckduckgo.ts tests/providers/duckduckgo.test.ts
@@ -322,103 +238,159 @@ git commit -m "feat(duckduckgo): add ddgsBackend, ddgsRegion, ddgsTimelimit conf
 
 ---
 
-## Task 3: Exa — Log Quota Warning at 800/1000
+## Task 3: Exa — Quota Warning via ProviderRegistry
 
-**Files:** `src/providers/exa.ts`, `tests/providers/exa.test.ts`
+**Files:** `src/providers/registry.ts`, `tests/providers/registry.test.ts`
 
-**Change:** Track monthly search count and log a warning when approaching the 1000-request monthly quota (threshold: 800).
+**Change:** Add a quota warning mechanism to `ProviderRegistry`. The registry already tracks per-provider usage counts with file persistence (`~/.pi/agent/tools-usage.json`) and enforces hard monthly quotas. This task adds a warning when usage exceeds 80% of the quota.
 
-- [ ] **Step 1:** Add usage tracking to `ExaProvider`
+**Why not in-memory on the provider?** The `ProviderRegistry` is the source of truth for usage counts (persisted across process restarts). Adding an in-memory counter to `ExaProvider` would be redundant and would reset on every CLI invocation — making it useless.
+
+- [ ] **Step 1:** Add `getQuotaWarning()` method to `ProviderRegistry`
 
 ```typescript
-// In src/providers/exa.ts, add to ExaProvider class:
+// In src/providers/registry.ts, add to the ProviderRegistry class:
 
-private searchCount = 0;
-private readonly QUOTA_WARN_THRESHOLD = 800;
-private readonly MONTHLY_QUOTA = 1000;
-private warnedThisMonth = false;
+private static readonly QUOTA_WARN_RATIO = 0.8;
 
-// In the search() method, after a successful response:
-async search(
-  query: string,
-  maxResults: number,
-  signal?: AbortSignal,
-  filters?: SearchFilters,
-): Promise<SearchResult[]> {
-  // ... existing body/request code ...
+/**
+ * Returns a warning string if a provider's usage is approaching its monthly quota.
+ * Returns null if no warning is needed (no quota, below threshold, or already exhausted).
+ */
+getQuotaWarning(providerName: string): string | null {
+  const reg = this.searchProviders.get(providerName);
+  if (!reg || reg.monthlyQuota === null) return null;
 
-  const response = await fetch("https://api.exa.ai/search", {
-    method: "POST",
-    headers: this.headers(),
-    body: JSON.stringify(body),
-    signal,
-  });
-  if (!response.ok) throw new Error(`Exa API error: ${response.status} ${response.statusText}`);
-  const data = (await response.json()) as ExaSearchResponse;
+  const used = this.counts[providerName] ?? 0;
+  const threshold = Math.floor(reg.monthlyQuota * ProviderRegistry.QUOTA_WARN_RATIO);
 
-  // Quota tracking
-  this.searchCount++;
-  if (this.searchCount >= this.QUOTA_WARN_THRESHOLD && !this.warnedThisMonth) {
-    this.warnedThisMonth = true;
-    console.warn(
-      `[pi-tools] Exa: monthly usage at ${this.searchCount}/${this.MONTHLY_QUOTA}. ` +
-      `Consider reducing usage or upgrading your plan.`,
-    );
+  if (used < threshold) return null;
+
+  const remaining = reg.monthlyQuota - used;
+  if (remaining <= 0) {
+    return `[pi-tools] ${providerName}: monthly quota exhausted (${used}/${reg.monthlyQuota}).`;
   }
-
-  return parseExaResults(data).slice(0, maxResults);
+  return `[pi-tools] ${providerName}: monthly usage at ${used}/${reg.monthlyQuota} (${remaining} remaining).`;
 }
 ```
 
-- [ ] **Step 2:** Add test
+- [ ] **Step 2:** Emit warning in `recordOutcome()` when threshold is crossed
 
 ```typescript
-// Add to tests/providers/exa.test.ts
+// In recordOutcome(), after incrementing and saving:
+
+recordOutcome(providerName: string, result: { success: boolean; latencyMs?: number }): void {
+  this.counts[providerName] = (this.counts[providerName] ?? 0) + 1;
+  this.saveUsage();
+
+  // Emit quota warning if threshold just crossed
+  const warning = this.getQuotaWarning(providerName);
+  if (warning) {
+    const prevCount = this.counts[providerName] - 1;
+    const reg = this.searchProviders.get(providerName);
+    const threshold = reg?.monthlyQuota
+      ? Math.floor(reg.monthlyQuota * ProviderRegistry.QUOTA_WARN_RATIO)
+      : Infinity;
+    // Only warn once: when we cross the threshold or hit exhaustion
+    if (prevCount === threshold - 1 || this.counts[providerName] === reg?.monthlyQuota) {
+      console.warn(warning);
+    }
+  }
+
+  // Update performance metrics (existing code unchanged)
+  const m = this.getOrCreateMetrics(providerName);
+  if (result.success) {
+    m.successes += 1;
+    if (result.latencyMs !== undefined) {
+      m.latencySamples += 1;
+      m.avgLatency += (result.latencyMs - m.avgLatency) / m.latencySamples;
+    }
+  } else {
+    m.failures += 1;
+  }
+}
+```
+
+- [ ] **Step 3:** Add tests
+
+```typescript
+// Add to tests/providers/registry.test.ts
 
 describe("quota warning", () => {
-  it("logs warning when usage exceeds 800", async () => {
+  it("returns null when provider has no quota", () => {
+    const persistence = createMemoryPersistence();
+    const registry = new ProviderRegistry(persistence);
+    const provider = { name: "ddg", label: "DDG", search: vi.fn() } as any;
+    registry.registerSearch(provider, { tier: 3, monthlyQuota: null });
+
+    expect(registry.getQuotaWarning("ddg")).toBeNull();
+  });
+
+  it("returns null when usage is below 80%", () => {
+    const persistence = createMemoryPersistence({ exa: { count: 500, month: getCurrentMonth() } });
+    const registry = new ProviderRegistry(persistence);
+    const provider = { name: "exa", label: "Exa", search: vi.fn() } as any;
+    registry.registerSearch(provider, { tier: 1, monthlyQuota: 1000 });
+
+    expect(registry.getQuotaWarning("exa")).toBeNull();
+  });
+
+  it("returns warning when usage reaches 80%", () => {
+    const persistence = createMemoryPersistence({ exa: { count: 800, month: getCurrentMonth() } });
+    const registry = new ProviderRegistry(persistence);
+    const provider = { name: "exa", label: "Exa", search: vi.fn() } as any;
+    registry.registerSearch(provider, { tier: 1, monthlyQuota: 1000 });
+
+    const warning = registry.getQuotaWarning("exa");
+    expect(warning).toContain("exa");
+    expect(warning).toContain("800/1000");
+    expect(warning).toContain("200 remaining");
+  });
+
+  it("returns exhausted message when quota is used up", () => {
+    const persistence = createMemoryPersistence({ exa: { count: 1000, month: getCurrentMonth() } });
+    const registry = new ProviderRegistry(persistence);
+    const provider = { name: "exa", label: "Exa", search: vi.fn() } as any;
+    registry.registerSearch(provider, { tier: 1, monthlyQuota: 1000 });
+
+    const warning = registry.getQuotaWarning("exa");
+    expect(warning).toContain("exhausted");
+  });
+
+  it("emits console.warn when threshold is crossed via recordOutcome", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const persistence = createMemoryPersistence({ exa: { count: 799, month: getCurrentMonth() } });
+    const registry = new ProviderRegistry(persistence);
+    const provider = { name: "exa", label: "Exa", search: vi.fn() } as any;
+    registry.registerSearch(provider, { tier: 1, monthlyQuota: 1000 });
 
-    fetchStub.addResponse("api.exa.ai", {
-      body: { results: [{ title: "R", url: "http://r.com", text: "t" }] },
-    });
+    registry.recordOutcome("exa", { success: true, latencyMs: 100 });
 
-    const provider = new ExaProvider("test-key");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("exa"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("800/1000"));
 
-    // Simulate 800 searches by directly setting count (internal state)
-    // We'll call search once and check the warning doesn't fire
-    await provider.search("test", 5);
+    // Second call should NOT warn again
+    warnSpy.mockClear();
+    registry.recordOutcome("exa", { success: true, latencyMs: 100 });
     expect(warnSpy).not.toHaveBeenCalled();
-
-    // Set internal count to threshold - 1 via repeated calls or reflection
-    // For testing, we access the private field:
-    (provider as any).searchCount = 799;
-    await provider.search("test", 5);
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("monthly usage at 800/1000"),
-    );
-
-    // Should only warn once
-    await provider.search("test", 5);
-    expect(warnSpy).toHaveBeenCalledTimes(1);
 
     warnSpy.mockRestore();
   });
 });
 ```
 
-- [ ] **Step 3:** Verify
+- [ ] **Step 4:** Verify
 
 ```bash
-pnpm vitest run tests/providers/exa.test.ts
+pnpm vitest run tests/providers/registry.test.ts
 pnpm run typecheck
 ```
 
-- [ ] **Step 4:** Commit
+- [ ] **Step 5:** Commit
 
 ```bash
-git add src/providers/exa.ts tests/providers/exa.test.ts
-git commit -m "feat(exa): log quota warning when monthly usage exceeds 800/1000"
+git add src/providers/registry.ts tests/providers/registry.test.ts
+git commit -m "feat(registry): add quota warning when provider usage exceeds 80% threshold"
 ```
 
 ---
@@ -429,11 +401,11 @@ git commit -m "feat(exa): log quota warning when monthly usage exceeds 800/1000"
 
 **Change:** Allow Firecrawl to operate without an API key (1000 free credits/month on their free tier). Key becomes optional for higher rate limits.
 
-- [ ] **Step 1:** Update `FirecrawlProvider` and `providerMeta`
+- [ ] **Step 1:** Make `apiKey` optional in `FirecrawlProvider`
+
+Change the constructor and field:
 
 ```typescript
-// src/providers/firecrawl.ts
-
 export class FirecrawlProvider implements SearchProvider, FetchProvider {
   readonly name = "firecrawl";
   readonly label = "Firecrawl";
@@ -442,20 +414,25 @@ export class FirecrawlProvider implements SearchProvider, FetchProvider {
   constructor(apiKey?: string) {
     this.apiKey = apiKey;
   }
+```
 
-  private headers(): Record<string, string> {
-    const h: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (this.apiKey) {
-      h.Authorization = `Bearer ${this.apiKey}`;
-    }
-    return h;
+- [ ] **Step 2:** Make `headers()` conditionally include Authorization
+
+```typescript
+private headers(): Record<string, string> {
+  const h: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (this.apiKey) {
+    h.Authorization = `Bearer ${this.apiKey}`;
   }
-
-  // ... search() and fetch() methods unchanged ...
+  return h;
 }
+```
 
+- [ ] **Step 3:** Update `providerMeta`
+
+```typescript
 export const providerMeta: ProviderMeta = {
   name: "firecrawl",
   tier: 1,
@@ -468,7 +445,7 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 2:** Add test for keyless mode
+- [ ] **Step 4:** Add tests for keyless mode
 
 ```typescript
 // Add to tests/providers/firecrawl.test.ts
@@ -477,13 +454,7 @@ describe("keyless mode", () => {
   it("works without API key", async () => {
     fetchStub.addResponse("api.firecrawl.dev", {
       body: {
-        data: [
-          {
-            title: "Free Result",
-            url: "https://free.dev/1",
-            description: "Free snippet",
-          },
-        ],
+        data: [{ title: "Free Result", url: "https://free.dev/1", description: "Free snippet" }],
       },
     });
 
@@ -494,9 +465,7 @@ describe("keyless mode", () => {
   });
 
   it("does not send Authorization header when no key", async () => {
-    fetchStub.addResponse("api.firecrawl.dev", {
-      body: { data: [] },
-    });
+    fetchStub.addResponse("api.firecrawl.dev", { body: { data: [] } });
 
     const provider = new FirecrawlProvider();
     await provider.search("test", 5);
@@ -507,9 +476,7 @@ describe("keyless mode", () => {
   });
 
   it("sends Authorization header when key provided", async () => {
-    fetchStub.addResponse("api.firecrawl.dev", {
-      body: { data: [] },
-    });
+    fetchStub.addResponse("api.firecrawl.dev", { body: { data: [] } });
 
     const provider = new FirecrawlProvider("fc-my-key");
     await provider.search("test", 5);
@@ -531,14 +498,14 @@ describe("keyless mode", () => {
 });
 ```
 
-- [ ] **Step 3:** Verify
+- [ ] **Step 5:** Verify
 
 ```bash
 pnpm vitest run tests/providers/firecrawl.test.ts
 pnpm run typecheck
 ```
 
-- [ ] **Step 4:** Commit
+- [ ] **Step 6:** Commit
 
 ```bash
 git add src/providers/firecrawl.ts tests/providers/firecrawl.test.ts
@@ -547,23 +514,18 @@ git commit -m "feat(firecrawl): support keyless mode (requiresKey: false)"
 
 ---
 
-## Task 5: Jina — Optional Key Mode
+## Task 5: Jina — Optional Key Mode Tests
 
-**Files:** `src/providers/jina.ts`, `tests/providers/jina.test.ts`
+**Files:** `tests/providers/jina.test.ts`
 
-**Change:** Jina already supports optional key in its class (`apiKey?`), but `providerMeta.requiresKey` is already `false`. Verify this is correctly working and add explicit test coverage for both modes.
+**Change:** Jina already supports optional key in its class (`apiKey?`) and has `requiresKey: false`. No code changes needed — just add explicit test coverage for both modes.
 
-Note: Looking at the current code, Jina already has `requiresKey: false` and the constructor accepts optional key. This task just adds explicit test documentation.
+- [ ] **Step 1:** Verify current implementation is correct (read-only)
 
-- [ ] **Step 1:** Verify current implementation is correct
-
-The current `jina.ts` already has:
-
+Confirm `jina.ts` has:
 - `constructor(apiKey?: string)` — optional
 - `requiresKey: false` in providerMeta
-- Auth header conditionally included
-
-No code changes needed. Add tests to explicitly verify both modes.
+- Auth header conditionally included via `if (this.apiKey) { h.Authorization = ... }`
 
 - [ ] **Step 2:** Add explicit tests for optional key behavior
 
@@ -573,9 +535,7 @@ No code changes needed. Add tests to explicitly verify both modes.
 describe("optional key mode", () => {
   it("works without API key (no auth header)", async () => {
     fetchStub.addResponse("s.jina.ai", {
-      body: {
-        data: [{ title: "Free", url: "http://free.com", description: "desc" }],
-      },
+      body: { data: [{ title: "Free", url: "http://free.com", description: "desc" }] },
     });
 
     const provider = new JinaProvider(); // no key
@@ -587,9 +547,7 @@ describe("optional key mode", () => {
   });
 
   it("sends Authorization when key provided", async () => {
-    fetchStub.addResponse("s.jina.ai", {
-      body: { data: [] },
-    });
+    fetchStub.addResponse("s.jina.ai", { body: { data: [] } });
 
     const provider = new JinaProvider("jina-key-123");
     await provider.search("test", 5);
@@ -630,9 +588,9 @@ git commit -m "test(jina): add explicit optional key mode tests"
 
 **Files:** `src/providers/perplexity.ts`, `tests/providers/perplexity.test.ts`
 
-**Change:** Allow configuring the Perplexity model via `model` config option (e.g., `sonar`, `sonar-pro`, `sonar-reasoning`). Default remains `sonar`.
+**Change:** Allow configuring the Perplexity model via `model` config option (e.g., `sonar`, `sonar-pro`, `sonar-reasoning`). Default remains `sonar`. The `providerConfig` is captured in the `create` closure and passed to `buildBody`.
 
-- [ ] **Step 1:** Update `src/providers/perplexity.ts` to use config model
+- [ ] **Step 1:** Update `src/providers/perplexity.ts` to accept `providerConfig`
 
 ```typescript
 import { createHttpSearchProvider } from "./http-adapter.ts";
@@ -733,31 +691,19 @@ git commit -m "feat(perplexity): add model config option (sonar, sonar-pro, sona
 
 ---
 
-## Task 7: SearXNG — Pass Optional Bearer Token Auth Header
+## Task 7: SearXNG — Bearer Token Auth Tests
 
-**Files:** `src/providers/searxng.ts`, `tests/providers/searxng.test.ts`
+**Files:** `tests/providers/searxng.test.ts`
 
-**Change:** The current implementation already supports an optional Bearer token via the `apiKey` constructor option (see existing code lines 46-48). Verify and add explicit test coverage.
+**Change:** The current implementation already supports an optional Bearer token via the `apiKey` constructor option. Add explicit test coverage for the auth header behavior.
 
-- [ ] **Step 1:** Verify current implementation
+- [ ] **Step 1:** Verify current implementation (read-only)
 
-Looking at the existing `searxng.ts`:
+Confirm `searxng.ts` has:
+- `if (this.apiKey) { headers.Authorization = \`Bearer ${this.apiKey}\`; }`
+- `providerMeta.create` resolves `providerConfig?.apiKey` via `resolveApiKey()`
 
-```typescript
-if (this.apiKey) {
-  headers.Authorization = `Bearer ${this.apiKey}`;
-}
-```
-
-And in `providerMeta.create`:
-
-```typescript
-apiKey: providerConfig?.apiKey ? resolveApiKey(providerConfig.apiKey) : undefined,
-```
-
-This already works. Ensure test coverage explicitly validates the auth header behavior.
-
-- [ ] **Step 2:** Add explicit test for Bearer token
+- [ ] **Step 2:** Add explicit tests for Bearer token
 
 ```typescript
 // Add to tests/providers/searxng.test.ts
@@ -776,9 +722,7 @@ describe("authentication", () => {
   });
 
   it("does not send Authorization header when no apiKey", async () => {
-    fetchStub.addResponse("localhost:8080", {
-      body: { results: [] },
-    });
+    fetchStub.addResponse("localhost:8080", { body: { results: [] } });
 
     const provider = new SearXNGProvider();
     await provider.search("test", 5);
@@ -788,7 +732,6 @@ describe("authentication", () => {
   });
 
   it("providerMeta passes resolved apiKey to constructor", () => {
-    // With apiKey in config
     const instance = providerMeta.create(undefined, {
       enabled: true,
       instanceUrl: "http://my-searx.local",
@@ -827,14 +770,15 @@ pnpm run typecheck
 
 ## Summary of Changes
 
-| Provider   | Change Type | Description                                                                    |
-| ---------- | ----------- | ------------------------------------------------------------------------------ |
-| duckduckgo | Feature     | `ddgsBackend`, `ddgsRegion`, `ddgsTimelimit` config options passed as CLI args |
-| exa        | Feature     | Logs `console.warn` when monthly search count reaches 800/1000                 |
-| firecrawl  | Feature     | `requiresKey: false`, API key optional for free-tier usage                     |
-| jina       | Test only   | Already supports optional key; added explicit test coverage                    |
-| perplexity | Feature     | `model` config option (sonar, sonar-pro, sonar-reasoning)                      |
-| searxng    | Test only   | Already supports Bearer token; added explicit test coverage                    |
+| Provider   | Change Type | Description                                                                      |
+| ---------- | ----------- | -------------------------------------------------------------------------------- |
+| config     | Feature     | `ddgsBackend`, `ddgsRegion`, `ddgsTimelimit`, `model` added to ProviderConfigEntry |
+| duckduckgo | Feature     | Config options passed as CLI args to ddgs subprocess                              |
+| registry   | Feature     | `getQuotaWarning()` + console.warn at 80% threshold (leverages existing persistence) |
+| firecrawl  | Feature     | `requiresKey: false`, API key optional for free-tier usage                       |
+| jina       | Test only   | Already supports optional key; added explicit test coverage                      |
+| perplexity | Feature     | `model` config option (sonar, sonar-pro, sonar-reasoning) via closure            |
+| searxng    | Test only   | Already supports Bearer token; added explicit test coverage                      |
 
 **Config additions to `ProviderConfigEntry`:**
 
