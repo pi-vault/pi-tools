@@ -189,6 +189,18 @@ export function parseSerperResults(data: unknown): SearchResult[] {
   });
 }
 
+export function parseDuckDuckGoResults(data: unknown): SearchResult[] {
+  if (!Array.isArray(data)) return [];
+  return data.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.href as string) || "",
+      snippet: ((item.body as string) || "").slice(0, 500),
+    };
+  });
+}
+
 export function parseBraveResults(data: unknown): SearchResult[] {
   if (!data || typeof data !== "object") return [];
   const d = data as Record<string, unknown>;

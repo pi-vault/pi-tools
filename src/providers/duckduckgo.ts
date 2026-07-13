@@ -5,6 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 import { applyDomainFilters } from "../utils/filters.ts";
+import { parseDuckDuckGoResults } from "./parsers.ts";
 
 interface DDGSResult {
   title: string;
@@ -68,11 +69,7 @@ export class DuckDuckGoProvider implements SearchProvider {
         throw new Error("Failed to parse ddgs output: malformed JSON");
       }
 
-      return data.slice(0, maxResults).map((r) => ({
-        title: r.title,
-        url: r.href,
-        snippet: r.body,
-      }));
+      return parseDuckDuckGoResults(data).slice(0, maxResults);
     } finally {
       await fs.unlink(tmpFile).catch(() => {});
     }

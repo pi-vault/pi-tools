@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseBraveLlmResults,
   parseBraveResults,
+  parseDuckDuckGoResults,
   parseLangSearchResults,
   parseMarginaliaResults,
   parseOpenAINativeResults,
@@ -605,5 +606,42 @@ describe("parseOpenAINativeResults", () => {
     const results = parseOpenAINativeResults(data);
     expect(results).toHaveLength(1);
     expect(results[0].url).toBe("https://valid.com");
+  });
+});
+
+describe("parseDuckDuckGoResults", () => {
+  it("extracts results from valid array", () => {
+    const data = [
+      { title: "DDG Result", href: "https://ddg.co/1", body: "A snippet" },
+      { title: "Second", href: "https://ddg.co/2", body: "Another" },
+    ];
+    const results = parseDuckDuckGoResults(data);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({
+      title: "DDG Result",
+      url: "https://ddg.co/1",
+      snippet: "A snippet",
+    });
+  });
+
+  it("returns [] for non-array input", () => {
+    expect(parseDuckDuckGoResults(null)).toEqual([]);
+    expect(parseDuckDuckGoResults(undefined)).toEqual([]);
+    expect(parseDuckDuckGoResults({})).toEqual([]);
+    expect(parseDuckDuckGoResults("string")).toEqual([]);
+  });
+
+  it("truncates snippets to 500 chars", () => {
+    const long = "d".repeat(600);
+    const data = [{ title: "T", href: "http://u", body: long }];
+    const results = parseDuckDuckGoResults(data);
+    expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = [{ title: "Only Title" }, {}];
+    const results = parseDuckDuckGoResults(data);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
   });
 });
