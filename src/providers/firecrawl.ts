@@ -7,6 +7,7 @@ import type {
   SearchProvider,
   SearchResult,
 } from "./types.ts";
+import { parseFirecrawlResults } from "./parsers.ts";
 
 interface FirecrawlSearchResponse {
   data: Array<{ title: string; url: string; markdown?: string; description?: string }>;
@@ -46,12 +47,8 @@ export class FirecrawlProvider implements SearchProvider, FetchProvider {
     });
     if (!response.ok)
       throw new Error(`Firecrawl search error: ${response.status} ${response.statusText}`);
-    const data = (await response.json()) as FirecrawlSearchResponse;
-    return (data.data ?? []).slice(0, maxResults).map((r) => ({
-      title: r.title,
-      url: r.url,
-      snippet: r.description ?? r.markdown?.slice(0, 200) ?? "",
-    }));
+    const data: unknown = await response.json();
+    return parseFirecrawlResults(data).slice(0, maxResults);
   }
 
   async fetch(url: string, signal?: AbortSignal): Promise<FetchResult> {
