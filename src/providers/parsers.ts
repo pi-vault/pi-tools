@@ -52,6 +52,25 @@ export function parseLinkupResults(data: unknown): SearchResult[] {
   });
 }
 
+export function parseFastcrwResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawData = d.data as unknown[];
+  if (!Array.isArray(rawData)) return [];
+  return rawData.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: (
+        (item.description as string) ||
+        (item.snippet as string) ||
+        ""
+      ).slice(0, 500),
+    };
+  });
+}
+
 export function parseYouComResults(data: unknown): SearchResult[] {
   if (!data || typeof data !== "object") return [];
   const d = data as Record<string, unknown>;
