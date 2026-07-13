@@ -1,6 +1,7 @@
 // src/providers/searxng.ts
 import { resolveApiKey } from "../config.ts";
 import { validateUrl } from "../utils/ssrf.ts";
+import { parseSearxngResults } from "./parsers.ts";
 import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 const DEFAULT_INSTANCE_URL = "http://localhost:8080";
@@ -53,12 +54,8 @@ export class SearXNGProvider implements SearchProvider {
       throw new Error(`SearXNG error: ${response.status} ${response.statusText}`);
     }
 
-    const data = (await response.json()) as SearXNGSearchResponse;
-    return (data.results ?? []).slice(0, maxResults).map((r) => ({
-      title: r.title,
-      url: r.url,
-      snippet: r.content,
-    }));
+    const data: unknown = await response.json();
+    return parseSearxngResults(data).slice(0, maxResults);
   }
 }
 
