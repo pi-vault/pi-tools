@@ -4,6 +4,7 @@ import {
   parseBraveResults,
   parseLangSearchResults,
   parseMarginaliaResults,
+  parseOpenAINativeResults,
   parsePerplexityResults,
   parseSerperResults,
   parseWebSearchApiResults,
@@ -524,5 +525,85 @@ describe("parsePerplexityResults", () => {
     const results = parsePerplexityResults(data);
     expect(results).toHaveLength(1);
     expect(results[0].title).toBe("Perplexity Answer");
+  });
+});
+
+describe("parseOpenAINativeResults", () => {
+  it("extracts deduplicated URL citations", () => {
+    const data = {
+      output: [
+        {
+          type: "message",
+          role: "assistant",
+          content: [
+            {
+              type: "output_text",
+              text: "Here are results",
+              annotations: [
+                { type: "url_citation", url: "https://a.com", title: "A" },
+                { type: "url_citation", url: "https://b.com", title: "B" },
+                { type: "url_citation", url: "https://a.com", title: "A duplicate" },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const results = parseOpenAINativeResults(data);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({ title: "A", url: "https://a.com", snippet: "" });
+    expect(results[1]).toEqual({ title: "B", url: "https://b.com", snippet: "" });
+  });
+
+  it("returns [] when no message output", () => {
+    expect(parseOpenAINativeResults({ output: [{ type: "other" }] })).toEqual([]);
+  });
+
+  it("returns [] for malformed input", () => {
+    expect(parseOpenAINativeResults(null)).toEqual([]);
+    expect(parseOpenAINativeResults(undefined)).toEqual([]);
+    expect(parseOpenAINativeResults({})).toEqual([]);
+    expect(parseOpenAINativeResults("string")).toEqual([]);
+  });
+
+  it("returns [] when output is not an array", () => {
+    expect(parseOpenAINativeResults({ output: "not-array" })).toEqual([]);
+  });
+
+  it("returns [] when no annotations", () => {
+    const data = {
+      output: [
+        {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "No citations" }],
+        },
+      ],
+    };
+    expect(parseOpenAINativeResults(data)).toEqual([]);
+  });
+
+  it("skips annotations with empty url", () => {
+    const data = {
+      output: [
+        {
+          type: "message",
+          role: "assistant",
+          content: [
+            {
+              type: "output_text",
+              text: "text",
+              annotations: [
+                { type: "url_citation", url: "", title: "Empty URL" },
+                { type: "url_citation", url: "https://valid.com", title: "Valid" },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const results = parseOpenAINativeResults(data);
+    expect(results).toHaveLength(1);
+    expect(results[0].url).toBe("https://valid.com");
   });
 });

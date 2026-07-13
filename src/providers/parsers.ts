@@ -103,6 +103,44 @@ export function parseSofyaResults(data: unknown): SearchResult[] {
   });
 }
 
+export function parseOpenAINativeResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const output = d.output;
+  if (!Array.isArray(output)) return [];
+
+  const messageOutput = output.find(
+    (item: unknown) =>
+      item && typeof item === "object" && (item as Record<string, unknown>).type === "message",
+  ) as Record<string, unknown> | undefined;
+  if (!messageOutput) return [];
+
+  const content = messageOutput.content;
+  if (!Array.isArray(content)) return [];
+
+  const textContent = content.find(
+    (c: unknown) =>
+      c && typeof c === "object" && (c as Record<string, unknown>).type === "output_text",
+  ) as Record<string, unknown> | undefined;
+  if (!textContent) return [];
+
+  const annotations = textContent.annotations;
+  if (!Array.isArray(annotations) || annotations.length === 0) return [];
+
+  const seen = new Set<string>();
+  const results: SearchResult[] = [];
+  for (const ann of annotations) {
+    if (!ann || typeof ann !== "object") continue;
+    const a = ann as Record<string, unknown>;
+    if (a.type !== "url_citation") continue;
+    const url = (a.url as string) || "";
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    results.push({ title: (a.title as string) || "", url, snippet: "" });
+  }
+  return results;
+}
+
 export function parsePerplexityResults(data: unknown): SearchResult[] {
   if (!data || typeof data !== "object") return [];
   const d = data as Record<string, unknown>;
