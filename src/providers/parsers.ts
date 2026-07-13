@@ -33,6 +33,76 @@ export function parseBraveLlmResults(data: unknown): SearchResult[] {
   });
 }
 
+export function parseLinkupResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = (d.searchResults ?? d.results ?? d.data) as unknown[];
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: (
+        (item.content as string) ||
+        (item.snippet as string) ||
+        ""
+      ).slice(0, 500),
+    };
+  });
+}
+
+export function parseFastcrwResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawData = d.data as unknown[];
+  if (!Array.isArray(rawData)) return [];
+  return rawData.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: (
+        (item.description as string) ||
+        (item.snippet as string) ||
+        ""
+      ).slice(0, 500),
+    };
+  });
+}
+
+export function parseYouComResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawHits = (d.hits ?? d.results) as unknown[];
+  if (!Array.isArray(rawHits)) return [];
+  return rawHits.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    const snippets = Array.isArray(item.snippets)
+      ? (item.snippets as string[]).join(" ")
+      : "";
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.description as string) || snippets || "").slice(0, 500),
+    };
+  });
+}
+
+export function parseSofyaResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as { results?: unknown[] };
+  const results = Array.isArray(d.results) ? d.results : [];
+  return results.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.description as string) || (item.content as string) || "").slice(0, 500),
+    };
+  });
+}
+
 export function parseLangSearchResults(data: unknown): SearchResult[] {
   if (!data || typeof data !== "object") return [];
   const d = data as Record<string, unknown>;

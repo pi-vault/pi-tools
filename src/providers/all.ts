@@ -5,17 +5,21 @@ import { providerMeta as context7 } from "./context7.ts";
 import { providerMeta as duckduckgo } from "./duckduckgo.ts";
 import { providerMeta as exa } from "./exa.ts";
 import { providerMeta as exaMcp } from "./exa-mcp.ts";
+import { providerMeta as fastcrw } from "./fastcrw.ts";
 import { providerMeta as firecrawl } from "./firecrawl.ts";
 import { providerMeta as jina } from "./jina.ts";
 import { providerMeta as langsearch } from "./langsearch.ts";
+import { providerMeta as linkup } from "./linkup.ts";
 import { providerMeta as marginalia } from "./marginalia.ts";
 import { providerMeta as openaiNative } from "./openai-native.ts";
 import { providerMeta as parallel } from "./parallel.ts";
 import { providerMeta as perplexity } from "./perplexity.ts";
 import { providerMeta as searxng } from "./searxng.ts";
 import { providerMeta as serper } from "./serper.ts";
+import { providerMeta as sofya } from "./sofya.ts";
 import { providerMeta as tavily } from "./tavily.ts";
 import { providerMeta as websearchapi } from "./websearchapi.ts";
+import { providerMeta as youcom } from "./youcom.ts";
 
 export const allProviders: ProviderMeta[] = [
   brave,
@@ -24,15 +28,19 @@ export const allProviders: ProviderMeta[] = [
   duckduckgo,
   exa,
   exaMcp,
+  fastcrw,
   firecrawl,
   jina,
   langsearch,
+  linkup,
   marginalia,
   openaiNative,
   parallel,
   perplexity,
   searxng,
   serper,
+  sofya,
   tavily,
   websearchapi,
+  youcom,
 ];
