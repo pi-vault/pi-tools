@@ -121,7 +121,7 @@ Create `~/.pi/agent/extensions/tools.json`. Project settings in `.pi/tools.json`
     "jina": {
       "enabled": true
     },
-    "openai-native": {
+    "openai-codex": {
       "enabled": true,
       "apiKey": "OPENAI_API_KEY"
     },

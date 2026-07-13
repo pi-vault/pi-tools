@@ -1,6 +1,6 @@
 // src/providers/openai-codex.ts
 import type { ProviderConfigEntry } from "../config.ts";
-import type { ProviderMeta, SearchProvider, SearchResult } from "./types.ts";
+import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 import { parseOpenAINativeResults } from "./parsers.ts";
 
 /**
@@ -86,6 +86,7 @@ class OpenAICodexProvider implements SearchProvider {
   private readonly userApiKey?: string;
   private readonly model?: string;
   private resolvedMode: ResolvedMode | null = null;
+  private resolvePromise: Promise<void> | null = null;
 
   // Mode A dependencies (resolved lazily via dynamic import)
   private streamFn: PiStreamFn | null = null;
@@ -102,9 +103,13 @@ class OpenAICodexProvider implements SearchProvider {
     query: string,
     maxResults: number,
     signal?: AbortSignal,
+    _filters?: SearchFilters,
   ): Promise<SearchResult[]> {
     if (!this.resolvedMode) {
-      await this.resolveMode();
+      if (!this.resolvePromise) {
+        this.resolvePromise = this.resolveMode();
+      }
+      await this.resolvePromise;
     }
 
     switch (this.resolvedMode) {

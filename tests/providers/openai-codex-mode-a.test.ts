@@ -120,6 +120,24 @@ describe("OpenAICodexProvider - Mode A (Codex)", () => {
     expect(mockGetModel).toHaveBeenCalledWith("openai-codex", "gpt-5.4");
   });
 
+  it("passes AbortSignal through to stream options", async () => {
+    mockGetApiKey.mockResolvedValue("pi-key");
+    mockStream.mockReturnValue({
+      result: () => Promise.resolve({ stopReason: "end_turn", content: [] }),
+    });
+
+    const { providerMeta } = await import("../../src/providers/openai-codex.ts");
+    const provider = providerMeta.create(undefined).search!;
+    const controller = new AbortController();
+    await provider.search("test", 5, controller.signal);
+
+    expect(mockStream).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
+
   it("falls back to Mode B when key expires mid-session", async () => {
     // resolveMode calls getApiKey once, searchModeA calls it again each time
     mockGetApiKey
