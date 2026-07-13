@@ -14,6 +14,25 @@ export function parseMarginaliaResults(data: unknown): SearchResult[] {
   });
 }
 
+export function parseBraveLlmResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as { grounding?: unknown };
+  if (!d.grounding || typeof d.grounding !== "object") return [];
+  const g = d.grounding as { generic?: unknown };
+  if (!Array.isArray(g.generic)) return [];
+  return g.generic.map((entry: unknown) => {
+    if (!entry || typeof entry !== "object")
+      return { title: "", url: "", snippet: "" };
+    const e = entry as Record<string, unknown>;
+    const snippets = Array.isArray(e.snippets) ? (e.snippets as string[]) : [];
+    return {
+      title: (e.title as string) || "",
+      url: (e.url as string) || "",
+      snippet: snippets.join("\n\n"),
+    };
+  });
+}
+
 export function parseLangSearchResults(data: unknown): SearchResult[] {
   if (!data || typeof data !== "object") return [];
   const d = data as Record<string, unknown>;

@@ -12,6 +12,7 @@ export interface ProviderConfigEntry {
   apiKey?: string;
   instanceUrl?: string;
   ssrfAllowRanges?: string[];
+  tokenBudget?: number;
 }
 
 export interface GitHubConfig {
@@ -73,6 +74,7 @@ export function clearCredentialCache(): void {
 
 export const FALLBACK_ENV_MAP: Record<string, string> = {
   brave: "BRAVE_API_KEY",
+  "brave-llm": "BRAVE_API_KEY",
   exa: "EXA_API_KEY",
   jina: "JINA_API_KEY",
   tavily: "TAVILY_API_KEY",
@@ -114,6 +116,7 @@ const DEFAULT_CONFIG: PiToolsConfig = {
   selectionStrategy: "auto",
   providers: {
     brave: { enabled: true, monthlyQuota: 2000, apiKey: "BRAVE_API_KEY" },
+    "brave-llm": { enabled: true, monthlyQuota: 2000, apiKey: "BRAVE_API_KEY" },
     exa: { enabled: true, monthlyQuota: 1000, apiKey: "EXA_API_KEY" },
     tavily: { enabled: false, apiKey: "TAVILY_API_KEY" },
     jina: { enabled: true },

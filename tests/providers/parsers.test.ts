@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseLangSearchResults, parseMarginaliaResults } from "../../src/providers/parsers.ts";
+import {
+  parseBraveLlmResults,
+  parseLangSearchResults,
+  parseMarginaliaResults,
+} from "../../src/providers/parsers.ts";
 
 describe("parseMarginaliaResults", () => {
   it("maps valid response data to SearchResult[]", () => {
@@ -207,5 +211,149 @@ describe("parseLangSearchResults", () => {
     expect(results[0]).toEqual({ title: "Only Name", url: "", snippet: "" });
     expect(results[1]).toEqual({ title: "", url: "https://only-url.com", snippet: "" });
     expect(results[2]).toEqual({ title: "", url: "", snippet: "" });
+  });
+});
+
+describe("parseBraveLlmResults", () => {
+  it("maps grounding.generic entries to SearchResult[]", () => {
+    const data = {
+      grounding: {
+        generic: [
+          {
+            url: "https://brave.com/about",
+            title: "About Brave",
+            snippets: [
+              "Brave Search is a privacy-focused search engine.",
+              "It does not track users.",
+            ],
+          },
+          {
+            url: "https://brave.com/ai",
+            title: "Brave AI",
+            snippets: ["Brave offers AI-powered search summaries."],
+          },
+        ],
+      },
+    };
+    const results = parseBraveLlmResults(data);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({
+      title: "About Brave",
+      url: "https://brave.com/about",
+      snippet:
+        "Brave Search is a privacy-focused search engine.\n\nIt does not track users.",
+    });
+    expect(results[1]).toEqual({
+      title: "Brave AI",
+      url: "https://brave.com/ai",
+      snippet: "Brave offers AI-powered search summaries.",
+    });
+  });
+
+  it("returns empty array when grounding is missing", () => {
+    expect(parseBraveLlmResults({})).toEqual([]);
+    expect(parseBraveLlmResults({ grounding: null })).toEqual([]);
+  });
+
+  it("returns empty array for null/undefined input", () => {
+    expect(parseBraveLlmResults(null)).toEqual([]);
+    expect(parseBraveLlmResults(undefined)).toEqual([]);
+  });
+
+  it("returns empty array when generic is not an array", () => {
+    expect(parseBraveLlmResults({ grounding: {} })).toEqual([]);
+    expect(
+      parseBraveLlmResults({ grounding: { generic: "not-array" } }),
+    ).toEqual([]);
+  });
+
+  it("handles entries with missing fields gracefully", () => {
+    const data = {
+      grounding: {
+        generic: [
+          { snippets: ["Some content without url/title metadata"] },
+          { url: "https://example.com", title: "Has URL" },
+          {},
+        ],
+      },
+    };
+    const results = parseBraveLlmResults(data);
+    expect(results).toHaveLength(3);
+    expect(results[0]).toEqual({
+      title: "",
+      url: "",
+      snippet: "Some content without url/title metadata",
+    });
+    expect(results[1]).toEqual({
+      title: "Has URL",
+      url: "https://example.com",
+      snippet: "",
+    });
+    expect(results[2]).toEqual({
+      title: "",
+      url: "",
+      snippet: "",
+    });
+  });
+
+  it("joins multiple snippets with double newline", () => {
+    const data = {
+      grounding: {
+        generic: [
+          {
+            url: "https://example.com",
+            title: "Multi",
+            snippets: ["First chunk.", "Second chunk.", "Third chunk."],
+          },
+        ],
+      },
+    };
+    const results = parseBraveLlmResults(data);
+    expect(results[0].snippet).toBe(
+      "First chunk.\n\nSecond chunk.\n\nThird chunk.",
+    );
+  });
+
+  it("handles empty snippets array", () => {
+    const data = {
+      grounding: {
+        generic: [
+          { url: "https://example.com", title: "Empty", snippets: [] },
+        ],
+      },
+    };
+    const results = parseBraveLlmResults(data);
+    expect(results[0].snippet).toBe("");
+  });
+
+  it("handles null entries in generic array gracefully", () => {
+    const data = {
+      grounding: {
+        generic: [
+          null,
+          { url: "https://example.com", title: "Valid", snippets: ["test"] },
+        ],
+      },
+    };
+    const results = parseBraveLlmResults(data);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({ title: "", url: "", snippet: "" });
+    expect(results[1]).toEqual({
+      title: "Valid",
+      url: "https://example.com",
+      snippet: "test",
+    });
+  });
+
+  it("handles non-array snippets gracefully", () => {
+    const data = {
+      grounding: {
+        generic: [
+          { url: "https://example.com", title: "Bad", snippets: "not-array" },
+        ],
+      },
+    };
+    const results = parseBraveLlmResults(data);
+    expect(results[0].snippet).toBe("");
   });
 });
