@@ -18,9 +18,52 @@ import { parseOpenAINativeResults } from "./parsers.ts";
  * AuthStorage.getApiKey() is async but ProviderMeta.create() is sync.
  */
 
+const DEFAULT_MODEL_A = "gpt-5.4-mini";
 const DEFAULT_MODEL_B = "gpt-4.1-nano";
 const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses";
 const DEFAULT_SEARCH_CONTEXT_SIZE = "low";
+const MAX_TOOL_RESULTS = 20;
+const MAX_TITLE_LENGTH = 200;
+const MAX_SNIPPET_LENGTH = 1000;
+
+const SUBMIT_SEARCH_RESULTS_TOOL = {
+  name: "submit_search_results",
+  description: "Submit structured search results based on the available source evidence.",
+  parameters: {
+    type: "object",
+    properties: {
+      results: {
+        type: "array",
+        maxItems: MAX_TOOL_RESULTS,
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Page title or clearest source title for the URL." },
+            url: { type: "string", description: "Canonical http/https URL for the result." },
+            snippet: {
+              type: "string",
+              description:
+                "A dense 450-500 character, multi-sentence paragraph with the most query-relevant facts.",
+            },
+          },
+          required: ["title", "url", "snippet"],
+        },
+      },
+    },
+    required: ["results"],
+  },
+} as const;
+
+function buildSystemPrompt(numResults: number): string {
+  return [
+    `Research the user's query with hosted web_search and call submit_search_results exactly once with at most ${numResults} results.`,
+    "Return only real http/https URLs.",
+    "Prefer primary sources.",
+    "For snippet, write a dense 450-500 character, multi-sentence paragraph with the most query-relevant facts.",
+    "Do not invent details or present unsupported text as source content.",
+    "No prose. No internal references.",
+  ].join(" ");
+}
 
 type ResolvedMode = "codex" | "responses-api" | "unavailable";
 
@@ -117,12 +160,54 @@ class OpenAICodexProvider implements SearchProvider {
 
   /** Mode A: Streaming Codex via Pi AuthStorage. */
   private async searchModeA(
-    _query: string,
-    _maxResults: number,
-    _signal?: AbortSignal,
+    query: string,
+    maxResults: number,
+    signal?: AbortSignal,
   ): Promise<SearchResult[]> {
-    // Implemented in Mode A task
-    return [];
+    if (!this.streamFn || !this.getModelFn || !this.authStorage) return [];
+
+    // Re-fetch key each call (tokens can expire)
+    const apiKey = await this.authStorage.getApiKey("openai-codex", {
+      includeFallback: false,
+    });
+    if (!apiKey) {
+      // Key expired — fall back to Mode B if user key available
+      if (this.userApiKey) {
+        this.resolvedMode = "responses-api";
+        return this.searchModeB(query, maxResults, signal);
+      }
+      return [];
+    }
+
+    const modelId = this.model ?? DEFAULT_MODEL_A;
+    const model = this.getModelFn("openai-codex", modelId);
+    if (!model) return [];
+
+    const context = {
+      systemPrompt: buildSystemPrompt(maxResults),
+      messages: [{ role: "user" as const, content: query, timestamp: Date.now() }],
+      tools: [SUBMIT_SEARCH_RESULTS_TOOL],
+    };
+
+    const message = await this.streamFn(model, context, {
+      apiKey,
+      signal,
+      transport: "sse",
+      reasoningEffort: "minimal",
+      textVerbosity: "low",
+      onPayload: injectCodexSearchPayload,
+    }).result();
+
+    if (message.stopReason === "error" || message.stopReason === "aborted") {
+      return [];
+    }
+
+    const submitCall = message.content.find(
+      (block) => block.type === "toolCall" && block.name === "submit_search_results",
+    );
+    if (!submitCall || submitCall.type !== "toolCall") return [];
+
+    return normalizeCodexToolCallResults(submitCall.arguments, maxResults);
   }
 
   /** Mode B: Direct POST to OpenAI Responses API. */
@@ -159,6 +244,8 @@ class OpenAICodexProvider implements SearchProvider {
   }
 }
 
+// --- Utilities ---
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -189,10 +276,6 @@ export function injectCodexSearchPayload(payload: unknown): unknown {
 
   return body;
 }
-
-const MAX_TOOL_RESULTS = 20;
-const MAX_TITLE_LENGTH = 200;
-const MAX_SNIPPET_LENGTH = 1000;
 
 /**
  * Parse the submit_search_results tool call arguments into SearchResult[].
