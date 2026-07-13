@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Extract inline response parsing from 10 existing providers into pure functions in `src/providers/parsers.ts`, with full test coverage.
+**Goal:** Extract inline response parsing from 11 existing providers into pure functions in `src/providers/parsers.ts`, with full test coverage.
 
-**Architecture:** Each provider's inline `extractResults` lambda or class-embedded parsing logic moves to a named export in `parsers.ts`. The provider file then imports and references the parser. This produces zero behavior change while enabling isolated unit testing of parsers.
+**Architecture:** Each provider's inline `extractResults` lambda or class-embedded parsing logic moves to a named export in `parsers.ts`. The provider file then imports and references the parser. This standardizes snippet truncation to 500 chars while enabling isolated unit testing of parsers.
 
 **Tech Stack:** TypeScript, Vitest, pnpm
 
@@ -23,16 +23,18 @@ Every parser function follows this contract:
 
 ```typescript
 export function parseXxxResults(data: unknown): SearchResult[] {
-  // 1. Cast data to expected shape with safe access
-  // 2. Extract results array (return [] if missing/malformed)
-  // 3. Map to SearchResult[] with snippet truncation
-  // 4. Pure: no HTTP, no side effects, no imports beyond types
+  // 1. Guard: if (!data || typeof data !== "object") return [];
+  // 2. Cast data with Record<string, unknown> safe access
+  // 3. Extract results array (return [] if missing/malformed)
+  // 4. Map to SearchResult[] with snippet truncation to 500 chars
+  // 5. Pure: no HTTP, no side effects, no imports beyond types
 }
 ```
 
 - Input: `(data: unknown): SearchResult[]`
-- Returns `[]` on malformed/missing input
+- Returns `[]` on null, undefined, non-object, or malformed input
 - Truncates snippets to 500 chars via: `snippet.slice(0, 500)`
+- Uses `(field as string) || ""` pattern (matches existing parsers.ts style)
 - No thrown exceptions on bad input
 
 ## Verification Commands
@@ -54,45 +56,34 @@ pnpm run typecheck
 - [ ] **Step 1:** Add parser function to `src/providers/parsers.ts`
 
 ```typescript
-// Add to src/providers/parsers.ts
-
 export function parseBraveResults(data: unknown): SearchResult[] {
-  const d = data as {
-    web?: {
-      results: Array<{ title: string; url: string; description: string }>;
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const web = d.web;
+  if (!web || typeof web !== "object") return [];
+  const rawResults = (web as Record<string, unknown>).results;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.description as string) || "").slice(0, 500),
     };
-  };
-  return (d.web?.results ?? []).map((r) => ({
-    title: r.title ?? "",
-    url: r.url ?? "",
-    snippet: (r.description ?? "").slice(0, 500),
-  }));
+  });
 }
 ```
 
 - [ ] **Step 2:** Add test to `tests/providers/parsers.test.ts`
 
 ```typescript
-// Add to tests/providers/parsers.test.ts
-
-import { describe, it, expect } from "vitest";
-import { parseBraveResults } from "../../src/providers/parsers.ts";
-
 describe("parseBraveResults", () => {
   it("extracts results from valid response", () => {
     const data = {
       web: {
         results: [
-          {
-            title: "Brave Result",
-            url: "https://brave.com",
-            description: "A snippet",
-          },
-          {
-            title: "Second",
-            url: "https://example.com",
-            description: "Another",
-          },
+          { title: "Brave Result", url: "https://brave.com", description: "A snippet" },
+          { title: "Second", url: "https://example.com", description: "Another" },
         ],
       },
     };
@@ -110,15 +101,22 @@ describe("parseBraveResults", () => {
     expect(parseBraveResults(undefined)).toEqual([]);
     expect(parseBraveResults({})).toEqual([]);
     expect(parseBraveResults({ web: {} })).toEqual([]);
+    expect(parseBraveResults({ web: { results: "not-array" } })).toEqual([]);
   });
 
   it("truncates snippets to 500 chars", () => {
     const long = "x".repeat(600);
-    const data = {
-      web: { results: [{ title: "T", url: "http://u", description: long }] },
-    };
+    const data = { web: { results: [{ title: "T", url: "http://u", description: long }] } };
     const results = parseBraveResults(data);
     expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = { web: { results: [{ title: "Only Title" }, {}] } };
+    const results = parseBraveResults(data);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
   });
 });
 ```
@@ -126,41 +124,11 @@ describe("parseBraveResults", () => {
 - [ ] **Step 3:** Update `src/providers/brave.ts` to import and use the parser
 
 ```typescript
-// src/providers/brave.ts — replace inline extractResults
-import { createHttpSearchProvider } from "./http-adapter.ts";
-import { applyDomainFilters } from "../utils/filters.ts";
+// Replace the extractResults inline lambda with:
 import { parseBraveResults } from "./parsers.ts";
-import type { ProviderMeta, SearchFilters } from "./types.ts";
 
-// ... buildFreshness unchanged ...
-
-export const providerMeta: ProviderMeta = {
-  name: "brave",
-  tier: 1,
-  monthlyQuota: 2000,
-  requiresKey: true,
-  create: (key) => ({
-    search: createHttpSearchProvider(key!, {
-      name: "brave",
-      label: "Brave Search",
-      endpoint: (query, maxResults, filters) => {
-        const params = new URLSearchParams({
-          q: applyDomainFilters(query, filters),
-          count: String(maxResults),
-        });
-        const freshness = buildFreshness(filters);
-        if (freshness) params.set("freshness", freshness);
-        return `https://api.search.brave.com/res/v1/web/search?${params.toString()}`;
-      },
-      method: "GET",
-      buildHeaders: (apiKey) => ({
-        Accept: "application/json",
-        "X-Subscription-Token": apiKey,
-      }),
+// In the config object:
       extractResults: parseBraveResults,
-    }),
-  }),
-};
 ```
 
 - [ ] **Step 4:** Verify
@@ -188,14 +156,18 @@ git commit -m "refactor(parsers): extract parseBraveResults to parsers.ts"
 
 ```typescript
 export function parseSerperResults(data: unknown): SearchResult[] {
-  const d = data as {
-    organic?: Array<{ title: string; link: string; snippet: string }>;
-  };
-  return (d.organic ?? []).map((r) => ({
-    title: r.title ?? "",
-    url: r.link ?? "",
-    snippet: (r.snippet ?? "").slice(0, 500),
-  }));
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = d.organic;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.link as string) || "",
+      snippet: ((item.snippet as string) || "").slice(0, 500),
+    };
+  });
 }
 ```
 
@@ -206,11 +178,7 @@ describe("parseSerperResults", () => {
   it("extracts results from valid response", () => {
     const data = {
       organic: [
-        {
-          title: "Google Result",
-          link: "https://google.com/1",
-          snippet: "A snippet",
-        },
+        { title: "Google Result", link: "https://google.com/1", snippet: "A snippet" },
       ],
     };
     const results = parseSerperResults(data);
@@ -226,6 +194,7 @@ describe("parseSerperResults", () => {
     expect(parseSerperResults(null)).toEqual([]);
     expect(parseSerperResults(undefined)).toEqual([]);
     expect(parseSerperResults({})).toEqual([]);
+    expect(parseSerperResults({ organic: "not-array" })).toEqual([]);
   });
 
   it("truncates snippets to 500 chars", () => {
@@ -234,45 +203,24 @@ describe("parseSerperResults", () => {
     const results = parseSerperResults(data);
     expect(results[0].snippet).toHaveLength(500);
   });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = { organic: [{ title: "Only Title" }, {}] };
+    const results = parseSerperResults(data);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
+  });
 });
 ```
 
 - [ ] **Step 3:** Update `src/providers/serper.ts`
 
 ```typescript
-// src/providers/serper.ts — add import, replace inline extractResults
-import { createHttpSearchProvider } from "./http-adapter.ts";
-import { applyDomainFilters } from "../utils/filters.ts";
+// Add import:
 import { parseSerperResults } from "./parsers.ts";
-import type { ProviderMeta, SearchFilters } from "./types.ts";
 
-// ... isoToMDY and buildTbs unchanged ...
-
-export const providerMeta: ProviderMeta = {
-  name: "serper",
-  tier: 1,
-  monthlyQuota: 2500,
-  requiresKey: true,
-  create: (key) => ({
-    search: createHttpSearchProvider(key!, {
-      name: "serper",
-      label: "Google Serper",
-      endpoint: "https://google.serper.dev/search",
-      method: "POST",
-      authHeader: "X-API-KEY",
-      buildBody: (query, maxResults, filters) => {
-        const body: Record<string, unknown> = {
-          q: applyDomainFilters(query, filters),
-          num: maxResults,
-        };
-        const tbs = buildTbs(filters);
-        if (tbs) body.tbs = tbs;
-        return body;
-      },
+// Replace the extractResults inline lambda:
       extractResults: parseSerperResults,
-    }),
-  }),
-};
 ```
 
 - [ ] **Step 4:** Verify
@@ -300,14 +248,18 @@ git commit -m "refactor(parsers): extract parseSerperResults to parsers.ts"
 
 ```typescript
 export function parseWebSearchApiResults(data: unknown): SearchResult[] {
-  const d = data as {
-    organic?: Array<{ title: string; url: string; description: string }>;
-  };
-  return (d.organic ?? []).map((r) => ({
-    title: r.title ?? "",
-    url: r.url ?? "",
-    snippet: (r.description ?? "").slice(0, 500),
-  }));
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = d.organic;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.description as string) || "").slice(0, 500),
+    };
+  });
 }
 ```
 
@@ -318,11 +270,7 @@ describe("parseWebSearchApiResults", () => {
   it("extracts results from valid response", () => {
     const data = {
       organic: [
-        {
-          title: "WebSearch Result",
-          url: "https://example.com",
-          description: "Web snippet",
-        },
+        { title: "WebSearch Result", url: "https://example.com", description: "Web snippet" },
       ],
     };
     const results = parseWebSearchApiResults(data);
@@ -338,15 +286,21 @@ describe("parseWebSearchApiResults", () => {
     expect(parseWebSearchApiResults(null)).toEqual([]);
     expect(parseWebSearchApiResults(undefined)).toEqual([]);
     expect(parseWebSearchApiResults({})).toEqual([]);
+    expect(parseWebSearchApiResults({ organic: "not-array" })).toEqual([]);
   });
 
   it("truncates snippets to 500 chars", () => {
     const long = "z".repeat(600);
-    const data = {
-      organic: [{ title: "T", url: "http://u", description: long }],
-    };
+    const data = { organic: [{ title: "T", url: "http://u", description: long }] };
     const results = parseWebSearchApiResults(data);
     expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = { organic: [{ title: "Only Title" }, {}] };
+    const results = parseWebSearchApiResults(data);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
   });
 });
 ```
@@ -354,27 +308,11 @@ describe("parseWebSearchApiResults", () => {
 - [ ] **Step 3:** Update `src/providers/websearchapi.ts`
 
 ```typescript
-import { createHttpSearchProvider } from "./http-adapter.ts";
+// Add import:
 import { parseWebSearchApiResults } from "./parsers.ts";
-import type { ProviderMeta } from "./types.ts";
 
-export const providerMeta: ProviderMeta = {
-  name: "websearchapi",
-  tier: 1,
-  monthlyQuota: null,
-  requiresKey: true,
-  create: (key) => ({
-    search: createHttpSearchProvider(key!, {
-      name: "websearchapi",
-      label: "WebSearchAPI",
-      endpoint: "https://api.websearchapi.ai/ai-search",
-      method: "POST",
-      authPrefix: "Bearer ",
-      buildBody: (query, maxResults) => ({ query, maxResults }),
+// Replace the extractResults inline lambda:
       extractResults: parseWebSearchApiResults,
-    }),
-  }),
-};
 ```
 
 - [ ] **Step 4:** Verify
@@ -402,18 +340,18 @@ git commit -m "refactor(parsers): extract parseWebSearchApiResults to parsers.ts
 
 ```typescript
 export function parsePerplexityResults(data: unknown): SearchResult[] {
-  const d = data as {
-    choices?: Array<{ message?: { content?: string } }>;
-    citations?: string[];
-  };
-  const answer = d.choices?.[0]?.message?.content ?? "";
-  const citations = d.citations ?? [];
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const choices = d.choices as Array<Record<string, unknown>> | undefined;
+  const message = choices?.[0]?.message as Record<string, unknown> | undefined;
+  const answer = (message?.content as string) || "";
+  const citations = Array.isArray(d.citations) ? (d.citations as string[]) : [];
   if (!answer) return [];
   return [
     { title: "Perplexity Answer", url: "", snippet: answer.slice(0, 500) },
     ...citations.map((url) => ({
-      title: url ?? "",
-      url: url ?? "",
+      title: (url as string) || "",
+      url: (url as string) || "",
       snippet: "",
     })),
   ];
@@ -444,15 +382,14 @@ describe("parsePerplexityResults", () => {
   });
 
   it("returns [] when no answer content", () => {
-    expect(
-      parsePerplexityResults({ choices: [{ message: { content: "" } }] }),
-    ).toEqual([]);
+    expect(parsePerplexityResults({ choices: [{ message: { content: "" } }] })).toEqual([]);
     expect(parsePerplexityResults({})).toEqual([]);
   });
 
   it("returns [] for malformed input", () => {
     expect(parsePerplexityResults(null)).toEqual([]);
     expect(parsePerplexityResults(undefined)).toEqual([]);
+    expect(parsePerplexityResults("string")).toEqual([]);
   });
 
   it("truncates answer snippet to 500 chars", () => {
@@ -460,6 +397,13 @@ describe("parsePerplexityResults", () => {
     const data = { choices: [{ message: { content: long } }], citations: [] };
     const results = parsePerplexityResults(data);
     expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("returns answer only when citations missing", () => {
+    const data = { choices: [{ message: { content: "Answer" } }] };
+    const results = parsePerplexityResults(data);
+    expect(results).toHaveLength(1);
+    expect(results[0].title).toBe("Perplexity Answer");
   });
 });
 ```
@@ -514,47 +458,48 @@ git commit -m "refactor(parsers): extract parsePerplexityResults to parsers.ts"
 
 **Files:** `src/providers/parsers.ts`, `src/providers/openai-native.ts`, `tests/providers/parsers.test.ts`
 
+Note: The type definitions (UrlCitation, OutputText, MessageOutput, OutputItem) move into the parser function scope since they are only needed for parsing.
+
 - [ ] **Step 1:** Add parser function to `src/providers/parsers.ts`
 
 ```typescript
 export function parseOpenAINativeResults(data: unknown): SearchResult[] {
-  interface UrlCitation {
-    type: "url_citation";
-    url: string;
-    title: string;
-  }
-  interface OutputText {
-    type: "output_text";
-    text: string;
-    annotations?: UrlCitation[];
-  }
-  interface MessageOutput {
-    type: "message";
-    role: string;
-    content: OutputText[];
-  }
-  type OutputItem = MessageOutput | { type: string };
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const output = d.output;
+  if (!Array.isArray(output)) return [];
 
-  const d = data as { output?: OutputItem[] };
-  if (!d?.output) return [];
-
-  const messageOutput = d.output.find(
-    (item): item is MessageOutput => item.type === "message",
-  );
+  // Find the message output item
+  const messageOutput = output.find(
+    (item: unknown) =>
+      item && typeof item === "object" && (item as Record<string, unknown>).type === "message",
+  ) as Record<string, unknown> | undefined;
   if (!messageOutput) return [];
 
-  const textContent = messageOutput.content?.find(
-    (c): c is OutputText => c.type === "output_text",
-  );
-  if (!textContent?.annotations?.length) return [];
+  const content = messageOutput.content;
+  if (!Array.isArray(content)) return [];
 
+  // Find the output_text content block
+  const textContent = content.find(
+    (c: unknown) =>
+      c && typeof c === "object" && (c as Record<string, unknown>).type === "output_text",
+  ) as Record<string, unknown> | undefined;
+  if (!textContent) return [];
+
+  const annotations = textContent.annotations;
+  if (!Array.isArray(annotations) || annotations.length === 0) return [];
+
+  // Deduplicate by URL, preserving order
   const seen = new Set<string>();
   const results: SearchResult[] = [];
-  for (const ann of textContent.annotations) {
-    if (ann.type !== "url_citation") continue;
-    if (seen.has(ann.url)) continue;
-    seen.add(ann.url);
-    results.push({ title: ann.title ?? "", url: ann.url, snippet: "" });
+  for (const ann of annotations) {
+    if (!ann || typeof ann !== "object") continue;
+    const a = ann as Record<string, unknown>;
+    if (a.type !== "url_citation") continue;
+    const url = (a.url as string) || "";
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    results.push({ title: (a.title as string) || "", url, snippet: "" });
   }
   return results;
 }
@@ -577,11 +522,7 @@ describe("parseOpenAINativeResults", () => {
               annotations: [
                 { type: "url_citation", url: "https://a.com", title: "A" },
                 { type: "url_citation", url: "https://b.com", title: "B" },
-                {
-                  type: "url_citation",
-                  url: "https://a.com",
-                  title: "A duplicate",
-                },
+                { type: "url_citation", url: "https://a.com", title: "A duplicate" },
               ],
             },
           ],
@@ -590,28 +531,23 @@ describe("parseOpenAINativeResults", () => {
     };
     const results = parseOpenAINativeResults(data);
     expect(results).toHaveLength(2);
-    expect(results[0]).toEqual({
-      title: "A",
-      url: "https://a.com",
-      snippet: "",
-    });
-    expect(results[1]).toEqual({
-      title: "B",
-      url: "https://b.com",
-      snippet: "",
-    });
+    expect(results[0]).toEqual({ title: "A", url: "https://a.com", snippet: "" });
+    expect(results[1]).toEqual({ title: "B", url: "https://b.com", snippet: "" });
   });
 
   it("returns [] when no message output", () => {
-    expect(parseOpenAINativeResults({ output: [{ type: "other" }] })).toEqual(
-      [],
-    );
+    expect(parseOpenAINativeResults({ output: [{ type: "other" }] })).toEqual([]);
   });
 
   it("returns [] for malformed input", () => {
     expect(parseOpenAINativeResults(null)).toEqual([]);
     expect(parseOpenAINativeResults(undefined)).toEqual([]);
     expect(parseOpenAINativeResults({})).toEqual([]);
+    expect(parseOpenAINativeResults("string")).toEqual([]);
+  });
+
+  it("returns [] when output is not an array", () => {
+    expect(parseOpenAINativeResults({ output: "not-array" })).toEqual([]);
   });
 
   it("returns [] when no annotations", () => {
@@ -626,10 +562,36 @@ describe("parseOpenAINativeResults", () => {
     };
     expect(parseOpenAINativeResults(data)).toEqual([]);
   });
+
+  it("skips annotations with empty url", () => {
+    const data = {
+      output: [
+        {
+          type: "message",
+          role: "assistant",
+          content: [
+            {
+              type: "output_text",
+              text: "text",
+              annotations: [
+                { type: "url_citation", url: "", title: "Empty URL" },
+                { type: "url_citation", url: "https://valid.com", title: "Valid" },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const results = parseOpenAINativeResults(data);
+    expect(results).toHaveLength(1);
+    expect(results[0].url).toBe("https://valid.com");
+  });
 });
 ```
 
 - [ ] **Step 3:** Update `src/providers/openai-native.ts`
+
+Remove the local type definitions (UrlCitation, OutputText, MessageOutput, OutputItem, OpenAIResponsesResult) and replace with parser import:
 
 ```typescript
 import { createHttpSearchProvider } from "./http-adapter.ts";
@@ -681,18 +643,21 @@ git commit -m "refactor(parsers): extract parseOpenAINativeResults to parsers.ts
 
 **Files:** `src/providers/parsers.ts`, `src/providers/duckduckgo.ts`, `tests/providers/parsers.test.ts`
 
-Note: DuckDuckGo is a custom class provider, not an http-adapter user. The parser extracts the JSON-to-SearchResult mapping from the `search()` method.
+Note: DuckDuckGo is a custom class provider using subprocess. The parser extracts the JSON-to-SearchResult mapping from the `search()` method. The input is already validated as an array by the provider before calling the parser.
 
 - [ ] **Step 1:** Add parser function to `src/providers/parsers.ts`
 
 ```typescript
 export function parseDuckDuckGoResults(data: unknown): SearchResult[] {
   if (!Array.isArray(data)) return [];
-  return data.map((r: { title?: string; href?: string; body?: string }) => ({
-    title: r.title ?? "",
-    url: r.href ?? "",
-    snippet: (r.body ?? "").slice(0, 500),
-  }));
+  return data.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.href as string) || "",
+      snippet: ((item.body as string) || "").slice(0, 500),
+    };
+  });
 }
 ```
 
@@ -727,15 +692,28 @@ describe("parseDuckDuckGoResults", () => {
     const results = parseDuckDuckGoResults(data);
     expect(results[0].snippet).toHaveLength(500);
   });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = [{ title: "Only Title" }, {}];
+    const results = parseDuckDuckGoResults(data);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
+  });
 });
 ```
 
 - [ ] **Step 3:** Update `src/providers/duckduckgo.ts` — replace inline mapping with parser call
 
-Replace in the `search()` method:
+Add import at top:
 
 ```typescript
-// Before (lines 71-75):
+import { parseDuckDuckGoResults } from "./parsers.ts";
+```
+
+Replace in the `search()` method (lines 71-75):
+
+```typescript
+// Before:
 return data.slice(0, maxResults).map((r) => ({
   title: r.title,
   url: r.href,
@@ -744,12 +722,6 @@ return data.slice(0, maxResults).map((r) => ({
 
 // After:
 return parseDuckDuckGoResults(data).slice(0, maxResults);
-```
-
-Add import at top:
-
-```typescript
-import { parseDuckDuckGoResults } from "./parsers.ts";
 ```
 
 - [ ] **Step 4:** Verify
@@ -773,20 +745,24 @@ git commit -m "refactor(parsers): extract parseDuckDuckGoResults to parsers.ts"
 
 **Files:** `src/providers/parsers.ts`, `src/providers/exa.ts`, `tests/providers/parsers.test.ts`
 
-Note: Exa is a custom class provider. The parser extracts the result mapping from `search()`.
+Note: Exa is a custom class provider. The parser extracts the result mapping from `search()`. Leave `codeSearch()` unchanged (it has different semantics with `category: "code"` but identical mapping — it can use the same parser if desired, but the plan keeps it separate to minimize diff).
 
 - [ ] **Step 1:** Add parser function to `src/providers/parsers.ts`
 
 ```typescript
 export function parseExaResults(data: unknown): SearchResult[] {
-  const d = data as {
-    results?: Array<{ title: string; url: string; text?: string }>;
-  };
-  return (d.results ?? []).map((r) => ({
-    title: r.title ?? "",
-    url: r.url ?? "",
-    snippet: (r.text ?? "").slice(0, 500),
-  }));
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = d.results;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.text as string) || "").slice(0, 500),
+    };
+  });
 }
 ```
 
@@ -797,11 +773,7 @@ describe("parseExaResults", () => {
   it("extracts results from valid response", () => {
     const data = {
       results: [
-        {
-          title: "Exa Result",
-          url: "https://exa.ai/1",
-          text: "Content snippet",
-        },
+        { title: "Exa Result", url: "https://exa.ai/1", text: "Content snippet" },
       ],
     };
     const results = parseExaResults(data);
@@ -823,6 +795,7 @@ describe("parseExaResults", () => {
     expect(parseExaResults(null)).toEqual([]);
     expect(parseExaResults(undefined)).toEqual([]);
     expect(parseExaResults({})).toEqual([]);
+    expect(parseExaResults({ results: "not-array" })).toEqual([]);
   });
 
   it("truncates snippets to 500 chars", () => {
@@ -840,15 +813,17 @@ describe("parseExaResults", () => {
 // Add import at top:
 import { parseExaResults } from "./parsers.ts";
 
-// In search() method, replace:
+// In search() method, replace (lines 71-75):
 //   return (data.results ?? []).slice(0, maxResults).map((r) => ({
-//     title: r.title, url: r.url, snippet: r.text ?? "",
+//     title: r.title,
+//     url: r.url,
+//     snippet: r.text ?? "",
 //   }));
 // With:
 return parseExaResults(data).slice(0, maxResults);
 ```
 
-Note: Leave the `codeSearch()` method unchanged (it has different semantics — `category: "code"`).
+Note: Leave `codeSearch()` unchanged — it can optionally be refactored to use the same parser in a follow-up.
 
 - [ ] **Step 4:** Verify
 
@@ -875,19 +850,20 @@ git commit -m "refactor(parsers): extract parseExaResults to parsers.ts"
 
 ```typescript
 export function parseFirecrawlResults(data: unknown): SearchResult[] {
-  const d = data as {
-    data?: Array<{
-      title: string;
-      url: string;
-      markdown?: string;
-      description?: string;
-    }>;
-  };
-  return (d.data ?? []).map((r) => ({
-    title: r.title ?? "",
-    url: r.url ?? "",
-    snippet: (r.description ?? r.markdown?.slice(0, 200) ?? "").slice(0, 500),
-  }));
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawData = d.data;
+  if (!Array.isArray(rawData)) return [];
+  return rawData.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    const description = (item.description as string) || "";
+    const markdown = (item.markdown as string) || "";
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: (description || markdown.slice(0, 200)).slice(0, 500),
+    };
+  });
 }
 ```
 
@@ -898,11 +874,7 @@ describe("parseFirecrawlResults", () => {
   it("extracts results with description", () => {
     const data = {
       data: [
-        {
-          title: "Fire Result",
-          url: "https://fire.dev/1",
-          description: "A desc",
-        },
+        { title: "Fire Result", url: "https://fire.dev/1", description: "A desc" },
       ],
     };
     const results = parseFirecrawlResults(data);
@@ -912,21 +884,27 @@ describe("parseFirecrawlResults", () => {
 
   it("falls back to markdown when no description", () => {
     const data = {
-      data: [
-        { title: "T", url: "http://u", markdown: "# Heading\nContent here" },
-      ],
+      data: [{ title: "T", url: "http://u", markdown: "# Heading\nContent here" }],
     };
     const results = parseFirecrawlResults(data);
     expect(results[0].snippet).toBe("# Heading\nContent here");
+  });
+
+  it("truncates markdown fallback to 200 chars before 500 limit", () => {
+    const longMarkdown = "m".repeat(300);
+    const data = { data: [{ title: "T", url: "http://u", markdown: longMarkdown }] };
+    const results = parseFirecrawlResults(data);
+    expect(results[0].snippet).toHaveLength(200);
   });
 
   it("returns [] for malformed input", () => {
     expect(parseFirecrawlResults(null)).toEqual([]);
     expect(parseFirecrawlResults(undefined)).toEqual([]);
     expect(parseFirecrawlResults({})).toEqual([]);
+    expect(parseFirecrawlResults({ data: "not-array" })).toEqual([]);
   });
 
-  it("truncates snippets to 500 chars", () => {
+  it("truncates description snippets to 500 chars", () => {
     const long = "f".repeat(600);
     const data = { data: [{ title: "T", url: "http://u", description: long }] };
     const results = parseFirecrawlResults(data);
@@ -941,14 +919,17 @@ describe("parseFirecrawlResults", () => {
 // Add import at top:
 import { parseFirecrawlResults } from "./parsers.ts";
 
-// In search() method, replace:
+// In search() method, replace (lines 50-54):
 //   return (data.data ?? []).slice(0, maxResults).map((r) => ({
-//     title: r.title, url: r.url,
+//     title: r.title,
+//     url: r.url,
 //     snippet: r.description ?? r.markdown?.slice(0, 200) ?? "",
 //   }));
 // With:
 return parseFirecrawlResults(data).slice(0, maxResults);
 ```
+
+Note: The `FirecrawlSearchResponse` interface can be removed since the parser handles the shape internally.
 
 - [ ] **Step 4:** Verify
 
@@ -975,14 +956,18 @@ git commit -m "refactor(parsers): extract parseFirecrawlResults to parsers.ts"
 
 ```typescript
 export function parseJinaResults(data: unknown): SearchResult[] {
-  const d = data as {
-    data?: Array<{ title: string; url: string; description: string }>;
-  };
-  return (d.data ?? []).map((r) => ({
-    title: r.title ?? "",
-    url: r.url ?? "",
-    snippet: (r.description ?? "").slice(0, 500),
-  }));
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawData = d.data;
+  if (!Array.isArray(rawData)) return [];
+  return rawData.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.description as string) || "").slice(0, 500),
+    };
+  });
 }
 ```
 
@@ -993,11 +978,7 @@ describe("parseJinaResults", () => {
   it("extracts results from valid response", () => {
     const data = {
       data: [
-        {
-          title: "Jina Result",
-          url: "https://jina.ai/1",
-          description: "Jina snippet",
-        },
+        { title: "Jina Result", url: "https://jina.ai/1", description: "Jina snippet" },
       ],
     };
     const results = parseJinaResults(data);
@@ -1013,6 +994,7 @@ describe("parseJinaResults", () => {
     expect(parseJinaResults(null)).toEqual([]);
     expect(parseJinaResults(undefined)).toEqual([]);
     expect(parseJinaResults({})).toEqual([]);
+    expect(parseJinaResults({ data: "not-array" })).toEqual([]);
   });
 
   it("truncates snippets to 500 chars", () => {
@@ -1020,6 +1002,13 @@ describe("parseJinaResults", () => {
     const data = { data: [{ title: "T", url: "http://u", description: long }] };
     const results = parseJinaResults(data);
     expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = { data: [{ title: "Only Title" }, {}] };
+    const results = parseJinaResults(data);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
   });
 });
 ```
@@ -1030,13 +1019,17 @@ describe("parseJinaResults", () => {
 // Add import at top:
 import { parseJinaResults } from "./parsers.ts";
 
-// In search() method, replace:
+// In search() method, replace (lines 55-59):
 //   return (data.data ?? []).slice(0, maxResults).map((item) => ({
-//     title: item.title, url: item.url, snippet: item.description,
+//     title: item.title,
+//     url: item.url,
+//     snippet: item.description,
 //   }));
 // With:
 return parseJinaResults(data).slice(0, maxResults);
 ```
+
+Note: The `JinaSearchResponse` interface can be removed since the parser handles the shape internally.
 
 - [ ] **Step 4:** Verify
 
@@ -1063,14 +1056,18 @@ git commit -m "refactor(parsers): extract parseJinaResults to parsers.ts"
 
 ```typescript
 export function parseTavilyResults(data: unknown): SearchResult[] {
-  const d = data as {
-    results?: Array<{ title: string; url: string; content: string }>;
-  };
-  return (d.results ?? []).map((r) => ({
-    title: r.title ?? "",
-    url: r.url ?? "",
-    snippet: (r.content ?? "").slice(0, 500),
-  }));
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = d.results;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.content as string) || "").slice(0, 500),
+    };
+  });
 }
 ```
 
@@ -1081,11 +1078,7 @@ describe("parseTavilyResults", () => {
   it("extracts results from valid response", () => {
     const data = {
       results: [
-        {
-          title: "Tavily Result",
-          url: "https://tavily.com/1",
-          content: "Tavily snippet",
-        },
+        { title: "Tavily Result", url: "https://tavily.com/1", content: "Tavily snippet" },
       ],
     };
     const results = parseTavilyResults(data);
@@ -1101,6 +1094,7 @@ describe("parseTavilyResults", () => {
     expect(parseTavilyResults(null)).toEqual([]);
     expect(parseTavilyResults(undefined)).toEqual([]);
     expect(parseTavilyResults({})).toEqual([]);
+    expect(parseTavilyResults({ results: "not-array" })).toEqual([]);
   });
 
   it("truncates snippets to 500 chars", () => {
@@ -1108,6 +1102,13 @@ describe("parseTavilyResults", () => {
     const data = { results: [{ title: "T", url: "http://u", content: long }] };
     const results = parseTavilyResults(data);
     expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = { results: [{ title: "Only Title" }, {}] };
+    const results = parseTavilyResults(data);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
   });
 });
 ```
@@ -1118,13 +1119,17 @@ describe("parseTavilyResults", () => {
 // Add import at top:
 import { parseTavilyResults } from "./parsers.ts";
 
-// In search() method, replace:
+// In search() method, replace (lines 57-61):
 //   return (data.results ?? []).slice(0, maxResults).map((r) => ({
-//     title: r.title, url: r.url, snippet: r.content,
+//     title: r.title,
+//     url: r.url,
+//     snippet: r.content,
 //   }));
 // With:
 return parseTavilyResults(data).slice(0, maxResults);
 ```
+
+Note: The `TavilySearchResponse` interface can be removed since the parser handles the shape internally.
 
 - [ ] **Step 4:** Verify
 
@@ -1151,14 +1156,18 @@ git commit -m "refactor(parsers): extract parseTavilyResults to parsers.ts"
 
 ```typescript
 export function parseSearxngResults(data: unknown): SearchResult[] {
-  const d = data as {
-    results?: Array<{ title: string; url: string; content: string }>;
-  };
-  return (d.results ?? []).map((r) => ({
-    title: r.title ?? "",
-    url: r.url ?? "",
-    snippet: (r.content ?? "").slice(0, 500),
-  }));
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = d.results;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.content as string) || "").slice(0, 500),
+    };
+  });
 }
 ```
 
@@ -1169,11 +1178,7 @@ describe("parseSearxngResults", () => {
   it("extracts results from valid response", () => {
     const data = {
       results: [
-        {
-          title: "SearXNG Result",
-          url: "https://searx.info/1",
-          content: "SearX snippet",
-        },
+        { title: "SearXNG Result", url: "https://searx.info/1", content: "SearX snippet" },
       ],
     };
     const results = parseSearxngResults(data);
@@ -1189,6 +1194,7 @@ describe("parseSearxngResults", () => {
     expect(parseSearxngResults(null)).toEqual([]);
     expect(parseSearxngResults(undefined)).toEqual([]);
     expect(parseSearxngResults({})).toEqual([]);
+    expect(parseSearxngResults({ results: "not-array" })).toEqual([]);
   });
 
   it("truncates snippets to 500 chars", () => {
@@ -1196,6 +1202,13 @@ describe("parseSearxngResults", () => {
     const data = { results: [{ title: "T", url: "http://u", content: long }] };
     const results = parseSearxngResults(data);
     expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = { results: [{ title: "Only Title" }, {}] };
+    const results = parseSearxngResults(data);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
   });
 });
 ```
@@ -1206,13 +1219,17 @@ describe("parseSearxngResults", () => {
 // Add import at top:
 import { parseSearxngResults } from "./parsers.ts";
 
-// In search() method, replace:
+// In search() method, replace (lines 57-61):
 //   return (data.results ?? []).slice(0, maxResults).map((r) => ({
-//     title: r.title, url: r.url, snippet: r.content,
+//     title: r.title,
+//     url: r.url,
+//     snippet: r.content,
 //   }));
 // With:
 return parseSearxngResults(data).slice(0, maxResults);
 ```
+
+Note: The `SearXNGSearchResponse` interface can be removed since the parser handles the shape internally.
 
 - [ ] **Step 4:** Verify
 
@@ -1233,7 +1250,7 @@ git commit -m "refactor(parsers): extract parseSearxngResults to parsers.ts"
 
 ## Final Verification
 
-After all 11 tasks complete (Tasks 1-11 — Task 11 is SearXNG):
+After all 11 tasks complete:
 
 ```bash
 pnpm test
@@ -1241,4 +1258,4 @@ pnpm run lint
 pnpm run typecheck
 ```
 
-All 10 provider parsers now live in `src/providers/parsers.ts` alongside the 7 parsers from Phases 2-5, giving 17 total pure parser functions with full test coverage.
+All 11 provider parsers now live in `src/providers/parsers.ts` alongside the 7 parsers from Phases 2-5, giving 18 total pure parser functions with full test coverage.
