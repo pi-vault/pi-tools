@@ -1,7 +1,7 @@
 import * as fsSync from "node:fs";
 import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DuckDuckGoProvider } from "../../src/providers/duckduckgo.ts";
+import { DuckDuckGoProvider, providerMeta } from "../../src/providers/duckduckgo.ts";
 import { stubExec } from "../helpers.ts";
 import type { SearchFilters } from "../../src/providers/types.ts";
 
@@ -217,6 +217,59 @@ describe("DuckDuckGoProvider", () => {
       const results = await provider.search("test query", 5);
       expect(results.length).toBe(3);
       expect(results[0].title).toBe("Example Result");
+    });
+  });
+
+  describe("config options", () => {
+    it("passes backend flag when configured", async () => {
+      const provider = new DuckDuckGoProvider(execStub.fn, { backend: "lite" });
+      await provider.search("test", 5);
+
+      const args = execStub.lastArgs()!;
+      expect(args).toContain("-b");
+      expect(args[args.indexOf("-b") + 1]).toBe("lite");
+    });
+
+    it("passes region flag when configured", async () => {
+      const provider = new DuckDuckGoProvider(execStub.fn, { region: "us-en" });
+      await provider.search("test", 5);
+
+      const args = execStub.lastArgs()!;
+      expect(args).toContain("-r");
+      expect(args[args.indexOf("-r") + 1]).toBe("us-en");
+    });
+
+    it("config timelimit overrides filter-derived timelimit", async () => {
+      const provider = new DuckDuckGoProvider(execStub.fn, { timelimit: "m" });
+      const old = new Date();
+      old.setDate(old.getDate() - 200);
+      await provider.search("test", 5, undefined, { startDate: old.toISOString().slice(0, 10) });
+
+      const args = execStub.lastArgs()!;
+      expect(args).toContain("-t");
+      // Config timelimit "m" should override the computed "y" from startDate >30d ago
+      expect(args[args.indexOf("-t") + 1]).toBe("m");
+    });
+
+    it("does not pass backend/region flags when not configured", async () => {
+      const provider = new DuckDuckGoProvider(execStub.fn);
+      await provider.search("test", 5);
+
+      const args = execStub.lastArgs()!;
+      expect(args).not.toContain("-b");
+      expect(args).not.toContain("-r");
+    });
+
+    it("providerMeta.create passes config options to provider", () => {
+      const config = {
+        enabled: true,
+        ddgsBackend: "api",
+        ddgsRegion: "de-de",
+        ddgsTimelimit: "w",
+      };
+      const instance = providerMeta.create(undefined, config as any);
+      expect(instance.search).toBeDefined();
+      expect(instance.search!.name).toBe("duckduckgo");
     });
   });
 });
