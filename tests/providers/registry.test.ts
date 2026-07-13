@@ -757,6 +757,102 @@ describe("ProviderRegistry", () => {
   });
 });
 
+describe("quota warning", () => {
+  it("returns null when provider has no quota", () => {
+    const registry = mem();
+    const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+    registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+
+    expect(registry.getQuotaWarning("duckduckgo")).toBeNull();
+  });
+
+  it("returns null when usage is below 80%", () => {
+    const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    const registry = new ProviderRegistry({
+      load: () => ({ exa: { count: 500, month } }),
+      save: () => {},
+    });
+    const exa = mockProvider("exa", "Exa");
+    registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
+
+    expect(registry.getQuotaWarning("exa")).toBeNull();
+  });
+
+  it("returns warning when usage reaches 80%", () => {
+    const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    const registry = new ProviderRegistry({
+      load: () => ({ exa: { count: 800, month } }),
+      save: () => {},
+    });
+    const exa = mockProvider("exa", "Exa");
+    registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
+
+    const warning = registry.getQuotaWarning("exa");
+    expect(warning).not.toBeNull();
+    expect(warning).toContain("exa");
+    expect(warning).toContain("800/1000");
+  });
+
+  it("returns exhausted message when quota is used up", () => {
+    const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    const registry = new ProviderRegistry({
+      load: () => ({ exa: { count: 1000, month } }),
+      save: () => {},
+    });
+    const exa = mockProvider("exa", "Exa");
+    registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
+
+    const warning = registry.getQuotaWarning("exa");
+    expect(warning).toContain("exhausted");
+  });
+
+  it("emits console.warn when threshold is crossed via recordOutcome", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    const registry = new ProviderRegistry({
+      load: () => ({ exa: { count: 799, month } }),
+      save: () => {},
+    });
+    const exa = mockProvider("exa", "Exa");
+    registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
+
+    registry.recordOutcome("exa", { success: true, latencyMs: 100 });
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("exa"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("800/1000"));
+
+    // Second call should NOT warn again (not crossing threshold)
+    warnSpy.mockClear();
+    registry.recordOutcome("exa", { success: true, latencyMs: 100 });
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it("emits console.warn when quota is exhausted via recordOutcome", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    const registry = new ProviderRegistry({
+      load: () => ({ exa: { count: 999, month } }),
+      save: () => {},
+    });
+    const exa = mockProvider("exa", "Exa");
+    registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
+
+    registry.recordOutcome("exa", { success: true, latencyMs: 100 });
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("exhausted"));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("1000/1000"));
+
+    warnSpy.mockRestore();
+  });
+
+  it("returns null for unknown provider", () => {
+    const registry = mem();
+    expect(registry.getQuotaWarning("nonexistent")).toBeNull();
+  });
+});
+
 describe("docs provider registration", () => {
   it("selectDocs returns undefined when no docs provider registered", () => {
     const registry = mem();

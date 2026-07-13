@@ -16,17 +16,20 @@ interface FirecrawlScrapeResponse {
 export class FirecrawlProvider implements SearchProvider, FetchProvider {
   readonly name = "firecrawl";
   readonly label = "Firecrawl";
-  private apiKey: string;
+  private apiKey?: string;
 
-  constructor(apiKey: string) {
+  constructor(apiKey?: string) {
     this.apiKey = apiKey;
   }
 
   private headers(): Record<string, string> {
-    return {
+    const h: Record<string, string> = {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${this.apiKey}`,
     };
+    if (this.apiKey) {
+      h.Authorization = `Bearer ${this.apiKey}`;
+    }
+    return h;
   }
 
   async search(
@@ -65,9 +68,9 @@ export const providerMeta: ProviderMeta = {
   name: "firecrawl",
   tier: 1,
   monthlyQuota: 1000,
-  requiresKey: true,
+  requiresKey: false,
   create: (key) => {
-    const p = new FirecrawlProvider(key!);
+    const p = new FirecrawlProvider(key);
     return { search: p, fetch: p };
   },
 };

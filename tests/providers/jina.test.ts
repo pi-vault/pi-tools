@@ -1,6 +1,6 @@
 // tests/providers/jina.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { JinaProvider } from "../../src/providers/jina.ts";
+import { JinaProvider, providerMeta } from "../../src/providers/jina.ts";
 import { stubFetch } from "../helpers.ts";
 import type { SearchFilters } from "../../src/providers/types.ts";
 
@@ -107,6 +107,28 @@ describe("JinaProvider", () => {
       const url = fetchCall[0] as string;
       expect(url).toContain("q=test%20query");
       expect(url).not.toContain("site:");
+    });
+  });
+
+  describe("optional key mode", () => {
+    it("does not send Authorization header when no key provided", async () => {
+      fetchStub.addResponse("s.jina.ai", { body: { data: [] } });
+
+      const provider = new JinaProvider();
+      await provider.search("test", 5);
+
+      const fetchCall = (globalThis.fetch as any).mock.calls[0];
+      expect(fetchCall[1].headers.Authorization).toBeUndefined();
+    });
+
+    it("providerMeta.create works with and without key", () => {
+      const withKey = providerMeta.create("key");
+      expect(withKey.search).toBeDefined();
+      expect(withKey.fetch).toBeDefined();
+
+      const withoutKey = providerMeta.create(undefined);
+      expect(withoutKey.search).toBeDefined();
+      expect(withoutKey.fetch).toBeDefined();
     });
   });
 });

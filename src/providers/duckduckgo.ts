@@ -16,6 +16,12 @@ export type ExecFileFn = (
   callback: (error: Error | null, stdout: string, stderr: string) => void,
 ) => { kill(): boolean | undefined };
 
+interface DDGSOptions {
+  backend?: string;
+  region?: string;
+  timelimit?: string;
+}
+
 const EXEC_TIMEOUT_MS = 15_000;
 
 export class DuckDuckGoProvider implements SearchProvider {
@@ -23,9 +29,14 @@ export class DuckDuckGoProvider implements SearchProvider {
   readonly label = "DuckDuckGo";
 
   private readonly execFile: ExecFileFn;
+  private readonly ddgsOptions: DDGSOptions;
 
-  constructor(execFileFn: ExecFileFn = defaultExecFile as unknown as ExecFileFn) {
+  constructor(
+    execFileFn: ExecFileFn = defaultExecFile as unknown as ExecFileFn,
+    options?: DDGSOptions,
+  ) {
     this.execFile = execFileFn;
+    this.ddgsOptions = options ?? {};
   }
 
   async search(
@@ -39,7 +50,7 @@ export class DuckDuckGoProvider implements SearchProvider {
     }
 
     const effectiveQuery = applyDomainFilters(query, filters);
-    const timelimit = computeTimelimit(filters);
+    const timelimit = this.ddgsOptions.timelimit ?? computeTimelimit(filters);
 
     const tmpFile = path.join(os.tmpdir(), `ddgs-${crypto.randomUUID()}.json`);
 
@@ -82,6 +93,12 @@ export class DuckDuckGoProvider implements SearchProvider {
       };
 
       const args = ["text", "-q", query, "-m", String(maxResults), "-o", outPath];
+      if (this.ddgsOptions.backend) {
+        args.push("-b", this.ddgsOptions.backend);
+      }
+      if (this.ddgsOptions.region) {
+        args.push("-r", this.ddgsOptions.region);
+      }
       if (timelimit) {
         args.push("-t", timelimit);
       }
@@ -142,5 +159,11 @@ export const providerMeta: ProviderMeta = {
   tier: 3,
   monthlyQuota: null,
   requiresKey: false,
-  create: () => ({ search: new DuckDuckGoProvider() }),
+  create: (_key, providerConfig) => ({
+    search: new DuckDuckGoProvider(undefined, {
+      backend: providerConfig?.ddgsBackend,
+      region: providerConfig?.ddgsRegion,
+      timelimit: providerConfig?.ddgsTimelimit,
+    }),
+  }),
 };

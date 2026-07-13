@@ -78,4 +78,35 @@ describe("PerplexityProvider", () => {
       expect(body.includeDomains).toBeUndefined();
     });
   });
+
+  describe("model config", () => {
+    it("uses default model 'sonar' when not configured", async () => {
+      fetchStub.addResponse("api.perplexity.ai", {
+        body: { choices: [{ message: { content: "answer" } }], citations: [] },
+      });
+
+      await makeProvider().search("test", 5);
+
+      const fetchCall = (globalThis.fetch as any).mock.calls[0];
+      const body = JSON.parse(fetchCall[1].body);
+      expect(body.model).toBe("sonar");
+    });
+
+    it("uses configured model from providerConfig", async () => {
+      fetchStub.addResponse("api.perplexity.ai", {
+        body: { choices: [{ message: { content: "answer" } }], citations: [] },
+      });
+
+      const provider = providerMeta.create("pplx-key", {
+        enabled: true,
+        model: "sonar-pro",
+      }).search!;
+      await provider.search("test", 5);
+
+      const fetchCall = (globalThis.fetch as any).mock.calls[0];
+      const body = JSON.parse(fetchCall[1].body);
+      expect(body.model).toBe("sonar-pro");
+    });
+
+  });
 });

@@ -7,7 +7,7 @@ export const providerMeta: ProviderMeta = {
   tier: 2,
   monthlyQuota: null,
   requiresKey: true,
-  create: (key) => ({
+  create: (key, providerConfig) => ({
     search: createHttpSearchProvider(key!, {
       name: "perplexity",
       label: "Perplexity Sonar",
@@ -15,7 +15,7 @@ export const providerMeta: ProviderMeta = {
       method: "POST",
       authPrefix: "Bearer ",
       buildBody: (query) => ({
-        model: "sonar",
+        model: providerConfig?.model ?? "sonar",
         messages: [{ role: "user", content: query }],
       }),
       extractResults: parsePerplexityResults,
