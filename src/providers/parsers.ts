@@ -103,6 +103,21 @@ export function parseSofyaResults(data: unknown): SearchResult[] {
   });
 }
 
+export function parseSerperResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = d.organic;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.link as string) || "",
+      snippet: ((item.snippet as string) || "").slice(0, 500),
+    };
+  });
+}
+
 export function parseBraveResults(data: unknown): SearchResult[] {
   if (!data || typeof data !== "object") return [];
   const d = data as Record<string, unknown>;

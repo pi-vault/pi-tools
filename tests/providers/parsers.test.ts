@@ -4,6 +4,7 @@ import {
   parseBraveResults,
   parseLangSearchResults,
   parseMarginaliaResults,
+  parseSerperResults,
 } from "../../src/providers/parsers.ts";
 
 describe("parseMarginaliaResults", () => {
@@ -397,6 +398,44 @@ describe("parseBraveResults", () => {
     const data = { web: { results: [{ title: "Only Title" }, {}] } };
     const results = parseBraveResults(data);
     expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
+  });
+});
+
+describe("parseSerperResults", () => {
+  it("extracts results from valid response", () => {
+    const data = {
+      organic: [
+        { title: "Google Result", link: "https://google.com/1", snippet: "A snippet" },
+      ],
+    };
+    const results = parseSerperResults(data);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({
+      title: "Google Result",
+      url: "https://google.com/1",
+      snippet: "A snippet",
+    });
+  });
+
+  it("returns [] for malformed input", () => {
+    expect(parseSerperResults(null)).toEqual([]);
+    expect(parseSerperResults(undefined)).toEqual([]);
+    expect(parseSerperResults({})).toEqual([]);
+    expect(parseSerperResults({ organic: "not-array" })).toEqual([]);
+  });
+
+  it("truncates snippets to 500 chars", () => {
+    const long = "y".repeat(600);
+    const data = { organic: [{ title: "T", link: "http://u", snippet: long }] };
+    const results = parseSerperResults(data);
+    expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = { organic: [{ title: "Only Title" }, {}] };
+    const results = parseSerperResults(data);
     expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
     expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
   });
