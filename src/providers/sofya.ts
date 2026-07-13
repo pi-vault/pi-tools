@@ -86,8 +86,7 @@ export const providerMeta: ProviderMeta = {
   monthlyQuota: null,
   requiresKey: true,
   create: (key, providerConfig) => {
-    const cfg = providerConfig as any;
-    const p = new SofyaProvider(key!, cfg?.searchDepth, cfg?.topic);
+    const p = new SofyaProvider(key!, providerConfig?.searchDepth, providerConfig?.topic);
     return { search: p, fetch: p };
   },
 };

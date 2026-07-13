@@ -11,7 +11,7 @@ export const providerMeta: ProviderMeta = {
     search: createHttpSearchProvider(key!, {
       name: "fastcrw",
       label: "fastCRW",
-      endpoint: `${(providerConfig as any)?.baseUrl ?? "https://api.fastcrw.com"}/v1/search`,
+      endpoint: `${providerConfig?.baseUrl ?? "https://api.fastcrw.com"}/v1/search`,
       method: "POST",
       authPrefix: "Bearer ",
       buildBody: (query, maxResults) => ({

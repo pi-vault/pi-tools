@@ -17,7 +17,7 @@ export const providerMeta: ProviderMeta = {
       buildBody: (query) => ({
         query,
         outputType: "searchResults",
-        depth: (providerConfig as any)?.depth ?? "standard",
+        depth: providerConfig?.depth ?? "standard",
       }),
       extractResults: parseLinkupResults,
     }),
