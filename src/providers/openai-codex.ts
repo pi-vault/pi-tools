@@ -1,8 +1,163 @@
 // src/providers/openai-codex.ts
 import type { ProviderConfigEntry } from "../config.ts";
-import type { ProviderMeta, SearchResult } from "./types.ts";
+import type { ProviderMeta, SearchProvider, SearchResult } from "./types.ts";
+import { parseOpenAINativeResults } from "./parsers.ts";
 
+/**
+ * Dual-mode OpenAI Codex provider.
+ *
+ * Mode A (Codex): Uses Pi AuthStorage + streamOpenAICodexResponses via @earendil-works/pi-ai.
+ *   Activated when Pi packages are available and AuthStorage has an openai-codex key.
+ *   Returns rich snippets via submit_search_results tool call.
+ *
+ * Mode B (Responses API): Uses user-provided OPENAI_API_KEY with the Responses API.
+ *   Activated as fallback when Mode A is unavailable.
+ *   Returns url_citation annotations (title + url, no snippets).
+ *
+ * Mode resolution is deferred to first search() call (lazy init) because
+ * AuthStorage.getApiKey() is async but ProviderMeta.create() is sync.
+ */
+
+const DEFAULT_MODEL_B = "gpt-4.1-nano";
+const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses";
 const DEFAULT_SEARCH_CONTEXT_SIZE = "low";
+
+type ResolvedMode = "codex" | "responses-api" | "unavailable";
+
+// Minimal type shapes for dynamically imported Pi packages.
+interface PiStreamFn {
+  (model: unknown, context: unknown, options: unknown): { result(): Promise<PiStreamMessage> };
+}
+interface PiGetModelFn {
+  (provider: string, modelId: string): unknown | undefined;
+}
+interface PiAuthStorage {
+  getApiKey(provider: string, opts?: { includeFallback?: boolean }): Promise<string | undefined>;
+}
+interface PiStreamMessage {
+  stopReason: string;
+  errorMessage?: string;
+  content: Array<{ type: string; name?: string; arguments?: unknown }>;
+}
+
+class OpenAICodexProvider implements SearchProvider {
+  readonly name = "openai-codex";
+  readonly label = "OpenAI Codex";
+
+  private readonly userApiKey?: string;
+  private readonly model?: string;
+  private resolvedMode: ResolvedMode | null = null;
+
+  // Mode A dependencies (resolved lazily via dynamic import)
+  private streamFn: PiStreamFn | null = null;
+  private getModelFn: PiGetModelFn | null = null;
+  private authStorage: PiAuthStorage | null = null;
+
+  constructor(userApiKey?: string, providerConfig?: ProviderConfigEntry) {
+    this.userApiKey = userApiKey;
+    this.model = (providerConfig as Record<string, unknown> | undefined)
+      ?.model as string | undefined;
+  }
+
+  async search(
+    query: string,
+    maxResults: number,
+    signal?: AbortSignal,
+  ): Promise<SearchResult[]> {
+    if (!this.resolvedMode) {
+      await this.resolveMode();
+    }
+
+    switch (this.resolvedMode) {
+      case "codex":
+        return this.searchModeA(query, maxResults, signal);
+      case "responses-api":
+        return this.searchModeB(query, maxResults, signal);
+      default:
+        return [];
+    }
+  }
+
+  private async resolveMode(): Promise<void> {
+    // Try Mode A: dynamic import of Pi packages
+    try {
+      const [piAi, piAgent] = await Promise.all([
+        import("@earendil-works/pi-ai") as Promise<{
+          streamOpenAICodexResponses: PiStreamFn;
+          getModel: PiGetModelFn;
+        }>,
+        import("@earendil-works/pi-coding-agent") as Promise<{
+          AuthStorage: { create(): PiAuthStorage };
+        }>,
+      ]);
+
+      const authStorage = piAgent.AuthStorage.create();
+      const key = await authStorage.getApiKey("openai-codex", {
+        includeFallback: false,
+      });
+      if (key) {
+        this.streamFn = piAi.streamOpenAICodexResponses;
+        this.getModelFn = piAi.getModel;
+        this.authStorage = authStorage;
+        this.resolvedMode = "codex";
+        return;
+      }
+    } catch {
+      // Pi packages not available — fall through to Mode B
+    }
+
+    // Try Mode B: user-provided API key
+    if (this.userApiKey) {
+      this.resolvedMode = "responses-api";
+      return;
+    }
+
+    this.resolvedMode = "unavailable";
+  }
+
+  /** Mode A: Streaming Codex via Pi AuthStorage. */
+  private async searchModeA(
+    _query: string,
+    _maxResults: number,
+    _signal?: AbortSignal,
+  ): Promise<SearchResult[]> {
+    // Implemented in Mode A task
+    return [];
+  }
+
+  /** Mode B: Direct POST to OpenAI Responses API. */
+  private async searchModeB(
+    query: string,
+    maxResults: number,
+    signal?: AbortSignal,
+  ): Promise<SearchResult[]> {
+    if (!this.userApiKey) return [];
+
+    const response = await fetch(RESPONSES_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.userApiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.model ?? DEFAULT_MODEL_B,
+        tools: [{ type: "web_search" }],
+        tool_choice: "required",
+        input: `Search the web for: ${query}`,
+      }),
+      signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `OpenAI Codex API error: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    const data: unknown = await response.json();
+    return parseOpenAINativeResults(data).slice(0, maxResults);
+  }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -99,5 +254,7 @@ export const providerMeta: ProviderMeta = {
   tier: 1,
   monthlyQuota: null,
   requiresKey: false,
-  create: (_key?: string, _providerConfig?: ProviderConfigEntry) => ({}),
+  create: (key?: string, providerConfig?: ProviderConfigEntry) => ({
+    search: new OpenAICodexProvider(key, providerConfig),
+  }),
 };
