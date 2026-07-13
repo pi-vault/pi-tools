@@ -3,6 +3,22 @@ import { loadMergedConfig, resolveApiKey, clearCredentialCache } from "./config.
 import type { ProviderRegistry } from "./providers/registry.ts";
 import type { ProviderMeta } from "./providers/types.ts";
 
+/** Provider name aliases for backward compatibility. */
+const PROVIDER_ALIASES: Record<string, string> = {
+  "openai-native": "openai-codex",
+};
+
+function resolveProviderAlias(name: string): { resolved: string; aliased: boolean } {
+  const resolved = PROVIDER_ALIASES[name];
+  if (resolved) {
+    console.warn(
+      `[pi-tools] Provider "${name}" is deprecated. Use "${resolved}" instead.`,
+    );
+    return { resolved, aliased: true };
+  }
+  return { resolved: name, aliased: false };
+}
+
 interface ConfigChangeSet {
   added: string[];
   removed: string[];
@@ -108,7 +124,8 @@ export class ConfigManager {
   }
 
   private registerProvider(name: string, config: PiToolsConfig): void {
-    const meta = this.metaByName.get(name);
+    const { resolved } = resolveProviderAlias(name);
+    const meta = this.metaByName.get(resolved);
     if (!meta) return;
 
     const providerConfig = config.providers[name];
