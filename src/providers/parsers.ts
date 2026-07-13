@@ -103,6 +103,24 @@ export function parseSofyaResults(data: unknown): SearchResult[] {
   });
 }
 
+export function parsePerplexityResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const choices = d.choices as Array<Record<string, unknown>> | undefined;
+  const message = choices?.[0]?.message as Record<string, unknown> | undefined;
+  const answer = (message?.content as string) || "";
+  const citations = Array.isArray(d.citations) ? (d.citations as string[]) : [];
+  if (!answer) return [];
+  return [
+    { title: "Perplexity Answer", url: "", snippet: answer.slice(0, 500) },
+    ...citations.map((url) => ({
+      title: (url as string) || "",
+      url: (url as string) || "",
+      snippet: "",
+    })),
+  ];
+}
+
 export function parseWebSearchApiResults(data: unknown): SearchResult[] {
   if (!data || typeof data !== "object") return [];
   const d = data as Record<string, unknown>;

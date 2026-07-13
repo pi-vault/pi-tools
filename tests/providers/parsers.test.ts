@@ -4,6 +4,7 @@ import {
   parseBraveResults,
   parseLangSearchResults,
   parseMarginaliaResults,
+  parsePerplexityResults,
   parseSerperResults,
   parseWebSearchApiResults,
 } from "../../src/providers/parsers.ts";
@@ -477,5 +478,51 @@ describe("parseWebSearchApiResults", () => {
     const results = parseWebSearchApiResults(data);
     expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
     expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
+  });
+});
+
+describe("parsePerplexityResults", () => {
+  it("extracts answer and citations", () => {
+    const data = {
+      choices: [{ message: { content: "The answer is 42." } }],
+      citations: ["https://source1.com", "https://source2.com"],
+    };
+    const results = parsePerplexityResults(data);
+    expect(results).toHaveLength(3);
+    expect(results[0]).toEqual({
+      title: "Perplexity Answer",
+      url: "",
+      snippet: "The answer is 42.",
+    });
+    expect(results[1]).toEqual({
+      title: "https://source1.com",
+      url: "https://source1.com",
+      snippet: "",
+    });
+  });
+
+  it("returns [] when no answer content", () => {
+    expect(parsePerplexityResults({ choices: [{ message: { content: "" } }] })).toEqual([]);
+    expect(parsePerplexityResults({})).toEqual([]);
+  });
+
+  it("returns [] for malformed input", () => {
+    expect(parsePerplexityResults(null)).toEqual([]);
+    expect(parsePerplexityResults(undefined)).toEqual([]);
+    expect(parsePerplexityResults("string")).toEqual([]);
+  });
+
+  it("truncates answer snippet to 500 chars", () => {
+    const long = "a".repeat(600);
+    const data = { choices: [{ message: { content: long } }], citations: [] };
+    const results = parsePerplexityResults(data);
+    expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("returns answer only when citations missing", () => {
+    const data = { choices: [{ message: { content: "Answer" } }] };
+    const results = parsePerplexityResults(data);
+    expect(results).toHaveLength(1);
+    expect(results[0].title).toBe("Perplexity Answer");
   });
 });
