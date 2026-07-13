@@ -1111,9 +1111,9 @@ pnpm run lint
 pnpm run typecheck
 ```
 
-**Expected state of `src/providers/all.ts`** after this phase — 4 new entries added (18 total):
+**Expected state of `src/providers/all.ts`** after this phase — 4 new entries added (21 total):
 
-- brave, context7, duckduckgo, exa, exaMcp, **fastcrw**, firecrawl, jina, **linkup**, openaiNative, parallel, perplexity, searxng, serper, **sofya**, tavily, websearchapi, **youcom**
+- brave, braveLlm, context7, duckduckgo, exa, exaMcp, **fastcrw**, firecrawl, jina, langsearch, **linkup**, marginalia, openaiNative, parallel, perplexity, searxng, serper, **sofya**, tavily, websearchapi, **youcom**
 
 **Expected additions to `src/providers/parsers.ts`:**
 
