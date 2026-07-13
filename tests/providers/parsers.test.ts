@@ -532,6 +532,16 @@ describe("parsePerplexityResults", () => {
     expect(results).toHaveLength(1);
     expect(results[0].title).toBe("Perplexity Answer");
   });
+
+  it("handles citation items with missing/non-string values", () => {
+    const data = {
+      choices: [{ message: { content: "Answer" } }],
+      citations: [null, undefined, 123, "https://valid.com"],
+    };
+    const results = parsePerplexityResults(data);
+    expect(results).toHaveLength(5);
+    expect(results[4]).toEqual({ title: "https://valid.com", url: "https://valid.com", snippet: "" });
+  });
 });
 
 describe("parseOpenAINativeResults", () => {
@@ -611,6 +621,33 @@ describe("parseOpenAINativeResults", () => {
     const results = parseOpenAINativeResults(data);
     expect(results).toHaveLength(1);
     expect(results[0].url).toBe("https://valid.com");
+  });
+
+  it("handles annotations with missing fields gracefully", () => {
+    const data = {
+      output: [
+        {
+          type: "message",
+          role: "assistant",
+          content: [
+            {
+              type: "output_text",
+              text: "text",
+              annotations: [
+                { type: "url_citation", url: "https://x.com" },
+                { type: "url_citation", url: "https://y.com", title: "" },
+                null,
+                { type: "other_type", url: "https://skip.com" },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const results = parseOpenAINativeResults(data);
+    expect(results).toHaveLength(2);
+    expect(results[0]).toEqual({ title: "", url: "https://x.com", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "https://y.com", snippet: "" });
   });
 });
 
@@ -723,6 +760,13 @@ describe("parseFirecrawlResults", () => {
     const data = { data: [{ title: "T", url: "http://u", description: long }] };
     const results = parseFirecrawlResults(data);
     expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = { data: [{ title: "Only Title" }, {}] };
+    const results = parseFirecrawlResults(data);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
   });
 });
 
