@@ -432,4 +432,48 @@ describe("ConfigManager", () => {
     // exa's create throws — brave still registered, no crash
     expect(registry.getSearchProviderNames()).toEqual(["brave"]);
   });
+
+  it("resolves openai-native config alias to openai-codex provider", () => {
+    vi.mocked(loadMergedConfig).mockReturnValue(
+      makeConfig({
+        providers: {
+          "openai-native": { enabled: true, apiKey: "sk-test" },
+        },
+      }),
+    );
+    vi.mocked(resolveApiKey).mockReturnValue("sk-test");
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const registry = mem();
+    const metas = [makeMeta("openai-codex", { requiresKey: true })];
+    new ConfigManager("/test/cwd", registry, metas);
+
+    // Provider registered under the resolved name
+    expect(registry.getSearchProviderNames()).toContain("openai-codex");
+    // Deprecation warning emitted
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("openai-native"),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("does not warn for non-aliased provider names", () => {
+    vi.mocked(loadMergedConfig).mockReturnValue(
+      makeConfig({
+        providers: {
+          "openai-codex": { enabled: true },
+        },
+      }),
+    );
+    vi.mocked(resolveApiKey).mockReturnValue(undefined);
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const registry = mem();
+    const metas = [makeMeta("openai-codex")];
+    new ConfigManager("/test/cwd", registry, metas);
+
+    expect(registry.getSearchProviderNames()).toContain("openai-codex");
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
 });
