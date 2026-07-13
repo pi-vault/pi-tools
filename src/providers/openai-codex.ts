@@ -68,12 +68,8 @@ function buildSystemPrompt(numResults: number): string {
 type ResolvedMode = "codex" | "responses-api" | "unavailable";
 
 // Minimal type shapes for dynamically imported Pi packages.
-interface PiStreamFn {
-  (model: unknown, context: unknown, options: unknown): { result(): Promise<PiStreamMessage> };
-}
-interface PiGetModelFn {
-  (provider: string, modelId: string): unknown | undefined;
-}
+type PiStreamFn = (model: unknown, context: unknown, options: unknown) => { result(): Promise<PiStreamMessage> };
+type PiGetModelFn = (provider: string, modelId: string) => unknown | undefined;
 interface PiAuthStorage {
   getApiKey(provider: string, opts?: { includeFallback?: boolean }): Promise<string | undefined>;
 }
@@ -125,11 +121,11 @@ class OpenAICodexProvider implements SearchProvider {
     // Try Mode A: dynamic import of Pi packages
     try {
       const [piAi, piAgent] = await Promise.all([
-        import("@earendil-works/pi-ai") as Promise<{
+        import("@earendil-works/pi-ai") as unknown as Promise<{
           streamOpenAICodexResponses: PiStreamFn;
           getModel: PiGetModelFn;
         }>,
-        import("@earendil-works/pi-coding-agent") as Promise<{
+        import("@earendil-works/pi-coding-agent") as unknown as Promise<{
           AuthStorage: { create(): PiAuthStorage };
         }>,
       ]);
