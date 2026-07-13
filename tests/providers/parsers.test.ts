@@ -3,11 +3,16 @@ import {
   parseBraveLlmResults,
   parseBraveResults,
   parseDuckDuckGoResults,
+  parseExaResults,
+  parseFirecrawlResults,
+  parseJinaResults,
   parseLangSearchResults,
   parseMarginaliaResults,
   parseOpenAINativeResults,
   parsePerplexityResults,
+  parseSearxngResults,
   parseSerperResults,
+  parseTavilyResults,
   parseWebSearchApiResults,
 } from "../../src/providers/parsers.ts";
 
@@ -641,6 +646,189 @@ describe("parseDuckDuckGoResults", () => {
   it("handles items with missing fields gracefully", () => {
     const data = [{ title: "Only Title" }, {}];
     const results = parseDuckDuckGoResults(data);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
+  });
+});
+
+describe("parseExaResults", () => {
+  it("extracts results from valid response", () => {
+    const data = {
+      results: [{ title: "Exa Result", url: "https://exa.ai/1", text: "Content snippet" }],
+    };
+    const results = parseExaResults(data);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({
+      title: "Exa Result",
+      url: "https://exa.ai/1",
+      snippet: "Content snippet",
+    });
+  });
+
+  it("handles missing text field", () => {
+    const data = { results: [{ title: "T", url: "http://u" }] };
+    const results = parseExaResults(data);
+    expect(results[0].snippet).toBe("");
+  });
+
+  it("returns [] for malformed input", () => {
+    expect(parseExaResults(null)).toEqual([]);
+    expect(parseExaResults(undefined)).toEqual([]);
+    expect(parseExaResults({})).toEqual([]);
+    expect(parseExaResults({ results: "not-array" })).toEqual([]);
+  });
+
+  it("truncates snippets to 500 chars", () => {
+    const long = "e".repeat(600);
+    const data = { results: [{ title: "T", url: "http://u", text: long }] };
+    const results = parseExaResults(data);
+    expect(results[0].snippet).toHaveLength(500);
+  });
+});
+
+describe("parseFirecrawlResults", () => {
+  it("extracts results with description", () => {
+    const data = {
+      data: [{ title: "Fire Result", url: "https://fire.dev/1", description: "A desc" }],
+    };
+    const results = parseFirecrawlResults(data);
+    expect(results).toHaveLength(1);
+    expect(results[0].snippet).toBe("A desc");
+  });
+
+  it("falls back to markdown when no description", () => {
+    const data = {
+      data: [{ title: "T", url: "http://u", markdown: "# Heading\nContent here" }],
+    };
+    const results = parseFirecrawlResults(data);
+    expect(results[0].snippet).toBe("# Heading\nContent here");
+  });
+
+  it("truncates markdown fallback to 200 chars before 500 limit", () => {
+    const longMarkdown = "m".repeat(300);
+    const data = { data: [{ title: "T", url: "http://u", markdown: longMarkdown }] };
+    const results = parseFirecrawlResults(data);
+    expect(results[0].snippet).toHaveLength(200);
+  });
+
+  it("returns [] for malformed input", () => {
+    expect(parseFirecrawlResults(null)).toEqual([]);
+    expect(parseFirecrawlResults(undefined)).toEqual([]);
+    expect(parseFirecrawlResults({})).toEqual([]);
+    expect(parseFirecrawlResults({ data: "not-array" })).toEqual([]);
+  });
+
+  it("truncates description snippets to 500 chars", () => {
+    const long = "f".repeat(600);
+    const data = { data: [{ title: "T", url: "http://u", description: long }] };
+    const results = parseFirecrawlResults(data);
+    expect(results[0].snippet).toHaveLength(500);
+  });
+});
+
+describe("parseJinaResults", () => {
+  it("extracts results from valid response", () => {
+    const data = {
+      data: [{ title: "Jina Result", url: "https://jina.ai/1", description: "Jina snippet" }],
+    };
+    const results = parseJinaResults(data);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({
+      title: "Jina Result",
+      url: "https://jina.ai/1",
+      snippet: "Jina snippet",
+    });
+  });
+
+  it("returns [] for malformed input", () => {
+    expect(parseJinaResults(null)).toEqual([]);
+    expect(parseJinaResults(undefined)).toEqual([]);
+    expect(parseJinaResults({})).toEqual([]);
+    expect(parseJinaResults({ data: "not-array" })).toEqual([]);
+  });
+
+  it("truncates snippets to 500 chars", () => {
+    const long = "j".repeat(600);
+    const data = { data: [{ title: "T", url: "http://u", description: long }] };
+    const results = parseJinaResults(data);
+    expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = { data: [{ title: "Only Title" }, {}] };
+    const results = parseJinaResults(data);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
+  });
+});
+
+describe("parseTavilyResults", () => {
+  it("extracts results from valid response", () => {
+    const data = {
+      results: [{ title: "Tavily Result", url: "https://tavily.com/1", content: "Tavily snippet" }],
+    };
+    const results = parseTavilyResults(data);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({
+      title: "Tavily Result",
+      url: "https://tavily.com/1",
+      snippet: "Tavily snippet",
+    });
+  });
+
+  it("returns [] for malformed input", () => {
+    expect(parseTavilyResults(null)).toEqual([]);
+    expect(parseTavilyResults(undefined)).toEqual([]);
+    expect(parseTavilyResults({})).toEqual([]);
+    expect(parseTavilyResults({ results: "not-array" })).toEqual([]);
+  });
+
+  it("truncates snippets to 500 chars", () => {
+    const long = "t".repeat(600);
+    const data = { results: [{ title: "T", url: "http://u", content: long }] };
+    const results = parseTavilyResults(data);
+    expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = { results: [{ title: "Only Title" }, {}] };
+    const results = parseTavilyResults(data);
+    expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
+    expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
+  });
+});
+
+describe("parseSearxngResults", () => {
+  it("extracts results from valid response", () => {
+    const data = {
+      results: [{ title: "SearXNG Result", url: "https://searx.info/1", content: "SearX snippet" }],
+    };
+    const results = parseSearxngResults(data);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual({
+      title: "SearXNG Result",
+      url: "https://searx.info/1",
+      snippet: "SearX snippet",
+    });
+  });
+
+  it("returns [] for malformed input", () => {
+    expect(parseSearxngResults(null)).toEqual([]);
+    expect(parseSearxngResults(undefined)).toEqual([]);
+    expect(parseSearxngResults({})).toEqual([]);
+    expect(parseSearxngResults({ results: "not-array" })).toEqual([]);
+  });
+
+  it("truncates snippets to 500 chars", () => {
+    const long = "s".repeat(600);
+    const data = { results: [{ title: "T", url: "http://u", content: long }] };
+    const results = parseSearxngResults(data);
+    expect(results[0].snippet).toHaveLength(500);
+  });
+
+  it("handles items with missing fields gracefully", () => {
+    const data = { results: [{ title: "Only Title" }, {}] };
+    const results = parseSearxngResults(data);
     expect(results[0]).toEqual({ title: "Only Title", url: "", snippet: "" });
     expect(results[1]).toEqual({ title: "", url: "", snippet: "" });
   });

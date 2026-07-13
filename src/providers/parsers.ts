@@ -233,3 +233,80 @@ export function parseLangSearchResults(data: unknown): SearchResult[] {
     };
   });
 }
+
+export function parseExaResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = d.results;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.text as string) || "").slice(0, 500),
+    };
+  });
+}
+
+export function parseFirecrawlResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawData = d.data;
+  if (!Array.isArray(rawData)) return [];
+  return rawData.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    const description = (item.description as string) || "";
+    const markdown = (item.markdown as string) || "";
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: (description || markdown.slice(0, 200)).slice(0, 500),
+    };
+  });
+}
+
+export function parseJinaResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawData = d.data;
+  if (!Array.isArray(rawData)) return [];
+  return rawData.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.description as string) || "").slice(0, 500),
+    };
+  });
+}
+
+export function parseTavilyResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = d.results;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.content as string) || "").slice(0, 500),
+    };
+  });
+}
+
+export function parseSearxngResults(data: unknown): SearchResult[] {
+  if (!data || typeof data !== "object") return [];
+  const d = data as Record<string, unknown>;
+  const rawResults = d.results;
+  if (!Array.isArray(rawResults)) return [];
+  return rawResults.map((r: unknown) => {
+    const item = r as Record<string, unknown>;
+    return {
+      title: (item.title as string) || "",
+      url: (item.url as string) || "",
+      snippet: ((item.content as string) || "").slice(0, 500),
+    };
+  });
+}
