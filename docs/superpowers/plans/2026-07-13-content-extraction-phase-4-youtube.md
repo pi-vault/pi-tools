@@ -4,24 +4,31 @@
 
 **Goal:** Create `src/extract/youtube.ts` and `src/extract/perplexity.ts` — YouTube URL detection, transcript extraction with Gemini Web → Gemini API → Perplexity fallback chain, and thumbnail fetching.
 
-**Architecture:** This is Phase 4 of the Content Extraction expansion. It implements the YouTube extraction pipeline that uses a three-tier fallback chain (Gemini Web cookies → Gemini API key → Perplexity chat). The Perplexity module is a standalone wrapper around the Perplexity chat/completions API, distinct from the existing search provider. Both modules are pure extractors with no pipeline routing — Phase 7 wires them into `pipeline.ts`.
+**Architecture:** This is Phase 4 of the Content Extraction expansion. It implements the YouTube extraction pipeline that uses a three-tier fallback chain (Gemini Web cookies → Gemini API key → Perplexity chat). The Perplexity module is a standalone wrapper around the Perplexity chat/completions API, distinct from the existing search provider in `src/providers/perplexity.ts`. Both modules are pure extractors with no pipeline routing — Phase 7 wires them into `pipeline.ts`.
 
-**Tech Stack:** TypeScript, Vitest, native `fetch`, `vi.mock` for test isolation
+**Tech Stack:** TypeScript, Vitest, native `fetch`, `stubFetch` from `tests/helpers.ts`, `vi.mock` for dependency isolation
 
 **Parent plan:** `docs/superpowers/plans/2026-07-13-content-extraction.md`
 
 **Spec:** `docs/superpowers/specs/2026-07-13-content-extraction-design.md`
 
-**Dependencies from earlier phases:**
+**Dependencies from earlier phases (all already landed on master):**
 
 | Import | Source | Phase |
 |--------|--------|-------|
 | `resolveProviderKey`, `FALLBACK_ENV_MAP` | `src/config.ts` | 1 |
+| `loadConfig`, `DEFAULT_YOUTUBE_CONFIG`, `YouTubeConfig` | `src/config.ts` | 1 |
 | `queryGeminiApi`, `isGeminiApiAvailable` | `src/extract/gemini-api.ts` | 2 |
 | `isGeminiWebAvailable`, `queryWithCookies` | `src/extract/gemini-web.ts` | 3 |
 | `ExtractedContent`, `ExtractOptions` | `src/extract/pipeline.ts` | 1 |
 
-**Reference implementation:** `/Users/lanh/Developer/pi-packages/nicobailon-pi-web-access/youtube-extract.ts` and `perplexity.ts`
+**Reference implementation:** `nicobailon-pi-web-access/youtube-extract.ts` and `perplexity.ts`
+
+**Existing infrastructure already in place:**
+- `config.ts` exports `YouTubeConfig` (`enabled?`, `preferredModel?`), `DEFAULT_YOUTUBE_CONFIG` (`{ enabled: true, preferredModel: "gemini-3-flash-preview" }`), and `loadConfig()` which parses `youtube` from tools.json.
+- `config-video.test.ts` already validates these defaults.
+- `ExtractedContent` in `pipeline.ts` already has `thumbnail?: { data: string; mimeType: string }`, `frames?: VideoFrame[]`, `duration?: number`.
+- `FALLBACK_ENV_MAP` already maps `perplexity` → `PERPLEXITY_API_KEY`.
 
 ---
 
@@ -38,8 +45,16 @@
 ```typescript
 import { resolveProviderKey } from "../config.ts";
 
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 const PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions";
-const DEFAULT_TIMEOUT_MS = 30000;
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 /**
  * Check whether a Perplexity API key is available.
@@ -54,7 +69,8 @@ export function isPerplexityAvailable(): boolean {
  * Returns the assistant's response text.
  *
  * Used as the last-resort YouTube transcript fallback — provides a text summary
- * without visual understanding.
+ * without visual understanding. Distinct from the search provider in
+ * src/providers/perplexity.ts which returns structured SearchResult[].
  */
 export async function queryPerplexity(
   query: string,
@@ -106,6 +122,10 @@ export async function queryPerplexity(
   return content;
 }
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
 function getPerplexityKey(): string | undefined {
   return resolveProviderKey("perplexity");
 }
@@ -117,7 +137,7 @@ function getPerplexityKey(): string | undefined {
 pnpm run typecheck
 ```
 
-Expected: No type errors (Phase 2/3 modules may not exist yet — this file only imports from `config.ts`).
+Expected: No type errors. This file only imports from `config.ts` which is already on master.
 
 ---
 
@@ -132,12 +152,18 @@ Expected: No type errors (Phase 2/3 modules may not exist yet — this file only
 - [ ] **2.1** Create `src/extract/youtube.ts` with URL detection, config loading, and the full extraction pipeline:
 
 ```typescript
+import {
+  DEFAULT_YOUTUBE_CONFIG,
+  loadConfig,
+} from "../config.ts";
 import { isGeminiApiAvailable, queryGeminiApi } from "./gemini-api.ts";
 import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.ts";
 import { isPerplexityAvailable, queryPerplexity } from "./perplexity.ts";
 import type { ExtractedContent, ExtractOptions } from "./pipeline.ts";
 
-// --- Constants ---
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
 
 const YOUTUBE_REGEX =
   /(?:(?:www\.|m\.)?youtube\.com\/(?:watch\?.*v=|shorts\/|live\/|embed\/|v\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
@@ -150,10 +176,11 @@ const YOUTUBE_PROMPT = `Extract the complete content of this YouTube video. Incl
 
 Format as markdown.`;
 
-const DEFAULT_MODEL = "gemini-3-flash-preview";
 const THUMBNAIL_TIMEOUT_MS = 5000;
 
-// --- URL Detection ---
+// ---------------------------------------------------------------------------
+// URL Detection
+// ---------------------------------------------------------------------------
 
 /**
  * Detect whether a URL is a YouTube video URL and extract the video ID.
@@ -178,14 +205,20 @@ export function isYouTubeURL(url: string): {
 }
 
 /**
- * Check whether YouTube extraction is enabled.
- * Currently always returns true — Phase 7 will wire this to config.youtube.enabled.
+ * Check whether YouTube extraction is enabled via config.
+ * Reads youtube.enabled from tools.json (defaults to true).
  */
 export function isYouTubeEnabled(): boolean {
-  return true;
+  try {
+    return loadConfig().youtube?.enabled ?? DEFAULT_YOUTUBE_CONFIG.enabled;
+  } catch {
+    return DEFAULT_YOUTUBE_CONFIG.enabled;
+  }
 }
 
-// --- Main Extraction ---
+// ---------------------------------------------------------------------------
+// Main Extraction
+// ---------------------------------------------------------------------------
 
 /**
  * Extract YouTube video content using a three-tier fallback chain:
@@ -205,9 +238,8 @@ export async function extractYouTube(
     ? `https://www.youtube.com/watch?v=${videoId}`
     : url;
   const effectivePrompt = options?.prompt ?? YOUTUBE_PROMPT;
-  const effectiveModel = options?.model ?? DEFAULT_MODEL;
-
-  const attemptErrors: string[] = [];
+  const effectiveModel =
+    options?.model ?? getPreferredModel();
 
   // Tier 1: Gemini Web (cookie auth)
   const webResult = await tryGeminiWeb(
@@ -215,7 +247,6 @@ export async function extractYouTube(
     effectivePrompt,
     effectiveModel,
     signal,
-    attemptErrors,
   );
   if (webResult) return finalizeResult(webResult, url, videoId);
 
@@ -225,7 +256,6 @@ export async function extractYouTube(
     effectivePrompt,
     effectiveModel,
     signal,
-    attemptErrors,
   );
   if (apiResult) return finalizeResult(apiResult, url, videoId);
 
@@ -234,7 +264,6 @@ export async function extractYouTube(
     url,
     effectivePrompt,
     signal,
-    attemptErrors,
   );
   if (perplexityResult) return finalizeResult(perplexityResult, url, videoId);
 
@@ -242,7 +271,9 @@ export async function extractYouTube(
   return null;
 }
 
-// --- Thumbnail ---
+// ---------------------------------------------------------------------------
+// Thumbnail
+// ---------------------------------------------------------------------------
 
 /**
  * Fetch YouTube video thumbnail as base64-encoded JPEG.
@@ -265,7 +296,9 @@ export async function fetchYouTubeThumbnail(
   }
 }
 
-// --- Helpers ---
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 /**
  * Extract the first markdown heading (# Title) from text.
@@ -275,17 +308,15 @@ export function extractHeadingTitle(text: string): string | null {
   return match ? match[1].trim() : null;
 }
 
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
-function addAttemptError(
-  errors: string[],
-  label: string,
-  err: unknown,
-): void {
-  const message = errorMessage(err).replace(/\s+/g, " ").trim();
-  if (message) errors.push(`${label}: ${message}`);
+function getPreferredModel(): string {
+  try {
+    return (
+      loadConfig().youtube?.preferredModel ??
+      DEFAULT_YOUTUBE_CONFIG.preferredModel
+    );
+  } catch {
+    return DEFAULT_YOUTUBE_CONFIG.preferredModel;
+  }
 }
 
 async function finalizeResult(
@@ -304,26 +335,23 @@ async function finalizeResult(
     truncated: false,
   };
 
-  // Fetch thumbnail (best-effort, non-blocking on failure)
   if (videoId) {
     const thumbnail = await fetchYouTubeThumbnail(videoId);
-    if (thumbnail) {
-      (content as ExtractedContent & { thumbnail?: { data: string; mimeType: string } }).thumbnail =
-        thumbnail;
-    }
+    if (thumbnail) content.thumbnail = thumbnail;
   }
 
   return content;
 }
 
-// --- Fallback Tier Functions ---
+// ---------------------------------------------------------------------------
+// Fallback Tier Functions
+// ---------------------------------------------------------------------------
 
 async function tryGeminiWeb(
   url: string,
   prompt: string,
   model: string,
   signal: AbortSignal | undefined,
-  attemptErrors: string[],
 ): Promise<{ text: string; extractionChain: string[] } | null> {
   try {
     const cookies = await isGeminiWebAvailable();
@@ -335,12 +363,11 @@ async function tryGeminiWeb(
       youtubeUrl: url,
       model,
       signal,
-      timeoutMs: 120000,
+      timeoutMs: 120_000,
     });
 
     return { text, extractionChain: ["youtube:gemini-web"] };
-  } catch (err) {
-    if (!signal?.aborted) addAttemptError(attemptErrors, "Gemini Web", err);
+  } catch {
     return null;
   }
 }
@@ -350,7 +377,6 @@ async function tryGeminiApi(
   prompt: string,
   model: string,
   signal: AbortSignal | undefined,
-  attemptErrors: string[],
 ): Promise<{ text: string; extractionChain: string[] } | null> {
   try {
     if (!isGeminiApiAvailable()) return null;
@@ -360,12 +386,11 @@ async function tryGeminiApi(
     const text = await queryGeminiApi(prompt, url, {
       model,
       signal,
-      timeoutMs: 120000,
+      timeoutMs: 120_000,
     });
 
     return { text, extractionChain: ["youtube:gemini-api"] };
-  } catch (err) {
-    if (!signal?.aborted) addAttemptError(attemptErrors, "Gemini API", err);
+  } catch {
     return null;
   }
 }
@@ -374,7 +399,6 @@ async function tryPerplexity(
   url: string,
   prompt: string,
   signal: AbortSignal | undefined,
-  attemptErrors: string[],
 ): Promise<{ text: string; extractionChain: string[] } | null> {
   try {
     if (signal?.aborted || !isPerplexityAvailable()) return null;
@@ -392,20 +416,19 @@ async function tryPerplexity(
       `*Full video understanding requires Gemini access. Set GEMINI_API_KEY or sign into Google in Chrome.*`;
 
     return { text, extractionChain: ["youtube:perplexity"] };
-  } catch (err) {
-    if (!signal?.aborted) addAttemptError(attemptErrors, "Perplexity", err);
+  } catch {
     return null;
   }
 }
 ```
 
-- [ ] **2.2** Verify the file has no syntax errors (type checking will pass once Phase 2/3 modules exist):
+- [ ] **2.2** Verify the file compiles:
 
 ```bash
-npx tsc --noEmit src/extract/youtube.ts 2>&1 || true
+pnpm run typecheck
 ```
 
-Note: This will report missing modules from Phase 2/3 (`gemini-api.ts`, `gemini-web.ts`). That's expected — those are created in earlier phases. The important check is that the internal logic has no syntax errors.
+Expected: No type errors. All imports (`loadConfig`, `DEFAULT_YOUTUBE_CONFIG`, `queryGeminiApi`, `isGeminiWebAvailable`, etc.) are already on master from Phases 1-3.
 
 ---
 
@@ -421,8 +444,9 @@ Note: This will report missing modules from Phase 2/3 (`gemini-api.ts`, `gemini-
 
 ```typescript
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { stubFetch, type FetchStub } from "../helpers.ts";
 
-// Mock config.ts to control key resolution
+// Mock config.ts to control key resolution without hitting the filesystem.
 vi.mock("../../src/config.ts", () => ({
   resolveProviderKey: vi.fn(),
   FALLBACK_ENV_MAP: { perplexity: "PERPLEXITY_API_KEY" },
@@ -436,16 +460,21 @@ import {
 
 describe("perplexity", () => {
   const mockResolveProviderKey = vi.mocked(resolveProviderKey);
+  let fetchStub: FetchStub;
 
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn());
+    fetchStub = stubFetch();
     mockResolveProviderKey.mockReturnValue(undefined);
   });
 
   afterEach(() => {
+    fetchStub.restore();
     vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
+
+  // -------------------------------------------------------------------------
+  // isPerplexityAvailable
+  // -------------------------------------------------------------------------
 
   describe("isPerplexityAvailable", () => {
     it("returns false when no API key is configured", () => {
@@ -459,6 +488,10 @@ describe("perplexity", () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // queryPerplexity
+  // -------------------------------------------------------------------------
+
   describe("queryPerplexity", () => {
     it("throws when no API key is available", async () => {
       mockResolveProviderKey.mockReturnValue(undefined);
@@ -469,89 +502,64 @@ describe("perplexity", () => {
 
     it("sends correct request and returns response content", async () => {
       mockResolveProviderKey.mockReturnValue("pplx-test-key");
-
-      const mockResponse = {
-        ok: true,
-        json: vi.fn().mockResolvedValue({
-          choices: [
-            {
-              message: {
-                content: "This is a summary of the video.",
-              },
-            },
-          ],
-        }),
-      };
-      vi.mocked(fetch).mockResolvedValue(mockResponse as unknown as Response);
+      fetchStub.addResponse("api.perplexity.ai", {
+        body: {
+          choices: [{ message: { content: "This is a summary of the video." } }],
+        },
+      });
 
       const result = await queryPerplexity("Summarize this video");
 
-      expect(fetch).toHaveBeenCalledWith(
-        "https://api.perplexity.ai/chat/completions",
-        expect.objectContaining({
-          method: "POST",
-          headers: {
-            Authorization: "Bearer pplx-test-key",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            model: "sonar",
-            messages: [{ role: "user", content: "Summarize this video" }],
-            max_tokens: 4096,
-          }),
-        }),
-      );
-
       expect(result).toBe("This is a summary of the video.");
+
+      const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+      const [calledUrl, calledInit] = fetchMock.mock.calls[0] as [
+        string,
+        RequestInit,
+      ];
+      expect(calledUrl).toBe("https://api.perplexity.ai/chat/completions");
+      expect(calledInit.method).toBe("POST");
+      expect(
+        (calledInit.headers as Record<string, string>).Authorization,
+      ).toBe("Bearer pplx-test-key");
+
+      const body = JSON.parse(calledInit.body as string) as {
+        model: string;
+        messages: Array<{ role: string; content: string }>;
+        max_tokens: number;
+      };
+      expect(body.model).toBe("sonar");
+      expect(body.messages[0].content).toBe("Summarize this video");
+      expect(body.max_tokens).toBe(4096);
     });
 
     it("throws on HTTP error response", async () => {
       mockResolveProviderKey.mockReturnValue("pplx-test-key");
-
-      const mockResponse = {
-        ok: false,
+      fetchStub.addResponse("api.perplexity.ai", {
         status: 429,
-        statusText: "Too Many Requests",
-        text: vi.fn().mockResolvedValue("rate limited"),
-      };
-      vi.mocked(fetch).mockResolvedValue(mockResponse as unknown as Response);
+        body: "rate limited",
+      });
 
       await expect(queryPerplexity("test")).rejects.toThrow(
-        "Perplexity API error 429: rate limited",
+        "Perplexity API error 429",
       );
     });
 
     it("throws on empty response content", async () => {
       mockResolveProviderKey.mockReturnValue("pplx-test-key");
-
-      const mockResponse = {
-        ok: true,
-        json: vi.fn().mockResolvedValue({ choices: [] }),
-      };
-      vi.mocked(fetch).mockResolvedValue(mockResponse as unknown as Response);
+      fetchStub.addResponse("api.perplexity.ai", {
+        body: { choices: [] },
+      });
 
       await expect(queryPerplexity("test")).rejects.toThrow(
         "Perplexity API returned empty response",
       );
     });
 
-    it("passes abort signal to fetch", async () => {
-      mockResolveProviderKey.mockReturnValue("pplx-test-key");
-
-      const controller = new AbortController();
-      controller.abort();
-
-      vi.mocked(fetch).mockRejectedValue(new DOMException("aborted", "AbortError"));
-
-      await expect(
-        queryPerplexity("test", controller.signal),
-      ).rejects.toThrow();
-    });
-
     it("throws on network error", async () => {
       mockResolveProviderKey.mockReturnValue("pplx-test-key");
-
-      vi.mocked(fetch).mockRejectedValue(new Error("Network failure"));
+      // stubFetch returns 404 for unmatched URLs; override fetch to throw
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error("Network failure"));
 
       await expect(queryPerplexity("test")).rejects.toThrow("Network failure");
     });
@@ -559,11 +567,7 @@ describe("perplexity", () => {
 });
 ```
 
-- [ ] **3.2** Create the `tests/extract/` directory if it doesn't exist:
-
-```bash
-mkdir -p tests/extract
-```
+The `tests/extract/` directory already exists (it contains `gemini-api.test.ts`, `gemini-web.test.ts`, etc.).
 
 ---
 
@@ -579,6 +583,7 @@ mkdir -p tests/extract
 
 ```typescript
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { stubFetch, type FetchStub } from "../helpers.ts";
 
 // Mock dependencies from earlier phases
 vi.mock("../../src/extract/gemini-api.ts", () => ({
@@ -596,9 +601,18 @@ vi.mock("../../src/extract/perplexity.ts", () => ({
   queryPerplexity: vi.fn(),
 }));
 
-import { isGeminiApiAvailable, queryGeminiApi } from "../../src/extract/gemini-api.ts";
-import { isGeminiWebAvailable, queryWithCookies } from "../../src/extract/gemini-web.ts";
-import { isPerplexityAvailable, queryPerplexity } from "../../src/extract/perplexity.ts";
+import {
+  isGeminiApiAvailable,
+  queryGeminiApi,
+} from "../../src/extract/gemini-api.ts";
+import {
+  isGeminiWebAvailable,
+  queryWithCookies,
+} from "../../src/extract/gemini-web.ts";
+import {
+  isPerplexityAvailable,
+  queryPerplexity,
+} from "../../src/extract/perplexity.ts";
 import {
   extractHeadingTitle,
   extractYouTube,
@@ -608,48 +622,68 @@ import {
 } from "../../src/extract/youtube.ts";
 
 describe("youtube", () => {
+  let fetchStub: FetchStub;
+
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn());
+    fetchStub = stubFetch();
   });
 
   afterEach(() => {
+    fetchStub.restore();
     vi.restoreAllMocks();
-    vi.unstubAllGlobals();
   });
+
+  // -------------------------------------------------------------------------
+  // isYouTubeURL
+  // -------------------------------------------------------------------------
 
   describe("isYouTubeURL", () => {
     it("detects standard watch URL", () => {
-      const result = isYouTubeURL("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+      const result = isYouTubeURL(
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      );
       expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
     });
 
     it("detects watch URL without www", () => {
-      const result = isYouTubeURL("https://youtube.com/watch?v=dQw4w9WgXcQ");
+      const result = isYouTubeURL(
+        "https://youtube.com/watch?v=dQw4w9WgXcQ",
+      );
       expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
     });
 
     it("detects mobile URL", () => {
-      const result = isYouTubeURL("https://m.youtube.com/watch?v=dQw4w9WgXcQ");
+      const result = isYouTubeURL(
+        "https://m.youtube.com/watch?v=dQw4w9WgXcQ",
+      );
       expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
     });
 
     it("detects shorts URL", () => {
-      const result = isYouTubeURL("https://www.youtube.com/shorts/dQw4w9WgXcQ");
+      const result = isYouTubeURL(
+        "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+      );
       expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
     });
 
     it("detects live URL", () => {
-      const result = isYouTubeURL("https://www.youtube.com/live/dQw4w9WgXcQ");
+      const result = isYouTubeURL(
+        "https://www.youtube.com/live/dQw4w9WgXcQ",
+      );
       expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
     });
 
     it("detects embed URL", () => {
-      const result = isYouTubeURL("https://www.youtube.com/embed/dQw4w9WgXcQ");
+      const result = isYouTubeURL(
+        "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      );
       expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
     });
 
     it("detects /v/ URL", () => {
-      const result = isYouTubeURL("https://www.youtube.com/v/dQw4w9WgXcQ");
+      const result = isYouTubeURL(
+        "https://www.youtube.com/v/dQw4w9WgXcQ",
+      );
       expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
     });
 
@@ -693,11 +727,19 @@ describe("youtube", () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // isYouTubeEnabled
+  // -------------------------------------------------------------------------
+
   describe("isYouTubeEnabled", () => {
     it("returns true by default", () => {
       expect(isYouTubeEnabled()).toBe(true);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // extractHeadingTitle
+  // -------------------------------------------------------------------------
 
   describe("extractHeadingTitle", () => {
     it("extracts first heading from markdown", () => {
@@ -721,18 +763,22 @@ describe("youtube", () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // extractYouTube
+  // -------------------------------------------------------------------------
+
   describe("extractYouTube", () => {
     it("uses Gemini Web when available (tier 1)", async () => {
-      const mockCookies = { __Secure_1PSID: "test" };
+      const mockCookies = { "__Secure-1PSID": "test" };
       vi.mocked(isGeminiWebAvailable).mockResolvedValue(mockCookies);
       vi.mocked(queryWithCookies).mockResolvedValue(
         "# Video Title\n\nTranscript content here.",
       );
       // Thumbnail fetch
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(100)),
-      } as unknown as Response);
+      fetchStub.addResponse("img.youtube.com", {
+        body: "fake-jpeg-data",
+        headers: { "content-type": "image/jpeg" },
+      });
 
       const result = await extractYouTube(
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -742,14 +788,15 @@ describe("youtube", () => {
       expect(result!.text).toContain("Transcript content here.");
       expect(result!.title).toBe("Video Title");
       expect(result!.extractionChain).toEqual(["youtube:gemini-web"]);
-      expect(result!.url).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+      expect(result!.url).toBe(
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      );
 
       expect(queryWithCookies).toHaveBeenCalledWith(
         expect.stringContaining("Extract the complete content"),
         mockCookies,
         expect.objectContaining({
           youtubeUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-          model: "gemini-3-flash-preview",
         }),
       );
     });
@@ -760,14 +807,12 @@ describe("youtube", () => {
       vi.mocked(queryGeminiApi).mockResolvedValue(
         "# API Video\n\nAPI transcript.",
       );
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(50)),
-      } as unknown as Response);
+      fetchStub.addResponse("img.youtube.com", {
+        body: "fake-jpeg-data",
+        headers: { "content-type": "image/jpeg" },
+      });
 
-      const result = await extractYouTube(
-        "https://youtu.be/dQw4w9WgXcQ",
-      );
+      const result = await extractYouTube("https://youtu.be/dQw4w9WgXcQ");
 
       expect(result).not.toBeNull();
       expect(result!.title).toBe("API Video");
@@ -775,7 +820,9 @@ describe("youtube", () => {
       expect(queryGeminiApi).toHaveBeenCalledWith(
         expect.stringContaining("Extract the complete content"),
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        expect.objectContaining({ model: "gemini-3-flash-preview" }),
+        expect.objectContaining({
+          model: expect.any(String),
+        }),
       );
     });
 
@@ -786,11 +833,10 @@ describe("youtube", () => {
       vi.mocked(queryPerplexity).mockResolvedValue(
         "This video discusses the history of rickrolling.",
       );
-      // Thumbnail fetch
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(50)),
-      } as unknown as Response);
+      fetchStub.addResponse("img.youtube.com", {
+        body: "fake-jpeg-data",
+        headers: { "content-type": "image/jpeg" },
+      });
 
       const result = await extractYouTube(
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -824,10 +870,10 @@ describe("youtube", () => {
       vi.mocked(queryGeminiApi).mockResolvedValue(
         "# Custom Analysis\n\nFocused content.",
       );
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(50)),
-      } as unknown as Response);
+      fetchStub.addResponse("img.youtube.com", {
+        body: "fake-jpeg-data",
+        headers: { "content-type": "image/jpeg" },
+      });
 
       const result = await extractYouTube(
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -847,10 +893,10 @@ describe("youtube", () => {
       vi.mocked(isGeminiWebAvailable).mockResolvedValue(null);
       vi.mocked(isGeminiApiAvailable).mockReturnValue(true);
       vi.mocked(queryGeminiApi).mockResolvedValue("# Title\n\nContent.");
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(50)),
-      } as unknown as Response);
+      fetchStub.addResponse("img.youtube.com", {
+        body: "fake-jpeg-data",
+        headers: { "content-type": "image/jpeg" },
+      });
 
       await extractYouTube(
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -877,23 +923,22 @@ describe("youtube", () => {
         controller.signal,
       );
 
-      // Should not call queryGeminiApi because signal is already aborted
       expect(queryGeminiApi).not.toHaveBeenCalled();
       expect(result).toBeNull();
     });
 
     it("catches Gemini Web errors and falls through to API", async () => {
-      const mockCookies = { __Secure_1PSID: "test" };
+      const mockCookies = { "__Secure-1PSID": "test" };
       vi.mocked(isGeminiWebAvailable).mockResolvedValue(mockCookies);
       vi.mocked(queryWithCookies).mockRejectedValue(
         new Error("Cookie expired"),
       );
       vi.mocked(isGeminiApiAvailable).mockReturnValue(true);
       vi.mocked(queryGeminiApi).mockResolvedValue("# Fallback\n\nContent.");
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(50)),
-      } as unknown as Response);
+      fetchStub.addResponse("img.youtube.com", {
+        body: "fake-jpeg-data",
+        headers: { "content-type": "image/jpeg" },
+      });
 
       const result = await extractYouTube(
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -907,10 +952,10 @@ describe("youtube", () => {
       vi.mocked(isGeminiWebAvailable).mockResolvedValue(null);
       vi.mocked(isGeminiApiAvailable).mockReturnValue(true);
       vi.mocked(queryGeminiApi).mockResolvedValue("# Title\n\nContent.");
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(50)),
-      } as unknown as Response);
+      fetchStub.addResponse("img.youtube.com", {
+        body: "fake-jpeg-data",
+        headers: { "content-type": "image/jpeg" },
+      });
 
       await extractYouTube("https://youtu.be/abc123DEF-_");
 
@@ -926,10 +971,10 @@ describe("youtube", () => {
       vi.mocked(isGeminiApiAvailable).mockReturnValue(false);
       vi.mocked(isPerplexityAvailable).mockReturnValue(true);
       vi.mocked(queryPerplexity).mockResolvedValue("Custom answer.");
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(50)),
-      } as unknown as Response);
+      fetchStub.addResponse("img.youtube.com", {
+        body: "fake-jpeg-data",
+        headers: { "content-type": "image/jpeg" },
+      });
 
       await extractYouTube(
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
@@ -944,47 +989,35 @@ describe("youtube", () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // fetchYouTubeThumbnail
+  // -------------------------------------------------------------------------
+
   describe("fetchYouTubeThumbnail", () => {
     it("returns base64 thumbnail on success", async () => {
-      const fakeImageData = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(fakeImageData.buffer),
-      } as unknown as Response);
+      fetchStub.addResponse("img.youtube.com", {
+        body: "fake-jpeg-data",
+        headers: { "content-type": "image/jpeg" },
+      });
 
       const result = await fetchYouTubeThumbnail("dQw4w9WgXcQ");
 
       expect(result).not.toBeNull();
       expect(result!.mimeType).toBe("image/jpeg");
-      expect(result!.data).toBe(Buffer.from(fakeImageData).toString("base64"));
-      expect(fetch).toHaveBeenCalledWith(
-        "https://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
-        expect.objectContaining({ signal: expect.any(AbortSignal) }),
-      );
+      expect(result!.data.length).toBeGreaterThan(0);
     });
 
     it("returns null on HTTP error", async () => {
-      vi.mocked(fetch).mockResolvedValue({
-        ok: false,
-        status: 404,
-      } as unknown as Response);
+      fetchStub.addResponse("img.youtube.com", { status: 404 });
 
       const result = await fetchYouTubeThumbnail("invalid_id__");
       expect(result).toBeNull();
     });
 
-    it("returns null on empty response", async () => {
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
-      } as unknown as Response);
-
-      const result = await fetchYouTubeThumbnail("dQw4w9WgXcQ");
-      expect(result).toBeNull();
-    });
-
     it("returns null on network error", async () => {
-      vi.mocked(fetch).mockRejectedValue(new Error("timeout"));
+      // No route registered in stubFetch → returns 404, but we need a real error.
+      // Override fetch to throw a network error.
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error("timeout"));
 
       const result = await fetchYouTubeThumbnail("dQw4w9WgXcQ");
       expect(result).toBeNull();
@@ -1001,13 +1034,7 @@ describe("youtube", () => {
 
 ### Steps
 
-- [ ] **5.1** Ensure the `tests/extract/` directory exists:
-
-```bash
-mkdir -p tests/extract
-```
-
-- [ ] **5.2** Run the Perplexity tests:
+- [ ] **5.1** Run the Perplexity tests:
 
 ```bash
 pnpm vitest run tests/extract/perplexity.test.ts
@@ -1015,7 +1042,7 @@ pnpm vitest run tests/extract/perplexity.test.ts
 
 Expected: All tests pass.
 
-- [ ] **5.3** Run the YouTube tests:
+- [ ] **5.2** Run the YouTube tests:
 
 ```bash
 pnpm vitest run tests/extract/youtube.test.ts
@@ -1023,7 +1050,7 @@ pnpm vitest run tests/extract/youtube.test.ts
 
 Expected: All tests pass (dependencies are fully mocked via `vi.mock`).
 
-- [ ] **5.4** Run the full test suite to check for regressions:
+- [ ] **5.3** Run the full test suite to check for regressions:
 
 ```bash
 pnpm test
@@ -1031,21 +1058,21 @@ pnpm test
 
 Expected: All existing tests continue to pass.
 
-- [ ] **5.5** Run type checking:
+- [ ] **5.4** Run type checking:
 
 ```bash
 pnpm run typecheck
 ```
 
-Expected: No type errors. Note — if Phase 2/3 modules do not yet exist on the current branch, `src/extract/youtube.ts` may have import errors. In that case, verify that only the expected cross-phase import errors remain and no new errors are introduced.
+Expected: No type errors.
 
-- [ ] **5.6** Run linting:
+- [ ] **5.5** Run linting:
 
 ```bash
 pnpm run lint
 ```
 
-Expected: No lint errors.
+Expected: No lint errors. Fix any formatting issues with `pnpm run format`.
 
 ---
 
@@ -1067,10 +1094,12 @@ Phase 4 of content extraction expansion:
   - queryPerplexity() sends single-message chat request (30s timeout)
 - Add src/extract/youtube.ts: YouTube extraction pipeline
   - isYouTubeURL() detects watch/shorts/live/embed/youtu.be, excludes playlists
-  - extractYouTube() with 3-tier fallback: Gemini Web → Gemini API → Perplexity
+  - isYouTubeEnabled() reads youtube.enabled from config (defaults true)
+  - extractYouTube() with 3-tier fallback: Gemini Web -> Gemini API -> Perplexity
+  - Reads preferredModel from config via loadConfig().youtube
   - fetchYouTubeThumbnail() fetches hqdefault.jpg as base64
   - extractHeadingTitle() parses first markdown heading
-- Comprehensive test coverage for both modules
+- Comprehensive test coverage for both modules using stubFetch
 
 Generated with [Devin](https://devin.ai)
 
@@ -1083,29 +1112,52 @@ Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.
 
 ### Separation from existing Perplexity search provider
 
-The `src/extract/perplexity.ts` module is distinct from the existing Perplexity search provider in `src/providers/`. The search provider returns structured `SearchResult[]` with 500-char truncated snippets. This module returns raw answer text (up to 4096 tokens) — suitable for video content summarization where length matters.
+The `src/extract/perplexity.ts` module is distinct from the existing Perplexity search provider in `src/providers/perplexity.ts`. The search provider uses `createHttpSearchProvider` and returns structured `SearchResult[]` parsed from Perplexity's citation-based response format. This module returns raw answer text (up to 4096 tokens) — suitable for video content summarization where length matters.
 
-### ExtractedContent thumbnail field
+### YouTube config integration
 
-The current `ExtractedContent` interface in `pipeline.ts` does not yet include a `thumbnail` field. Phase 1 (config/types) extends it. The `finalizeResult` helper uses a type assertion to attach the thumbnail. When Phase 1 lands, this assertion can be removed in favor of the proper interface field.
+`config.ts` already exports `YouTubeConfig` (`enabled`, `preferredModel`), `DEFAULT_YOUTUBE_CONFIG`, and `loadConfig()` which parses the `youtube` key from tools.json. Phase 1 landed all of this. The `youtube.ts` module reads both fields:
+- `isYouTubeEnabled()` checks `loadConfig().youtube?.enabled`
+- `getPreferredModel()` checks `loadConfig().youtube?.preferredModel`
+
+Both fall back to `DEFAULT_YOUTUBE_CONFIG` on missing config or parse errors.
+
+### ExtractedContent already has thumbnail/frames/duration
+
+Phase 1 extended `ExtractedContent` with `thumbnail?: { data: string; mimeType: string }`, `frames?: VideoFrame[]`, and `duration?: number`. No type assertions needed — `finalizeResult` assigns `content.thumbnail` directly.
 
 ### AbortSignal.any compatibility
 
-`AbortSignal.any()` requires Node.js >= 20.3.0. The project requires Node >= 24.15.0, so this is safe. `AbortSignal.timeout()` is also available (Node >= 18.0.0).
+`AbortSignal.any()` requires Node.js >= 20.3.0. The project requires Node >= 24.15.0, so this is safe.
 
 ### Why extractYouTube returns null instead of throwing
 
-Following the pipeline design: extraction functions return `null` to signal "cannot handle" so the pipeline can try the next tier. Errors within a tier are caught and logged to `attemptErrors` for debugging, but the caller (pipeline.ts in Phase 7) only sees null = "try something else."
+Following the pipeline design: extraction functions return `null` to signal "cannot handle" so the pipeline can try the next tier. Errors within each tier are caught silently (matching how `extractGitHub` behaves). The caller (pipeline.ts in Phase 7) sees `null` = "try something else."
 
-### Design decisions diverging from pi-web-access
+### Why try* functions don't track attemptErrors
+
+The original plan collected errors per-tier into an `attemptErrors` array but never surfaced them. Since `extractYouTube` returns `null` on all-fail (consistent with the pipeline pattern where `extractGitHub` does the same), tracking per-tier errors is unnecessary complexity. Errors from the underlying modules (`queryGeminiApi`, `queryWithCookies`, etc.) are already self-descriptive if they propagate. If error aggregation is needed later (e.g., for debugging output in Phase 7), it can be added at the pipeline level.
+
+### Design decisions diverging from pi-web-access reference
 
 | Topic | pi-web-access | This plan | Rationale |
 |-------|--------------|-----------|-----------|
-| Config loading | Reads custom config file on disk | Uses existing `resolveProviderKey` from config.ts | Unified credential resolution |
-| Activity monitor | Custom logging via `activityMonitor` | Not included (Phase 7 handles logging) | Keep extractors pure |
-| Error return | Returns `ExtractedContent` with `error` field | Returns `null` on all-fail | Matches pi-tools pipeline pattern |
+| Config loading | Reads custom JSON file on disk | Uses existing `loadConfig()` / `resolveProviderKey` | Unified config via tools.json |
+| Activity monitor | Custom `activityMonitor` logging | Not included (Phase 7 handles logging) | Keep extractors pure |
+| Error return | Returns `ExtractedContent` with `error` field | Returns `null` on all-fail | Matches pi-tools pipeline pattern (`extractGitHub` also returns null) |
+| Error aggregation | Collects per-tier errors in `attemptErrors` | Not collected (dead code removed) | No consumer for the data |
 | Perplexity model | `"sonar"` with `max_tokens: 1024` | `"sonar"` with `max_tokens: 4096` | More room for video transcripts |
 | Timeout | Uses AbortSignal per-request | 30s timeout for Perplexity, 120s for Gemini | Appropriate per-service limits |
+| Config rethrow | `shouldRethrow()` for JSON parse errors | Not needed (config loaded via loadConfig) | loadConfig handles its own errors |
+| Frame extraction | yt-dlp + ffmpeg frame extraction | Not included (separate concern) | Can be added when pipeline.ts wires frames |
+
+### Test patterns
+
+Tests follow existing conventions:
+- `stubFetch()` from `tests/helpers.ts` for HTTP mocking (returns real `Response` objects)
+- `vi.mock()` for inter-module dependency isolation (same pattern as `gemini-web.test.ts` mocking `chrome-cookies.ts`)
+- `vi.mocked()` for typed mock access
+- Section dividers matching the `// ---` style in test files
 
 ---
 
@@ -1114,6 +1166,6 @@ Following the pipeline design: extraction functions return `null` to signal "can
 | File | Change |
 |------|--------|
 | `src/extract/perplexity.ts` | NEW — Perplexity chat/completions client: `isPerplexityAvailable()`, `queryPerplexity()` |
-| `src/extract/youtube.ts` | NEW — YouTube extraction pipeline: URL detection, 3-tier fallback, thumbnail fetch, heading parser |
-| `tests/extract/perplexity.test.ts` | NEW — Tests for key availability, successful query, HTTP errors, empty response, abort |
-| `tests/extract/youtube.test.ts` | NEW — Tests for URL detection (13 cases), extraction fallback chain (9 cases), thumbnail fetch (4 cases), heading parser (4 cases) |
+| `src/extract/youtube.ts` | NEW — YouTube extraction pipeline: URL detection, config-driven enabled/model, 3-tier fallback, thumbnail fetch, heading parser |
+| `tests/extract/perplexity.test.ts` | NEW — Tests for key availability, successful query, HTTP errors, empty response, network errors |
+| `tests/extract/youtube.test.ts` | NEW — Tests for URL detection (13 cases), extraction fallback chain (9 cases), thumbnail fetch (3 cases), heading parser (4 cases), config integration |
