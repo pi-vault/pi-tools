@@ -12,8 +12,10 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-13-content-extraction-design.md` (Frame Extraction section)
 
+**Reference implementation:** `nicobailon-pi-web-access` — `youtube-extract.ts`, `video-extract.ts`, `utils.ts`
+
 **Dependencies from earlier phases:**
-- `VideoFrame` interface from `src/extract/pipeline.ts` (Phase 1 extends ExtractedContent with video fields including VideoFrame)
+- `VideoFrame` interface from `src/extract/pipeline.ts` (already exists)
 
 ---
 
@@ -88,7 +90,6 @@ describe("parseTimestampParam", () => {
   it("distributes evenly across duration when frames only (no timestamp)", () => {
     const result = parseTimestampParam(undefined, 4, 120);
     expect(result).toHaveLength(4);
-    // Evenly spaced across 120s: 0, 40, 80, 120
     expect(result[0]).toBe(0);
     expect(result[3]).toBe(120);
   });
@@ -170,7 +171,9 @@ describe("getYouTubeStreamInfo", () => {
   });
 
   it("returns stream URL and duration on success", async () => {
-    vi.mocked(execFileSync).mockReturnValue("120\nhttps://rr4---sn.googlevideo.com/videoplayback?id=abc\n");
+    vi.mocked(execFileSync).mockReturnValue(
+      "120\nhttps://rr4---sn.googlevideo.com/videoplayback?id=abc\n",
+    );
     const result = await getYouTubeStreamInfo("dQw4w9WgXcQ");
     expect(result).toEqual({
       streamUrl: "https://rr4---sn.googlevideo.com/videoplayback?id=abc",
@@ -179,17 +182,26 @@ describe("getYouTubeStreamInfo", () => {
     expect(vi.mocked(execFileSync)).toHaveBeenCalledWith(
       "yt-dlp",
       expect.arrayContaining(["--print", "duration", "-g"]),
-      expect.objectContaining({ timeout: 15000 }),
+      expect.objectContaining({ timeout: 15000, stdio: ["pipe", "pipe", "pipe"] }),
     );
   });
 
   it("returns null duration when yt-dlp outputs NA", async () => {
-    vi.mocked(execFileSync).mockReturnValue("NA\nhttps://stream.example.com/video\n");
+    vi.mocked(execFileSync).mockReturnValue(
+      "NA\nhttps://stream.example.com/video\n",
+    );
     const result = await getYouTubeStreamInfo("abc123");
     expect(result).toEqual({
       streamUrl: "https://stream.example.com/video",
       duration: null,
     });
+  });
+
+  it("returns error when stream URL is missing", async () => {
+    vi.mocked(execFileSync).mockReturnValue("120\n");
+    const result = await getYouTubeStreamInfo("abc123");
+    expect(result).toHaveProperty("error");
+    expect((result as { error: string }).error).toContain("missing stream URL");
   });
 
   it("returns error when yt-dlp is not installed (ENOENT)", async () => {
@@ -201,8 +213,8 @@ describe("getYouTubeStreamInfo", () => {
     });
   });
 
-  it("returns error on timeout", async () => {
-    const err = Object.assign(new Error("timed out"), { killed: true, signal: "SIGTERM" });
+  it("returns error on timeout (killed)", async () => {
+    const err = Object.assign(new Error("timed out"), { killed: true });
     vi.mocked(execFileSync).mockImplementation(() => { throw err; });
     const result = await getYouTubeStreamInfo("abc123");
     expect(result).toEqual({
@@ -212,7 +224,7 @@ describe("getYouTubeStreamInfo", () => {
 
   it("returns descriptive error for private video", async () => {
     const err = Object.assign(new Error("yt-dlp error"), {
-      stderr: "ERROR: Private video. Sign in if you've been granted access.",
+      stderr: Buffer.from("ERROR: Private video. Sign in if you've been granted access."),
     });
     vi.mocked(execFileSync).mockImplementation(() => { throw err; });
     const result = await getYouTubeStreamInfo("private123");
@@ -222,7 +234,7 @@ describe("getYouTubeStreamInfo", () => {
 
   it("returns descriptive error for unavailable video", async () => {
     const err = Object.assign(new Error("yt-dlp error"), {
-      stderr: "ERROR: Video unavailable",
+      stderr: Buffer.from("ERROR: Video unavailable"),
     });
     vi.mocked(execFileSync).mockImplementation(() => { throw err; });
     const result = await getYouTubeStreamInfo("gone123");
@@ -247,7 +259,7 @@ describe("getLocalVideoDuration", () => {
     expect(vi.mocked(execFileSync)).toHaveBeenCalledWith(
       "ffprobe",
       expect.arrayContaining(["-show_entries", "format=duration", "/path/to/video.mp4"]),
-      expect.objectContaining({ timeout: 10000 }),
+      expect.objectContaining({ timeout: 10000, stdio: ["pipe", "pipe", "pipe"] }),
     );
   });
 
@@ -256,21 +268,23 @@ describe("getLocalVideoDuration", () => {
     vi.mocked(execFileSync).mockImplementation(() => { throw err; });
     const result = await getLocalVideoDuration("/path/to/video.mp4");
     expect(result).toEqual({
-      error: "ffprobe is not installed. Install ffmpeg which includes ffprobe",
+      error: "ffprobe is not installed. Install with: brew install ffmpeg",
     });
   });
 
   it("returns error on timeout", async () => {
-    const err = Object.assign(new Error("timed out"), { killed: true, signal: "SIGTERM" });
+    const err = Object.assign(new Error("timed out"), { killed: true });
     vi.mocked(execFileSync).mockImplementation(() => { throw err; });
     const result = await getLocalVideoDuration("/path/to/video.mp4");
     expect(result).toHaveProperty("error");
+    expect((result as { error: string }).error).toContain("timed out");
   });
 
   it("returns error when output is not a valid number", async () => {
     vi.mocked(execFileSync).mockReturnValue("N/A\n");
     const result = await getLocalVideoDuration("/path/to/video.mp4");
     expect(result).toHaveProperty("error");
+    expect((result as { error: string }).error).toContain("invalid duration");
   });
 });
 ```
@@ -298,8 +312,6 @@ describe("extractYouTubeFrames", () => {
   });
 
   it("extracts frames successfully from YouTube video", async () => {
-    // First call: yt-dlp for stream info
-    // Subsequent calls: ffmpeg for frame extraction
     const fakeJpeg = Buffer.from("fake-jpeg-data");
     vi.mocked(execFileSync)
       .mockReturnValueOnce("300\nhttps://stream.example.com/video\n") // yt-dlp
@@ -392,30 +404,24 @@ describe("extractLocalFrames", () => {
     expect(result.error).toBeNull();
   });
 
-  it("returns error when ffmpeg is not installed (ENOENT)", async () => {
-    vi.mocked(execFileSync)
-      .mockReturnValueOnce("60\n"); // ffprobe works
-
-    const err = Object.assign(new Error("spawn ffmpeg ENOENT"), { code: "ENOENT" });
-    vi.mocked(execFileSync).mockImplementationOnce(() => { throw err; });
-
-    // Reset and set up properly: ffprobe success, then ffmpeg ENOENT
-    vi.mocked(execFileSync).mockReset();
-    vi.mocked(execFileSync)
-      .mockReturnValueOnce("60\n") // ffprobe
-      .mockImplementation(() => { throw err; }); // ffmpeg ENOENT
-
-    const result = await extractLocalFrames("/tmp/video.mp4", [5]);
-    expect(result.frames).toEqual([]);
-    expect(result.error).toContain("ffmpeg");
-  });
-
-  it("returns error when ffprobe fails", async () => {
+  it("returns error when ffprobe fails (ENOENT)", async () => {
     const err = Object.assign(new Error("spawn ffprobe ENOENT"), { code: "ENOENT" });
     vi.mocked(execFileSync).mockImplementation(() => { throw err; });
 
     const result = await extractLocalFrames("/tmp/video.mp4", [5]);
+    expect(result.frames).toEqual([]);
     expect(result.error).toContain("ffprobe");
+  });
+
+  it("returns error when ffmpeg ENOENT (ffprobe works)", async () => {
+    const ffmpegErr = Object.assign(new Error("spawn ffmpeg ENOENT"), { code: "ENOENT" });
+    vi.mocked(execFileSync)
+      .mockReturnValueOnce("60\n") // ffprobe OK
+      .mockImplementation(() => { throw ffmpegErr; }); // ffmpeg ENOENT
+
+    const result = await extractLocalFrames("/tmp/video.mp4", [5]);
+    expect(result.frames).toEqual([]);
+    expect(result.error).toContain("ffmpeg");
   });
 
   it("returns partial results when some frames fail", async () => {
@@ -446,7 +452,7 @@ Expected: Import/compilation error — `src/extract/frames.ts` does not exist.
 
 ---
 
-## Task 4 — Implement `src/extract/frames.ts` — timestamp parsing and formatting
+## Task 4 — Implement `src/extract/frames.ts` — error utilities and timestamp functions
 
 **Files:**
 
@@ -454,15 +460,96 @@ Expected: Import/compilation error — `src/extract/frames.ts` does not exist.
 
 ### Steps
 
-- [ ] **4.1** Create the file with imports, the `VideoFrame` type import, and the timestamp parsing/formatting utilities:
+- [ ] **4.1** Create the file with imports, error utilities, and timestamp functions:
 
 ```typescript
 import { execFileSync } from "node:child_process";
 import type { VideoFrame } from "./pipeline.ts";
 
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 const MAX_FRAMES = 12;
 const DEFAULT_RANGE_FRAMES = 6;
 const FRAME_INTERVAL_S = 5;
+const FFMPEG_FRAME_TIMEOUT = 30_000;
+const FFMPEG_MAX_BUFFER = 5 * 1024 * 1024; // 5MB
+const YTDLP_TIMEOUT = 15_000;
+const FFPROBE_TIMEOUT = 10_000;
+
+// ---------------------------------------------------------------------------
+// Error utilities (aligned with pi-web-access/utils.ts patterns)
+// ---------------------------------------------------------------------------
+
+function readExecError(err: unknown): { code?: string; stderr: string; message: string } {
+  if (!err || typeof err !== "object") {
+    return { stderr: "", message: String(err) };
+  }
+  const code = (err as { code?: string }).code;
+  const message = (err as { message?: string }).message ?? "";
+  const stderrRaw = (err as { stderr?: Buffer | string }).stderr;
+  const stderr = Buffer.isBuffer(stderrRaw)
+    ? stderrRaw.toString("utf-8")
+    : typeof stderrRaw === "string"
+      ? stderrRaw
+      : "";
+  return { code, stderr, message };
+}
+
+function isTimeoutError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  if ((err as { killed?: boolean }).killed) return true;
+  const name = (err as { name?: string }).name;
+  const code = (err as { code?: string }).code;
+  const message = (err as { message?: string }).message ?? "";
+  return name === "AbortError" || code === "ETIMEDOUT" || message.toLowerCase().includes("timed out");
+}
+
+function trimErrorText(text: string, maxLen = 200): string {
+  const trimmed = text.trim().split("\n")[0] ?? "";
+  return trimmed.length > maxLen ? `${trimmed.slice(0, maxLen)}...` : trimmed;
+}
+
+// ---------------------------------------------------------------------------
+// Error mappers
+// ---------------------------------------------------------------------------
+
+function mapYtDlpError(err: unknown): string {
+  const { code, stderr, message } = readExecError(err);
+  if (code === "ENOENT") return "yt-dlp is not installed. Install with: brew install yt-dlp";
+  if (isTimeoutError(err)) return "yt-dlp timed out fetching video info";
+  const lower = stderr.toLowerCase();
+  if (lower.includes("private")) return "Video is private or unavailable";
+  if (lower.includes("sign in")) return "Video is age-restricted and requires authentication";
+  if (lower.includes("not available") || lower.includes("unavailable")) {
+    return "Video is unavailable in your region or has been removed";
+  }
+  if (lower.includes("live")) return "Cannot extract frames from a live stream";
+  const snippet = trimErrorText(stderr || message);
+  return snippet ? `yt-dlp failed: ${snippet}` : "yt-dlp failed";
+}
+
+function mapFfmpegError(err: unknown): string {
+  const { code, stderr, message } = readExecError(err);
+  if (code === "ENOENT") return "ffmpeg is not installed. Install with: brew install ffmpeg";
+  if (isTimeoutError(err)) return "ffmpeg timed out extracting frame";
+  if (stderr.includes("403")) return "Stream URL returned 403 — may have expired, try again";
+  const snippet = trimErrorText(stderr || message);
+  return snippet ? `ffmpeg failed: ${snippet}` : "ffmpeg failed";
+}
+
+function mapFfprobeError(err: unknown): string {
+  const { code, stderr, message } = readExecError(err);
+  if (code === "ENOENT") return "ffprobe is not installed. Install with: brew install ffmpeg";
+  if (isTimeoutError(err)) return "ffprobe timed out reading video duration";
+  const snippet = trimErrorText(stderr || message);
+  return snippet ? `ffprobe failed: ${snippet}` : "ffprobe failed";
+}
+
+// ---------------------------------------------------------------------------
+// Timestamp parsing and formatting
+// ---------------------------------------------------------------------------
 
 /**
  * Parse a timestamp string into seconds.
@@ -470,7 +557,7 @@ const FRAME_INTERVAL_S = 5;
  */
 function parseTimestamp(ts: string): number {
   const parts = ts.trim().split(":").map(Number);
-  if (parts.some(isNaN)) return 0;
+  if (parts.some(Number.isNaN)) return 0;
   if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
   if (parts.length === 2) return parts[0] * 60 + parts[1];
   return parts[0];
@@ -479,11 +566,11 @@ function parseTimestamp(ts: string): number {
 /**
  * Parse the timestamp parameter into an array of seconds to extract frames at.
  *
- * - No timestamp, no frames → []
- * - Range "start-end" → evenly-spaced points (default 6 or `frames` count)
- * - Single timestamp + frames → N timestamps at 5s intervals
- * - Single timestamp only → [parsedSeconds]
- * - No timestamp + frames + duration → evenly distributed across duration
+ * - No timestamp, no frames -> []
+ * - Range "start-end" -> evenly-spaced points (default 6 or `frames` count)
+ * - Single timestamp + frames -> N timestamps at 5s intervals
+ * - Single timestamp only -> [parsedSeconds]
+ * - No timestamp + frames + duration -> evenly distributed across duration
  */
 export function parseTimestampParam(
   timestamp: string | undefined,
@@ -492,10 +579,10 @@ export function parseTimestampParam(
 ): number[] {
   const count = frames ? Math.min(frames, MAX_FRAMES) : undefined;
 
-  // No timestamp, no frames → empty
+  // No timestamp, no frames -> empty
   if (!timestamp && !count) return [];
 
-  // No timestamp but frames requested → distribute across duration
+  // No timestamp but frames requested -> distribute across duration
   if (!timestamp && count) {
     if (duration == null || duration <= 0) return [];
     if (count === 1) return [0];
@@ -505,7 +592,6 @@ export function parseTimestampParam(
 
   // Has timestamp — check for range (contains "-" but not just a negative number)
   const rangeMatch = timestamp!.match(/^([^-]+)-(.+)$/);
-  // Disambiguate: "10-20" is a range, "-5" is not
   if (rangeMatch && rangeMatch[1].length > 0) {
     const start = parseTimestamp(rangeMatch[1]);
     const end = parseTimestamp(rangeMatch[2]);
@@ -520,7 +606,7 @@ export function parseTimestampParam(
   // Single timestamp
   const seconds = parseTimestamp(timestamp!);
 
-  // Single timestamp + frames → intervals of 5s
+  // Single timestamp + frames -> intervals of 5s
   if (count) {
     const clamped = Math.min(count, MAX_FRAMES);
     return Array.from({ length: clamped }, (_, i) => seconds + i * FRAME_INTERVAL_S);
@@ -559,7 +645,7 @@ Expected: All `parseTimestampParam` and `formatSeconds` tests pass.
 
 ---
 
-## Task 5 — Implement error mapping helpers and stream info functions
+## Task 5 — Implement stream info and duration functions
 
 **Files:**
 
@@ -567,64 +653,12 @@ Expected: All `parseTimestampParam` and `formatSeconds` tests pass.
 
 ### Steps
 
-- [ ] **5.1** Append the error mapping helpers and `getYouTubeStreamInfo` after `formatSeconds`:
+- [ ] **5.1** Append `getYouTubeStreamInfo` and `getLocalVideoDuration` after `formatSeconds`:
 
 ```typescript
-// --- Error mapping helpers ---
-
-function isEnoent(err: unknown): boolean {
-  return (
-    err instanceof Error &&
-    "code" in err &&
-    (err as { code: unknown }).code === "ENOENT"
-  );
-}
-
-function isTimeout(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const e = err as { killed?: boolean; signal?: string };
-  return e.killed === true || e.signal === "SIGTERM";
-}
-
-function mapYtDlpError(err: unknown): string {
-  if (isEnoent(err)) {
-    return "yt-dlp is not installed. Install with: brew install yt-dlp";
-  }
-  if (isTimeout(err)) {
-    return "yt-dlp timed out fetching video info";
-  }
-  // Check stderr for specific yt-dlp errors
-  const stderr = (err as { stderr?: string }).stderr ?? "";
-  const message = err instanceof Error ? err.message : String(err);
-  const combined = `${stderr} ${message}`.toLowerCase();
-
-  if (combined.includes("private")) {
-    return "Video is private. Sign in if you've been granted access.";
-  }
-  if (combined.includes("sign in") || combined.includes("login")) {
-    return "Video requires sign-in to access.";
-  }
-  if (combined.includes("unavailable") || combined.includes("not available")) {
-    return "Video is unavailable.";
-  }
-  if (combined.includes("live")) {
-    return "Live streams are not supported for frame extraction.";
-  }
-  return `yt-dlp error: ${message}`;
-}
-
-function mapFfmpegError(err: unknown): string {
-  if (isEnoent(err)) {
-    return "ffmpeg required for frame extraction";
-  }
-  if (isTimeout(err)) {
-    return "ffmpeg timed out extracting frame";
-  }
-  const message = err instanceof Error ? err.message : String(err);
-  return `ffmpeg error: ${message}`;
-}
-
-// --- Stream info functions ---
+// ---------------------------------------------------------------------------
+// Stream info functions
+// ---------------------------------------------------------------------------
 
 /**
  * Get the direct stream URL and duration for a YouTube video using yt-dlp.
@@ -638,15 +672,16 @@ export async function getYouTubeStreamInfo(
     const output = execFileSync(
       "yt-dlp",
       ["--print", "duration", "-g", `https://www.youtube.com/watch?v=${videoId}`],
-      { timeout: 15000, encoding: "utf-8" },
-    );
-    const lines = output.trim().split("\n");
-    if (lines.length < 2) {
-      return { error: "yt-dlp returned unexpected output format" };
-    }
-    const durationStr = lines[0].trim();
-    const streamUrl = lines[1].trim();
-    const duration = durationStr === "NA" ? null : Number(durationStr) || null;
+      { timeout: YTDLP_TIMEOUT, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
+    ).trim();
+    const lines = output.split(/\r?\n/);
+    const rawDuration = lines[0]?.trim();
+    const streamUrl = lines[1]?.trim();
+    if (!streamUrl) return { error: "yt-dlp failed: missing stream URL" };
+    const parsedDuration = rawDuration && rawDuration !== "NA"
+      ? Number.parseFloat(rawDuration)
+      : Number.NaN;
+    const duration = Number.isFinite(parsedDuration) ? parsedDuration : null;
     return { streamUrl, duration };
   } catch (err) {
     return { error: mapYtDlpError(err) };
@@ -664,22 +699,15 @@ export async function getLocalVideoDuration(
     const output = execFileSync(
       "ffprobe",
       ["-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", filePath],
-      { timeout: 10000, encoding: "utf-8" },
-    );
-    const duration = parseFloat(output.trim());
-    if (isNaN(duration)) {
-      return { error: `ffprobe returned invalid duration: ${output.trim()}` };
+      { timeout: FFPROBE_TIMEOUT, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
+    ).trim();
+    const duration = Number.parseFloat(output);
+    if (!Number.isFinite(duration)) {
+      return { error: `ffprobe failed: invalid duration output` };
     }
     return duration;
   } catch (err) {
-    if (isEnoent(err)) {
-      return { error: "ffprobe is not installed. Install ffmpeg which includes ffprobe" };
-    }
-    if (isTimeout(err)) {
-      return { error: "ffprobe timed out reading video duration" };
-    }
-    const message = err instanceof Error ? err.message : String(err);
-    return { error: `ffprobe error: ${message}` };
+    return { error: mapFfprobeError(err) };
   }
 }
 ```
@@ -705,23 +733,17 @@ Expected: All `getYouTubeStreamInfo` and `getLocalVideoDuration` tests pass.
 - [ ] **6.1** Append the frame extraction functions after `getLocalVideoDuration`:
 
 ```typescript
-// --- Frame extraction ---
-
-const FFMPEG_FRAME_TIMEOUT = 30000; // 30s per frame
-const FFMPEG_MAX_BUFFER = 5 * 1024 * 1024; // 5MB
+// ---------------------------------------------------------------------------
+// Frame extraction
+// ---------------------------------------------------------------------------
 
 /**
  * Extract a single frame from a video source at the given timestamp.
- * Returns the frame as a Buffer, or null on failure.
+ * Returns the frame as a Buffer, or an error string on failure.
  */
-function extractSingleFrame(
-  source: string,
-  timestampSec: number,
-  signal?: AbortSignal,
-): Buffer | null {
-  if (signal?.aborted) return null;
+function extractSingleFrame(source: string, timestampSec: number): Buffer | string {
   try {
-    const result = execFileSync(
+    const buffer = execFileSync(
       "ffmpeg",
       [
         "-ss", String(timestampSec),
@@ -734,14 +756,14 @@ function extractSingleFrame(
       {
         maxBuffer: FFMPEG_MAX_BUFFER,
         timeout: FFMPEG_FRAME_TIMEOUT,
+        stdio: ["pipe", "pipe", "pipe"],
       },
     );
-    // execFileSync returns Buffer when encoding is not specified
-    const buf = Buffer.isBuffer(result) ? result : Buffer.from(result, "binary");
-    if (buf.length === 0) return null;
+    const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer, "binary");
+    if (buf.length === 0) return "ffmpeg failed: empty output";
     return buf;
-  } catch {
-    return null;
+  } catch (err) {
+    return mapFfmpegError(err);
   }
 }
 
@@ -767,22 +789,22 @@ export async function extractYouTubeFrames(
 
   for (const t of timestamps) {
     if (signal?.aborted) break;
-    const buf = extractSingleFrame(info.streamUrl, t, signal);
-    if (buf) {
+    const result = extractSingleFrame(info.streamUrl, t);
+    if (Buffer.isBuffer(result)) {
       frames.push({
-        data: buf.toString("base64"),
+        data: result.toString("base64"),
         mimeType: "image/jpeg",
         timestamp: formatSeconds(t),
       });
     } else if (!firstError) {
-      firstError = mapFfmpegError(new Error(`Failed to extract frame at ${formatSeconds(t)}`));
+      firstError = result;
     }
   }
 
   return {
     frames,
     duration: info.duration,
-    error: frames.length === 0 ? firstError : null,
+    error: frames.length === 0 ? (firstError ?? "All frames failed to extract") : null,
   };
 }
 
@@ -799,11 +821,7 @@ export async function extractLocalFrames(
   signal?: AbortSignal,
 ): Promise<{ frames: VideoFrame[]; duration: number | null; error: string | null }> {
   const durationResult = await getLocalVideoDuration(filePath);
-  let duration: number | null = null;
-  if (typeof durationResult === "number") {
-    duration = durationResult;
-  } else {
-    // ffprobe failed — return error immediately
+  if (typeof durationResult !== "number") {
     return { frames: [], duration: null, error: durationResult.error };
   }
 
@@ -812,43 +830,22 @@ export async function extractLocalFrames(
 
   for (const t of timestamps) {
     if (signal?.aborted) break;
-    try {
-      const result = execFileSync(
-        "ffmpeg",
-        [
-          "-ss", String(t),
-          "-i", filePath,
-          "-frames:v", "1",
-          "-f", "image2pipe",
-          "-vcodec", "mjpeg",
-          "pipe:1",
-        ],
-        {
-          maxBuffer: FFMPEG_MAX_BUFFER,
-          timeout: FFMPEG_FRAME_TIMEOUT,
-        },
-      );
-      const buf = Buffer.isBuffer(result) ? result : Buffer.from(result, "binary");
-      if (buf.length > 0) {
-        frames.push({
-          data: buf.toString("base64"),
-          mimeType: "image/jpeg",
-          timestamp: formatSeconds(t),
-        });
-      } else if (!firstError) {
-        firstError = `Empty frame at ${formatSeconds(t)}`;
-      }
-    } catch (err) {
-      if (!firstError) {
-        firstError = mapFfmpegError(err);
-      }
+    const result = extractSingleFrame(filePath, t);
+    if (Buffer.isBuffer(result)) {
+      frames.push({
+        data: result.toString("base64"),
+        mimeType: "image/jpeg",
+        timestamp: formatSeconds(t),
+      });
+    } else if (!firstError) {
+      firstError = result;
     }
   }
 
   return {
     frames,
-    duration,
-    error: frames.length === 0 ? firstError : null,
+    duration: durationResult,
+    error: frames.length === 0 ? (firstError ?? "All frames failed to extract") : null,
   };
 }
 ```
@@ -863,23 +860,19 @@ Expected: All tests pass.
 
 ---
 
-## Task 7 — Verify VideoFrame type compatibility
+## Task 7 — Full verification
 
 **Files:** (none modified)
 
 ### Steps
 
-- [ ] **7.1** Confirm that `VideoFrame` is exported from `pipeline.ts`. If Phase 1 has not yet added it, add the interface to `src/extract/pipeline.ts`:
+- [ ] **7.1** Run the full test suite:
 
-```typescript
-export interface VideoFrame {
-  data: string; // base64-encoded JPEG
-  mimeType: string; // "image/jpeg"
-  timestamp: string; // formatted: "1:23:45" or "0:05:30"
-}
+```bash
+pnpm test
 ```
 
-Place this after the `ExtractedContent` interface. If it already exists (from Phase 1), skip this step.
+Expected: All tests pass, including the new `tests/extract/frames.test.ts`.
 
 - [ ] **7.2** Run type checking:
 
@@ -889,31 +882,7 @@ pnpm run typecheck
 
 Expected: No type errors. The `import type { VideoFrame } from "./pipeline.ts"` in frames.ts resolves correctly.
 
----
-
-## Task 8 — Full verification
-
-**Files:** (none modified)
-
-### Steps
-
-- [ ] **8.1** Run the full test suite:
-
-```bash
-pnpm test
-```
-
-Expected: All tests pass, including the new `tests/extract/frames.test.ts`.
-
-- [ ] **8.2** Run type checking:
-
-```bash
-pnpm run typecheck
-```
-
-Expected: No type errors.
-
-- [ ] **8.3** Run linting:
+- [ ] **7.3** Run linting:
 
 ```bash
 pnpm run lint
@@ -921,7 +890,7 @@ pnpm run lint
 
 Expected: No lint errors.
 
-- [ ] **8.4** Commit the changes:
+- [ ] **7.4** Commit the changes:
 
 ```bash
 git add src/extract/frames.ts tests/extract/frames.test.ts
@@ -934,8 +903,9 @@ Phase 5 of content extraction:
 - getLocalVideoDuration: get video duration via ffprobe
 - extractYouTubeFrames: extract JPEG frames from YouTube streams
 - extractLocalFrames: extract JPEG frames from local video files
-- Graceful error handling for missing tools (ENOENT), timeouts,
-  private/unavailable videos, and partial frame failures
+- Shared error utilities (readExecError, isTimeoutError, trimErrorText)
+- Graceful error handling for missing tools, timeouts, private/unavailable
+  videos, expired stream URLs (403), and partial frame failures
 - Comprehensive test coverage with mocked execFileSync
 
 Generated with [Devin](https://devin.ai)
@@ -947,9 +917,24 @@ Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.
 
 ## Implementation Notes
 
-### VideoFrame dependency on Phase 1
+### Changes from previous plan version
 
-This phase imports `VideoFrame` from `pipeline.ts`. If Phase 1 has not yet been implemented, Task 7.1 adds the minimal interface. The interface is intentionally simple (3 string fields) and won't conflict with Phase 1's broader ExtractedContent changes.
+This rewrite addresses 10 issues found by comparing against the source `pi-web-access` implementation:
+
+1. **Added `stdio: ["pipe", "pipe", "pipe"]`** to all `execFileSync` calls — prevents stderr from leaking to the user's terminal
+2. **Added shared error utilities** (`readExecError`, `isTimeoutError`, `trimErrorText`) matching `pi-web-access/utils.ts` — properly handles Buffer/string stderr, multiple timeout indicators, and message truncation
+3. **Fixed duration parsing** to use `Number.parseFloat`/`Number.isFinite` — previous version treated duration=0 as null due to `|| null` falsy coercion
+4. **Fixed line splitting** to use `/\r?\n/` — handles Windows-style line endings from yt-dlp
+5. **Added missing `streamUrl` validation** — returns error when yt-dlp output is malformed (only 1 line)
+6. **Added 403 detection in `mapFfmpegError`** — expired YouTube stream URLs return HTTP 403, which is a common failure mode
+7. **Cleaned up test setup** — removed confusing mid-test `mockReset()` in extractLocalFrames ENOENT test
+8. **Aligned error messages** with source — user-facing install instructions now match `pi-web-access`
+9. **Added `mapFfprobeError`** as separate function — cleaner than inline error handling
+10. **`extractSingleFrame` returns `Buffer | string`** — error as string avoids re-throwing and makes the flow clearer
+
+### VideoFrame dependency
+
+`VideoFrame` is already exported from `pipeline.ts` (added in Phase 1). No modifications needed.
 
 ### execFileSync vs execFile
 
@@ -965,8 +950,6 @@ Tests use `vi.mock("node:child_process")` with a factory that wraps the real `ex
 - Allows `.mockReturnValueOnce()` chaining for multi-call sequences (yt-dlp then ffmpeg)
 - Preserves the real implementation for any unmocked calls
 - Uses `.mockReset()` in beforeEach/afterEach for test isolation
-
-The project's existing `stubExec()` helper in `tests/helpers.ts` is designed for DuckDuckGo's `execFile` callback pattern, not `execFileSync`, so we use `vi.mock` directly.
 
 ### Partial success behavior
 
@@ -987,6 +970,5 @@ This matches the spec: "Partial success is acceptable — return whatever frames
 
 | File                          | Change                                                                 |
 | ----------------------------- | ---------------------------------------------------------------------- |
-| `src/extract/frames.ts`      | New file — timestamp parsing, formatting, stream info, frame extraction |
+| `src/extract/frames.ts`      | New file — error utils, timestamp parsing, formatting, stream info, frame extraction |
 | `tests/extract/frames.test.ts` | New file — comprehensive tests for all exported functions              |
-| `src/extract/pipeline.ts`    | Add `VideoFrame` interface if not already present from Phase 1         |
