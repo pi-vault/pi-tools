@@ -21,10 +21,7 @@ vi.mock("../../src/extract/perplexity.ts", () => ({
 // Default: return empty config (matches "no tools.json found" in real env).
 vi.mock("../../src/config.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/config.ts")>();
-  return {
-    ...actual,
-    loadConfig: vi.fn().mockReturnValue({} as import("../../src/config.ts").PiToolsConfig),
-  };
+  return { ...actual, loadConfig: vi.fn().mockReturnValue({}) };
 });
 
 import {
@@ -39,7 +36,7 @@ import {
   isPerplexityAvailable,
   queryPerplexity,
 } from "../../src/extract/perplexity.ts";
-import { loadConfig } from "../../src/config.ts";
+import { loadConfig, type PiToolsConfig } from "../../src/config.ts";
 import {
   extractHeadingTitle,
   extractYouTube,
@@ -48,13 +45,16 @@ import {
   isYouTubeURL,
 } from "../../src/extract/youtube.ts";
 
+const mockCfg = (cfg: Partial<PiToolsConfig>) =>
+  vi.mocked(loadConfig).mockReturnValue(cfg as PiToolsConfig);
+
 describe("youtube", () => {
   let fetchStub: FetchStub;
 
   beforeEach(() => {
     fetchStub = stubFetch();
     vi.clearAllMocks();
-    vi.mocked(loadConfig).mockReturnValue({} as import("../../src/config.ts").PiToolsConfig);
+    mockCfg({});
   });
 
   afterEach(() => {
@@ -67,93 +67,37 @@ describe("youtube", () => {
   // -------------------------------------------------------------------------
 
   describe("isYouTubeURL", () => {
-    it("detects standard watch URL", () => {
-      const result = isYouTubeURL(
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      );
-      expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
-    });
+    const valid: [string, string, string][] = [
+      ["standard watch", "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+      ["without www", "https://youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+      ["mobile", "https://m.youtube.com/watch?v=dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+      ["shorts", "https://www.youtube.com/shorts/dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+      ["live", "https://www.youtube.com/live/dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+      ["embed", "https://www.youtube.com/embed/dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+      ["/v/", "https://www.youtube.com/v/dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+      ["youtu.be", "https://youtu.be/dQw4w9WgXcQ", "dQw4w9WgXcQ"],
+      ["extra query params", "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=120&list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf", "dQw4w9WgXcQ"],
+      ["hyphens and underscores", "https://youtu.be/a-B_c1D2e3f", "a-B_c1D2e3f"],
+    ];
 
-    it("detects watch URL without www", () => {
-      const result = isYouTubeURL(
-        "https://youtube.com/watch?v=dQw4w9WgXcQ",
-      );
-      expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
-    });
+    for (const [label, url, videoId] of valid) {
+      it(`detects ${label} URL`, () => {
+        expect(isYouTubeURL(url)).toEqual({ isYouTube: true, videoId });
+      });
+    }
 
-    it("detects mobile URL", () => {
-      const result = isYouTubeURL(
-        "https://m.youtube.com/watch?v=dQw4w9WgXcQ",
-      );
-      expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
-    });
+    const invalid: [string, string][] = [
+      ["playlist", "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf"],
+      ["non-YouTube", "https://www.google.com/search?q=hello"],
+      ["empty string", ""],
+      ["channel URL", "https://www.youtube.com/@channelname"],
+    ];
 
-    it("detects shorts URL", () => {
-      const result = isYouTubeURL(
-        "https://www.youtube.com/shorts/dQw4w9WgXcQ",
-      );
-      expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
-    });
-
-    it("detects live URL", () => {
-      const result = isYouTubeURL(
-        "https://www.youtube.com/live/dQw4w9WgXcQ",
-      );
-      expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
-    });
-
-    it("detects embed URL", () => {
-      const result = isYouTubeURL(
-        "https://www.youtube.com/embed/dQw4w9WgXcQ",
-      );
-      expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
-    });
-
-    it("detects /v/ URL", () => {
-      const result = isYouTubeURL(
-        "https://www.youtube.com/v/dQw4w9WgXcQ",
-      );
-      expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
-    });
-
-    it("detects youtu.be short URL", () => {
-      const result = isYouTubeURL("https://youtu.be/dQw4w9WgXcQ");
-      expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
-    });
-
-    it("detects watch URL with extra query params", () => {
-      const result = isYouTubeURL(
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=120&list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
-      );
-      expect(result).toEqual({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
-    });
-
-    it("excludes playlist URLs", () => {
-      const result = isYouTubeURL(
-        "https://www.youtube.com/playlist?list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
-      );
-      expect(result).toEqual({ isYouTube: false, videoId: null });
-    });
-
-    it("returns false for non-YouTube URL", () => {
-      const result = isYouTubeURL("https://www.google.com/search?q=hello");
-      expect(result).toEqual({ isYouTube: false, videoId: null });
-    });
-
-    it("returns false for empty string", () => {
-      const result = isYouTubeURL("");
-      expect(result).toEqual({ isYouTube: false, videoId: null });
-    });
-
-    it("returns false for YouTube channel URL", () => {
-      const result = isYouTubeURL("https://www.youtube.com/@channelname");
-      expect(result).toEqual({ isYouTube: false, videoId: null });
-    });
-
-    it("handles video ID with hyphens and underscores", () => {
-      const result = isYouTubeURL("https://youtu.be/a-B_c1D2e3f");
-      expect(result).toEqual({ isYouTube: true, videoId: "a-B_c1D2e3f" });
-    });
+    for (const [label, url] of invalid) {
+      it(`rejects ${label}`, () => {
+        expect(isYouTubeURL(url)).toEqual({ isYouTube: false, videoId: null });
+      });
+    }
   });
 
   // -------------------------------------------------------------------------
@@ -162,18 +106,13 @@ describe("youtube", () => {
 
   describe("isYouTubeEnabled", () => {
     it("returns true by default (empty config)", () => {
-      vi.mocked(loadConfig).mockReturnValue({} as import("../../src/config.ts").PiToolsConfig);
+      mockCfg({});
       expect(isYouTubeEnabled()).toBe(true);
     });
 
     it("returns false when youtube.enabled is false", () => {
-      vi.mocked(loadConfig).mockReturnValue({ youtube: { enabled: false } } as import("../../src/config.ts").PiToolsConfig);
+      mockCfg({ youtube: { enabled: false } });
       expect(isYouTubeEnabled()).toBe(false);
-    });
-
-    it("returns true when youtube.enabled is true", () => {
-      vi.mocked(loadConfig).mockReturnValue({ youtube: { enabled: true } } as import("../../src/config.ts").PiToolsConfig);
-      expect(isYouTubeEnabled()).toBe(true);
     });
 
     it("returns default when loadConfig throws", () => {
@@ -311,7 +250,7 @@ describe("youtube", () => {
     });
 
     it("returns null when YouTube is disabled via config", async () => {
-      vi.mocked(loadConfig).mockReturnValue({ youtube: { enabled: false } } as import("../../src/config.ts").PiToolsConfig);
+      mockCfg({ youtube: { enabled: false } });
 
       const result = await extractYouTube(
         "https://www.youtube.com/watch?v=dQw4w9WgXcQ",

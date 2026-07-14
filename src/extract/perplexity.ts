@@ -16,7 +16,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * Uses resolveProviderKey which checks config + FALLBACK_ENV_MAP ("perplexity" → "PERPLEXITY_API_KEY").
  */
 export function isPerplexityAvailable(): boolean {
-  return !!getPerplexityKey();
+  return !!resolveProviderKey("perplexity");
 }
 
 /**
@@ -31,7 +31,7 @@ export async function queryPerplexity(
   query: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const key = getPerplexityKey();
+  const key = resolveProviderKey("perplexity");
   if (!key) {
     throw new Error(
       "Perplexity API key not found. Set PERPLEXITY_API_KEY environment variable " +
@@ -77,10 +77,4 @@ export async function queryPerplexity(
   return content;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
-function getPerplexityKey(): string | undefined {
-  return resolveProviderKey("perplexity");
-}
