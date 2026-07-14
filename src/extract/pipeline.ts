@@ -17,6 +17,12 @@ export class RetryableExtractionError extends Error {
   }
 }
 
+export interface VideoFrame {
+  data: string;
+  mimeType: string;
+  timestamp: string;
+}
+
 export interface ExtractedContent {
   text: string;
   title?: string;
@@ -25,6 +31,9 @@ export interface ExtractedContent {
   chars: number;
   truncated: boolean;
   contentId?: string;
+  thumbnail?: { data: string; mimeType: string };
+  frames?: VideoFrame[];
+  duration?: number;
 }
 
 const BINARY_CONTENT_TYPES = [
@@ -47,6 +56,10 @@ export interface ExtractOptions {
   raw?: boolean;
   github?: GitHubConfig;
   allowRanges?: string[];
+  prompt?: string;
+  timestamp?: string;
+  frames?: number;
+  model?: string;
 }
 
 export async function extractContent(

@@ -54,6 +54,25 @@ export interface DeepResearchConfig {
   guidance?: GuidanceOverride;
 }
 
+export interface GeminiConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  cloudflareApiKey?: string;
+  allowBrowserCookies?: boolean;
+  chromeProfile?: string;
+}
+
+export interface YouTubeConfig {
+  enabled?: boolean;
+  preferredModel?: string;
+}
+
+export interface VideoConfig {
+  enabled?: boolean;
+  preferredModel?: string;
+  maxSizeMB?: number;
+}
+
 export interface PiToolsConfig {
   defaultProvider: string;
   selectionStrategy: SelectionStrategy;
@@ -63,6 +82,9 @@ export interface PiToolsConfig {
   ssrf: SsrfConfig;
   combine: CombineConfig;
   deepResearch: DeepResearchConfig;
+  gemini?: GeminiConfig;
+  youtube?: YouTubeConfig;
+  video?: VideoConfig;
 }
 
 const ENV_VAR_PATTERN = /^[A-Z][A-Z0-9_]+$/;
@@ -100,6 +122,7 @@ export const FALLBACK_ENV_MAP: Record<string, string> = {
   parallel: "PARALLEL_API_KEY",
   "openai-native": "OPENAI_API_KEY",
   "openai-codex": "OPENAI_API_KEY",
+  gemini: "GEMINI_API_KEY",
 };
 
 export const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
@@ -117,6 +140,23 @@ export const DEFAULT_COMBINE_CONFIG: CombineConfig = {
 
 export const DEFAULT_DEEP_RESEARCH_CONFIG: DeepResearchConfig = {
   enabled: true,
+};
+
+export const DEFAULT_GEMINI_CONFIG: Required<Pick<GeminiConfig, "baseUrl" | "allowBrowserCookies" | "chromeProfile">> = {
+  baseUrl: "https://generativelanguage.googleapis.com",
+  allowBrowserCookies: false,
+  chromeProfile: "Default",
+};
+
+export const DEFAULT_YOUTUBE_CONFIG: Required<YouTubeConfig> = {
+  enabled: true,
+  preferredModel: "gemini-3-flash-preview",
+};
+
+export const DEFAULT_VIDEO_CONFIG: Required<VideoConfig> = {
+  enabled: true,
+  preferredModel: "gemini-3-flash-preview",
+  maxSizeMB: 50,
 };
 
 const DEFAULT_CONFIG: PiToolsConfig = {
@@ -225,6 +265,9 @@ function parseConfigFile(raw: string): PiToolsConfig {
     ssrf: validateSsrfConfig(parsed.ssrf),
     combine: validateCombineConfig(parsed.combine),
     deepResearch: validateDeepResearchConfig(parsed.deepResearch),
+    gemini: parsed.gemini,
+    youtube: parsed.youtube,
+    video: parsed.video,
   };
 }
 

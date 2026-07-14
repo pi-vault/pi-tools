@@ -168,13 +168,48 @@ export const FALLBACK_ENV_MAP: Record<string, string> = {
 };
 ```
 
-- [ ] **2.5** Verify typecheck passes:
+- [ ] **2.5** Modify `parseConfigFile` to pass through the new optional sections. `parseConfigFile` constructs its return value field-by-field (no spread of the raw JSON), so new fields must be explicitly included. Add after the `deepResearch` line in the return object:
+
+```typescript
+function parseConfigFile(raw: string): PiToolsConfig {
+  const parsed = JSON.parse(raw);
+
+  const strategy =
+    parsed.selectionStrategy === "auto" || parsed.selectionStrategy === "best-performing"
+      ? (parsed.selectionStrategy as SelectionStrategy)
+      : DEFAULT_CONFIG.selectionStrategy;
+
+  return {
+    defaultProvider: parsed.defaultProvider ?? DEFAULT_CONFIG.defaultProvider,
+    selectionStrategy: strategy,
+    providers: {
+      ...DEFAULT_CONFIG.providers,
+      ...parsed.providers,
+    },
+    github: {
+      ...DEFAULT_CONFIG.github,
+      ...parsed.github,
+    },
+    guidance: parsed.guidance,
+    ssrf: validateSsrfConfig(parsed.ssrf),
+    combine: validateCombineConfig(parsed.combine),
+    deepResearch: validateDeepResearchConfig(parsed.deepResearch),
+    gemini: parsed.gemini,
+    youtube: parsed.youtube,
+    video: parsed.video,
+  };
+}
+```
+
+The new fields are passed through raw (no validation) — validation will be added in Phase 2 when the Gemini client consumes them.
+
+- [ ] **2.6** Verify typecheck passes:
 
 ```bash
 pnpm run typecheck
 ```
 
-Expected: No type errors. New `PiToolsConfig` fields are optional, so `DEFAULT_CONFIG` and `parseConfigFile` remain valid.
+Expected: No type errors. New `PiToolsConfig` fields are optional, so `DEFAULT_CONFIG` remains valid without them.
 
 ---
 
@@ -189,6 +224,9 @@ Expected: No type errors. New `PiToolsConfig` fields are optional, so `DEFAULT_C
 - [ ] **3.1** Create the test file `tests/extract/config-video.test.ts` with the following content:
 
 ```typescript
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, it, expect } from "vitest";
 import {
   FALLBACK_ENV_MAP,
@@ -262,6 +300,24 @@ describe("PiToolsConfig — new optional sections", () => {
     expect(config.gemini).toBeUndefined();
     expect(config.youtube).toBeUndefined();
     expect(config.video).toBeUndefined();
+  });
+
+  it("loadConfig passes through gemini/youtube/video when present in file", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-tools-test-"));
+    const configPath = path.join(tmpDir, "tools.json");
+    fs.writeFileSync(configPath, JSON.stringify({
+      gemini: { apiKey: "test-key", baseUrl: "https://custom.example.com" },
+      youtube: { enabled: false, preferredModel: "gemini-2.5-pro" },
+      video: { enabled: true, maxSizeMB: 100 },
+    }));
+    try {
+      const config = loadConfig(configPath);
+      expect(config.gemini).toEqual({ apiKey: "test-key", baseUrl: "https://custom.example.com" });
+      expect(config.youtube).toEqual({ enabled: false, preferredModel: "gemini-2.5-pro" });
+      expect(config.video).toEqual({ enabled: true, maxSizeMB: 100 });
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true });
+    }
   });
 });
 
@@ -438,6 +494,7 @@ Phase 1 of content extraction feature:
 - Add DEFAULT_GEMINI_CONFIG, DEFAULT_YOUTUBE_CONFIG, DEFAULT_VIDEO_CONFIG
 - Add gemini entry to FALLBACK_ENV_MAP
 - Extend PiToolsConfig with gemini?, youtube?, video? sections
+- Wire new fields through parseConfigFile (raw passthrough)
 - Add comprehensive type-level and config-loading tests
 
 Generated with [Devin](https://devin.ai)
@@ -466,14 +523,9 @@ The `gemini` entry allows `resolveProviderKey("gemini")` to automatically resolv
 
 `gemini-3-flash-preview` is chosen as the default `preferredModel` for both YouTube and Video configs. This is the fastest multimodal Gemini model suitable for transcript/video analysis. Users can override via config.
 
-### parseConfigFile not modified
+### parseConfigFile modified (raw passthrough)
 
-The `parseConfigFile` function does not need modification because:
-1. The new `PiToolsConfig` fields are optional (`gemini?`, `youtube?`, `video?`)
-2. Any JSON with these sections will be passed through via the spread in the return object
-3. Validation of these sections will be added in Phase 2 when the Gemini client needs validated config
-
-If strict validation is needed earlier, a `validateGeminiConfig` function can be added (similar to `validateCombineConfig`), but this is deferred to Phase 2 to keep Phase 1 minimal.
+`parseConfigFile` constructs its return value field-by-field (no spread of the raw JSON). Without modification, new config fields like `gemini`, `youtube`, `video` would be silently dropped even when present in the user's `tools.json`. This phase adds them as raw passthrough (`parsed.gemini`, `parsed.youtube`, `parsed.video`) — no validation. Strict validation (similar to `validateCombineConfig`) will be added in Phase 2 when the Gemini client actually consumes these values.
 
 ### Test strategy
 
@@ -488,5 +540,5 @@ The tests in `tests/extract/config-video.test.ts` serve two purposes:
 | File | Change |
 | --- | --- |
 | `src/extract/pipeline.ts` | Add `VideoFrame` interface; extend `ExtractedContent` with `thumbnail`, `frames`, `duration`; extend `ExtractOptions` with `prompt`, `timestamp`, `frames`, `model` |
-| `src/config.ts` | Add `GeminiConfig`, `YouTubeConfig`, `VideoConfig` interfaces; add `DEFAULT_GEMINI_CONFIG`, `DEFAULT_YOUTUBE_CONFIG`, `DEFAULT_VIDEO_CONFIG` constants; add `gemini: "GEMINI_API_KEY"` to `FALLBACK_ENV_MAP`; extend `PiToolsConfig` with `gemini?`, `youtube?`, `video?` |
+| `src/config.ts` | Add `GeminiConfig`, `YouTubeConfig`, `VideoConfig` interfaces; add `DEFAULT_GEMINI_CONFIG`, `DEFAULT_YOUTUBE_CONFIG`, `DEFAULT_VIDEO_CONFIG` constants; add `gemini: "GEMINI_API_KEY"` to `FALLBACK_ENV_MAP`; extend `PiToolsConfig` with `gemini?`, `youtube?`, `video?`; wire new fields through `parseConfigFile` |
 | `tests/extract/config-video.test.ts` | New file — tests for defaults, FALLBACK_ENV_MAP, type shapes, config loading |
