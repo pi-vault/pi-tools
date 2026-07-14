@@ -52,37 +52,12 @@ interface GeminiWebResult {
 // Config helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Check if browser cookie access is allowed via env var or config.
- */
-export function isBrowserCookieAccessAllowed(): boolean {
+function isBrowserCookieAccessAllowed(): boolean {
   if (process.env.PI_ALLOW_BROWSER_COOKIES === "1") return true;
   try {
-    const config = loadConfig();
-    return config.gemini?.allowBrowserCookies === true;
+    return loadConfig().gemini?.allowBrowserCookies === true;
   } catch {
     return false;
-  }
-}
-
-/**
- * Normalize a chrome profile string: trim whitespace, return undefined
- * for empty or non-string values.
- */
-function normalizeChromeProfile(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : undefined;
-}
-
-/**
- * Get the configured Chrome profile name from config.
- */
-function getChromeProfileFromConfig(): string | undefined {
-  try {
-    return normalizeChromeProfile(loadConfig().gemini?.chromeProfile);
-  } catch {
-    return undefined;
   }
 }
 
@@ -96,9 +71,17 @@ export async function isGeminiWebAvailable(
 ): Promise<CookieMap | null> {
   if (!isBrowserCookieAccessAllowed()) return null;
 
+  let profile = chromeProfile?.trim() || undefined;
+  if (!profile) {
+    try {
+      profile = loadConfig().gemini?.chromeProfile?.trim() || undefined;
+    } catch {
+      // config unavailable
+    }
+  }
+
   const result = await getGoogleCookies({
-    profile:
-      normalizeChromeProfile(chromeProfile) ?? getChromeProfileFromConfig(),
+    profile,
     requiredCookies: REQUIRED_COOKIES,
   });
 
@@ -140,8 +123,8 @@ export async function queryWithCookies(
     options.signal,
   );
 
-  // If model unavailable and not already flash, retry with flash
-  if (isModelUnavailable(result.errorCode) && model !== DEFAULT_MODEL) {
+  // Error code 1052 = model unavailable; retry with flash
+  if (result.errorCode === 1052 && model !== DEFAULT_MODEL) {
     const fallback = await runGeminiWebOnce(
       fullPrompt,
       cookieMap,
@@ -427,7 +410,7 @@ function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortS
 
 function buildCookieHeader(cookieMap: CookieMap): string {
   return Object.entries(cookieMap)
-    .filter(([, value]) => typeof value === "string" && value.length > 0)
+    .filter(([, v]) => v.length > 0)
     .map(([name, value]) => `${name}=${value}`)
     .join("; ");
 }
@@ -457,11 +440,4 @@ function trimJsonEnvelope(text: string): string {
 function extractErrorCode(responseJson: unknown): number | undefined {
   const code = getNestedValue(responseJson, [0, 5, 2, 0, 1, 0]);
   return typeof code === "number" && code >= 0 ? code : undefined;
-}
-
-/**
- * Model unavailable is indicated by error code 1052.
- */
-function isModelUnavailable(errorCode: number | undefined): boolean {
-  return errorCode === 1052;
 }

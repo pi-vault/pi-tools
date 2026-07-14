@@ -93,35 +93,11 @@ describe("gemini-web", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // isBrowserCookieAccessAllowed
-  // ---------------------------------------------------------------------------
-
-  describe("isBrowserCookieAccessAllowed", () => {
-    it("returns true when PI_ALLOW_BROWSER_COOKIES=1", async () => {
-      vi.stubEnv("PI_ALLOW_BROWSER_COOKIES", "1");
-
-      const { isBrowserCookieAccessAllowed } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
-      expect(isBrowserCookieAccessAllowed()).toBe(true);
-    });
-
-    it("returns false when env var is absent", async () => {
-      vi.stubEnv("PI_ALLOW_BROWSER_COOKIES", "");
-
-      const { isBrowserCookieAccessAllowed } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
-      expect(isBrowserCookieAccessAllowed()).toBe(false);
-    });
-  });
-
-  // ---------------------------------------------------------------------------
-  // isGeminiWebAvailable
+  // isGeminiWebAvailable (also covers isBrowserCookieAccessAllowed)
   // ---------------------------------------------------------------------------
 
   describe("isGeminiWebAvailable", () => {
-    it("returns null when cookie access is not allowed", async () => {
+    it("returns null when cookie access is not allowed (env var absent)", async () => {
       vi.stubEnv("PI_ALLOW_BROWSER_COOKIES", "");
 
       const { isGeminiWebAvailable } = await import(

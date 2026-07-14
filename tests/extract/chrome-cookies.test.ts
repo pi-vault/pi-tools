@@ -41,12 +41,6 @@ vi.mock("node:sqlite", () => ({
   }),
 }));
 
-/**
- * Build an AES-128-CBC encrypted cookie value matching Chrome's format.
- * Uses CJS require to avoid a top-level import of createCipheriv
- * (we already import node:crypto for pbkdf2Sync; require keeps the
- * cipher helper self-contained without adding an unused top-level import).
- */
 function encryptCookieValue(
   plaintext: string,
   password: string,
