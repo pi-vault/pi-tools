@@ -302,7 +302,7 @@ async function importSqlite(): Promise<typeof import("node:sqlite") | null> {
     const msg =
       typeof warning === "string" ? warning : (warning?.message ?? "");
     if (msg.includes("SQLite is an experimental feature")) return;
-    return (orig as Function)(warning, ...args);
+    return (orig as (...a: unknown[]) => void)(warning, ...args);
   }) as typeof process.emitWarning;
 
   try {

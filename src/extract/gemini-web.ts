@@ -307,7 +307,7 @@ async function uploadFile(
 ): Promise<{ id: string; name: string }> {
   const data = readFileSync(filePath);
   const fileName = basename(filePath);
-  const boundary = "----FormBoundary" + Math.random().toString(36).slice(2);
+  const boundary = `----FormBoundary${Math.random().toString(36).slice(2)}`;
   const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: application/octet-stream\r\n\r\n`;
   const footer = `\r\n--${boundary}--\r\n`;
 
@@ -371,7 +371,7 @@ function parseStreamGenerateResponse(rawText: string): GeminiWebResult {
   const errorCode = extractErrorCode(responseJson);
 
   const parts = Array.isArray(responseJson) ? responseJson : [];
-  let firstCandidateSeen: unknown = undefined;
+  let firstCandidateSeen: unknown;
   let latestNonEmptyText = "";
 
   for (let i = 0; i < parts.length; i++) {
