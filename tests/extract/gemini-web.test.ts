@@ -43,6 +43,41 @@ function buildMockStreamResponse(text: string): string {
   return outer;
 }
 
+/**
+ * Build a multi-part streaming response. The parser keeps the latest
+ * non-empty text across all parts.
+ */
+function buildMultiPartStreamResponse(texts: string[]): string {
+  const parts = texts.map((text) => {
+    const innerPayload = JSON.stringify([
+      null,
+      null,
+      null,
+      null,
+      [[null, [text]]],
+    ]);
+    return [null, null, innerPayload];
+  });
+  return JSON.stringify(parts);
+}
+
+/**
+ * Build a mock response containing error code 1052 at path [0][5][2][0][1][0].
+ * extractErrorCode reads this path from the outer response JSON.
+ */
+function buildMockErrorResponse(errorCode: number): string {
+  // Outer array: first element has error code nested at [5][2][0][1][0]
+  const errorPart = [
+    null, // [0]
+    null, // [1]
+    null, // [2]
+    null, // [3]
+    null, // [4]
+    [null, null, [[null, [errorCode]]]], // [5][2][0][1][0] = errorCode
+  ];
+  return JSON.stringify([errorPart]);
+}
+
 describe("gemini-web", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
 
@@ -329,6 +364,137 @@ describe("gemini-web", () => {
       await expect(
         queryWithCookies("test", mockCookies, { timeoutMs: 50 }),
       ).rejects.toThrow();
+    });
+
+    it("retries with gemini-2.5-flash when model returns error code 1052", async () => {
+      // Replace fetch to track per-call responses: first StreamGenerate
+      // returns 1052 error, second returns success with flash.
+      fetchStub.restore();
+      let streamCallCount = 0;
+      globalThis.fetch = vi.fn(
+        async (url: string | URL, init?: RequestInit) => {
+          const urlStr = url instanceof URL ? url.href : url;
+          if (urlStr.includes("gemini.google.com/app")) {
+            return new Response(`"SNlM0e":"token"`, { status: 200 });
+          }
+          if (urlStr.includes("BardChatUi")) {
+            streamCallCount++;
+            if (streamCallCount === 1) {
+              // First call: error code 1052 (model unavailable)
+              return new Response(buildMockErrorResponse(1052), {
+                status: 200,
+              });
+            }
+            // Second call (fallback): success
+            return new Response(
+              buildMockStreamResponse("Fallback response"),
+              { status: 200 },
+            );
+          }
+          return new Response("Not Found", { status: 404 });
+        },
+      ) as unknown as typeof fetch;
+
+      const { queryWithCookies } = await import(
+        "../../src/extract/gemini-web.ts"
+      );
+      const result = await queryWithCookies("test", mockCookies, {
+        model: "gemini-2.5-pro",
+      });
+      expect(result).toBe("Fallback response");
+      expect(streamCallCount).toBe(2);
+
+      // Verify second call used flash model header
+      const fetchCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock
+        .calls;
+      const streamCalls = fetchCalls.filter(
+        (call: unknown[]) =>
+          typeof call[0] === "string" &&
+          (call[0] as string).includes("BardChatUi"),
+      );
+      expect(streamCalls[1]![1].headers["x-goog-ext-525001261-jspb"]).toBe(
+        '[1,null,null,null,"9ec249fc9ad08861",null,null,0,[4]]',
+      );
+    });
+
+    it("follows redirects preserving cookies during token fetch", async () => {
+      // Replace fetch to simulate a 302 redirect on the token page.
+      fetchStub.restore();
+      globalThis.fetch = vi.fn(
+        async (url: string | URL, init?: RequestInit) => {
+          const urlStr = url instanceof URL ? url.href : url;
+          if (urlStr === "https://gemini.google.com/app") {
+            // First fetch: 302 redirect
+            return new Response("", {
+              status: 302,
+              headers: { location: "https://accounts.google.com/auth-bounce" },
+            });
+          }
+          if (urlStr === "https://accounts.google.com/auth-bounce") {
+            // Second fetch: 302 redirect back
+            return new Response("", {
+              status: 302,
+              headers: {
+                location: "https://gemini.google.com/app?authuser=0",
+              },
+            });
+          }
+          if (urlStr.includes("gemini.google.com/app?authuser=0")) {
+            // Final fetch: returns the page with the token
+            return new Response(`"SNlM0e":"redirect-token"`, { status: 200 });
+          }
+          if (urlStr.includes("BardChatUi")) {
+            return new Response(
+              buildMockStreamResponse("After redirect"),
+              { status: 200 },
+            );
+          }
+          return new Response("Not Found", { status: 404 });
+        },
+      ) as unknown as typeof fetch;
+
+      const { queryWithCookies } = await import(
+        "../../src/extract/gemini-web.ts"
+      );
+      const result = await queryWithCookies("test", mockCookies);
+      expect(result).toBe("After redirect");
+
+      // Verify all 3 token-page fetches had the cookie header
+      const fetchCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock
+        .calls;
+      const tokenCalls = fetchCalls.filter(
+        (call: unknown[]) => {
+          const u = typeof call[0] === "string" ? call[0] : "";
+          return (
+            u.includes("gemini.google.com/app") ||
+            u.includes("accounts.google.com/auth-bounce")
+          );
+        },
+      );
+      expect(tokenCalls.length).toBe(3);
+      for (const call of tokenCalls) {
+        expect(call[1].headers.cookie).toContain("__Secure-1PSID=test-sid");
+      }
+    });
+
+    it("returns latest non-empty text from multi-part streaming response", async () => {
+      fetchStub.addResponse("gemini.google.com/app", {
+        body: `"SNlM0e":"token"`,
+        headers: { "content-type": "text/html" },
+      });
+      fetchStub.addResponse("BardChatUi", {
+        body: buildMultiPartStreamResponse([
+          "First chunk",
+          "Second chunk",
+          "Final answer",
+        ]),
+      });
+
+      const { queryWithCookies } = await import(
+        "../../src/extract/gemini-web.ts"
+      );
+      const result = await queryWithCookies("test", mockCookies);
+      expect(result).toBe("Final answer");
     });
 
     it("uploads files via multipart when files option is provided", async () => {

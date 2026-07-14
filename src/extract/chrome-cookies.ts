@@ -263,6 +263,7 @@ function readKeychainPassword(
   });
 }
 
+// Always returns a string (never null) — falls back to Chromium's hardcoded "peanuts".
 function readLinuxPassword(secretToolApp: string | undefined): Promise<string> {
   if (!secretToolApp) return Promise.resolve("peanuts");
 

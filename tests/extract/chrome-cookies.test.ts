@@ -1,5 +1,5 @@
 // tests/extract/chrome-cookies.test.ts
-import { pbkdf2Sync } from "node:crypto";
+import { createCipheriv, pbkdf2Sync } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // vi.mock() calls are hoisted, so these run before any import.
@@ -55,8 +55,6 @@ function encryptCookieValue(
 ): Buffer {
   const key = pbkdf2Sync(password, "saltysalt", iterations, 16, "sha1");
   const iv = Buffer.alloc(16, 0x20);
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { createCipheriv } = require("node:crypto");
   const enc = createCipheriv("aes-128-cbc", key, iv);
   return Buffer.concat([
     Buffer.from(prefix),
