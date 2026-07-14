@@ -76,6 +76,8 @@ export async function extractYouTube(
   signal?: AbortSignal,
   options?: ExtractOptions,
 ): Promise<ExtractedContent | null> {
+  if (!isYouTubeEnabled()) return null;
+
   const { videoId } = isYouTubeURL(url);
   const canonicalUrl = videoId
     ? `https://www.youtube.com/watch?v=${videoId}`
@@ -90,7 +92,7 @@ export async function extractYouTube(
     effectiveModel,
     signal,
   );
-  if (webResult) return finalizeResult(webResult, url, videoId);
+  if (webResult) return finalizeResult(webResult, url, videoId, signal);
 
   // Tier 2: Gemini API (key auth)
   const apiResult = await tryGeminiApi(
@@ -99,11 +101,15 @@ export async function extractYouTube(
     effectiveModel,
     signal,
   );
-  if (apiResult) return finalizeResult(apiResult, url, videoId);
+  if (apiResult) return finalizeResult(apiResult, url, videoId, signal);
 
   // Tier 3: Perplexity (text-only fallback)
-  const perplexityResult = await tryPerplexity(url, effectivePrompt, signal);
-  if (perplexityResult) return finalizeResult(perplexityResult, url, videoId);
+  const perplexityResult = await tryPerplexity(
+    canonicalUrl,
+    effectivePrompt,
+    signal,
+  );
+  if (perplexityResult) return finalizeResult(perplexityResult, url, videoId, signal);
 
   // All methods failed
   return null;
@@ -119,11 +125,16 @@ export async function extractYouTube(
  */
 export async function fetchYouTubeThumbnail(
   videoId: string,
+  signal?: AbortSignal,
 ): Promise<{ data: string; mimeType: string } | null> {
   try {
+    const timeoutSignal = AbortSignal.timeout(THUMBNAIL_TIMEOUT_MS);
+    const effectiveSignal = signal
+      ? AbortSignal.any([signal, timeoutSignal])
+      : timeoutSignal;
     const res = await fetch(
       `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
-      { signal: AbortSignal.timeout(THUMBNAIL_TIMEOUT_MS) },
+      { signal: effectiveSignal },
     );
     if (!res.ok) return null;
     const buffer = Buffer.from(await res.arrayBuffer());
@@ -161,6 +172,7 @@ async function finalizeResult(
   result: { text: string; extractionChain: string[] },
   originalUrl: string,
   videoId: string | null,
+  signal?: AbortSignal,
 ): Promise<ExtractedContent> {
   const title = extractHeadingTitle(result.text) ?? "YouTube Video";
 
@@ -174,7 +186,7 @@ async function finalizeResult(
   };
 
   if (videoId) {
-    const thumbnail = await fetchYouTubeThumbnail(videoId);
+    const thumbnail = await fetchYouTubeThumbnail(videoId, signal);
     if (thumbnail) content.thumbnail = thumbnail;
   }
 

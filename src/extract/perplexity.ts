@@ -61,7 +61,7 @@ export async function queryPerplexity(
   if (!response.ok) {
     const errorText = await response.text().catch(() => "");
     throw new Error(
-      `Perplexity API error ${response.status}: ${errorText || response.statusText}`,
+      `Perplexity API error ${response.status}: ${errorText.slice(0, 300) || response.statusText}`,
     );
   }
 

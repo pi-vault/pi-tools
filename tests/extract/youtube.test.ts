@@ -17,6 +17,16 @@ vi.mock("../../src/extract/perplexity.ts", () => ({
   queryPerplexity: vi.fn(),
 }));
 
+// Mock config to control isYouTubeEnabled / getPreferredModel behavior.
+// Default: return empty config (matches "no tools.json found" in real env).
+vi.mock("../../src/config.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/config.ts")>();
+  return {
+    ...actual,
+    loadConfig: vi.fn().mockReturnValue({} as import("../../src/config.ts").PiToolsConfig),
+  };
+});
+
 import {
   isGeminiApiAvailable,
   queryGeminiApi,
@@ -29,6 +39,7 @@ import {
   isPerplexityAvailable,
   queryPerplexity,
 } from "../../src/extract/perplexity.ts";
+import { loadConfig } from "../../src/config.ts";
 import {
   extractHeadingTitle,
   extractYouTube,
@@ -43,6 +54,7 @@ describe("youtube", () => {
   beforeEach(() => {
     fetchStub = stubFetch();
     vi.clearAllMocks();
+    vi.mocked(loadConfig).mockReturnValue({} as import("../../src/config.ts").PiToolsConfig);
   });
 
   afterEach(() => {
@@ -149,7 +161,25 @@ describe("youtube", () => {
   // -------------------------------------------------------------------------
 
   describe("isYouTubeEnabled", () => {
-    it("returns true by default", () => {
+    it("returns true by default (empty config)", () => {
+      vi.mocked(loadConfig).mockReturnValue({} as import("../../src/config.ts").PiToolsConfig);
+      expect(isYouTubeEnabled()).toBe(true);
+    });
+
+    it("returns false when youtube.enabled is false", () => {
+      vi.mocked(loadConfig).mockReturnValue({ youtube: { enabled: false } } as import("../../src/config.ts").PiToolsConfig);
+      expect(isYouTubeEnabled()).toBe(false);
+    });
+
+    it("returns true when youtube.enabled is true", () => {
+      vi.mocked(loadConfig).mockReturnValue({ youtube: { enabled: true } } as import("../../src/config.ts").PiToolsConfig);
+      expect(isYouTubeEnabled()).toBe(true);
+    });
+
+    it("returns default when loadConfig throws", () => {
+      vi.mocked(loadConfig).mockImplementation(() => {
+        throw new Error("config parse error");
+      });
       expect(isYouTubeEnabled()).toBe(true);
     });
   });
@@ -278,6 +308,19 @@ describe("youtube", () => {
       );
 
       expect(result).toBeNull();
+    });
+
+    it("returns null when YouTube is disabled via config", async () => {
+      vi.mocked(loadConfig).mockReturnValue({ youtube: { enabled: false } } as import("../../src/config.ts").PiToolsConfig);
+
+      const result = await extractYouTube(
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      );
+
+      expect(result).toBeNull();
+      expect(isGeminiWebAvailable).not.toHaveBeenCalled();
+      expect(isGeminiApiAvailable).not.toHaveBeenCalled();
+      expect(isPerplexityAvailable).not.toHaveBeenCalled();
     });
 
     it("uses custom prompt when provided in options", async () => {
@@ -427,6 +470,13 @@ describe("youtube", () => {
       fetchStub.addResponse("img.youtube.com", { status: 404 });
 
       const result = await fetchYouTubeThumbnail("invalid_id__");
+      expect(result).toBeNull();
+    });
+
+    it("returns null on empty response body", async () => {
+      fetchStub.addResponse("img.youtube.com", { body: "" });
+
+      const result = await fetchYouTubeThumbnail("dQw4w9WgXcQ");
       expect(result).toBeNull();
     });
 
