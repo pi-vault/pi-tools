@@ -4,7 +4,7 @@
 
 **Goal:** Create `src/extract/gemini-api.ts` — a thin Gemini REST API client for video/URL content analysis.
 
-**Architecture:** This is Phase 2 of the Content Extraction implementation. It creates a standalone Gemini generateContent client that supports direct API key auth and Cloudflare AI Gateway routing. The module is self-contained — it loads config from the same config file as the rest of pi-tools and resolves credentials via `resolveApiKey()` from Phase 1.
+**Architecture:** This is Phase 2 of the Content Extraction implementation. It creates a standalone Gemini generateContent client that supports direct API key auth and Cloudflare AI Gateway routing. Config is loaded via `loadConfig()` from `src/config.ts` (reusing Phase 1's `GeminiConfig` type and config infrastructure), with credential indirection through `resolveApiKey()`.
 
 **Tech Stack:** TypeScript, Vitest, native `fetch`, `AbortSignal.any()` / `AbortSignal.timeout()`
 
@@ -25,88 +25,7 @@
 - [ ] **1.1** Create `src/extract/gemini-api.ts` with the full module implementation:
 
 ```typescript
-import { resolveApiKey } from "../config.ts";
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const DEFAULT_API_HOST = "https://generativelanguage.googleapis.com";
-const API_VERSION = "v1beta";
-export const DEFAULT_MODEL = "gemini-3-flash-preview";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface GeminiApiOptions {
-  model?: string;
-  mimeType?: string;
-  signal?: AbortSignal;
-  timeoutMs?: number; // default: 120_000
-}
-
-interface GeminiApiConfig {
-  gemini?: {
-    apiKey?: string;
-    baseUrl?: string;
-    cloudflareApiKey?: string;
-  };
-}
-
-interface GenerateContentResponse {
-  candidates?: Array<{
-    content?: {
-      parts?: Array<{ text?: string }>;
-    };
-  }>;
-}
-
-// ---------------------------------------------------------------------------
-// Config loading (lazy, cached)
-// ---------------------------------------------------------------------------
-
-let cachedConfig: GeminiApiConfig | null = null;
-
-function loadGeminiConfig(): GeminiApiConfig {
-  if (cachedConfig) return cachedConfig;
-
-  // Use the same config file path as the rest of pi-tools
-  const os = await import("node:os");
-  const path = await import("node:path");
-  const fs = await import("node:fs");
-
-  const configPath = path.join(
-    os.homedir(),
-    ".pi",
-    "agent",
-    "extensions",
-    "tools.json",
-  );
-
-  if (!fs.existsSync(configPath)) {
-    cachedConfig = {};
-    return cachedConfig;
-  }
-
-  try {
-    const raw = fs.readFileSync(configPath, "utf-8");
-    cachedConfig = JSON.parse(raw) as GeminiApiConfig;
-    return cachedConfig;
-  } catch {
-    cachedConfig = {};
-    return cachedConfig;
-  }
-}
-```
-
-**Wait** — top-level `await` for dynamic imports won't work in a synchronous function. The reference implementation uses synchronous `readFileSync` directly. Use this corrected pattern instead:
-
-```typescript
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { resolveApiKey } from "../config.ts";
+import { loadConfig, resolveApiKey, type GeminiConfig } from "../config.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -128,14 +47,6 @@ export interface GeminiApiOptions {
   timeoutMs?: number;
 }
 
-interface GeminiApiConfig {
-  gemini?: {
-    apiKey?: string;
-    baseUrl?: string;
-    cloudflareApiKey?: string;
-  };
-}
-
 interface GenerateContentResponse {
   candidates?: Array<{
     content?: {
@@ -145,37 +56,20 @@ interface GenerateContentResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Config loading (lazy, module-scoped cache)
+// Config loading (lazy, module-scoped cache via loadConfig)
 // ---------------------------------------------------------------------------
 
-let cachedConfig: GeminiApiConfig | null = null;
+let cachedGeminiConfig: GeminiConfig | null = null;
 
-function getConfigPath(): string {
-  return join(homedir(), ".pi", "agent", "extensions", "tools.json");
-}
-
-function loadGeminiConfig(): GeminiApiConfig {
-  if (cachedConfig) return cachedConfig;
-
-  const configPath = getConfigPath();
-  if (!existsSync(configPath)) {
-    cachedConfig = {};
-    return cachedConfig;
-  }
-
-  try {
-    const raw = readFileSync(configPath, "utf-8");
-    cachedConfig = JSON.parse(raw) as GeminiApiConfig;
-    return cachedConfig;
-  } catch {
-    cachedConfig = {};
-    return cachedConfig;
-  }
+function getGeminiConfig(): GeminiConfig {
+  if (cachedGeminiConfig) return cachedGeminiConfig;
+  cachedGeminiConfig = loadConfig().gemini ?? {};
+  return cachedGeminiConfig;
 }
 
 /** Reset config cache — exposed for testing only. */
 export function _resetConfigCache(): void {
-  cachedConfig = null;
+  cachedGeminiConfig = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,8 +78,8 @@ export function _resetConfigCache(): void {
 
 function normalizeString(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  const normalized = value.trim();
-  return normalized.length > 0 ? normalized : null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function normalizeBaseUrl(value: unknown): string | null {
@@ -220,7 +114,8 @@ function withTimeout(
 export function getApiKey(): string | null {
   return (
     normalizeString(process.env.GEMINI_API_KEY) ??
-    normalizeString(resolveApiKey(loadGeminiConfig().gemini?.apiKey))
+    normalizeString(resolveApiKey(getGeminiConfig().apiKey)) ??
+    null
   );
 }
 
@@ -235,7 +130,7 @@ export function getApiKey(): string | null {
 export function getApiHost(): string {
   return (
     normalizeBaseUrl(process.env.GOOGLE_GEMINI_BASE_URL) ??
-    normalizeBaseUrl(loadGeminiConfig().gemini?.baseUrl) ??
+    normalizeBaseUrl(getGeminiConfig().baseUrl) ??
     DEFAULT_API_HOST
   );
 }
@@ -252,12 +147,13 @@ export function getVersionedApiBase(): string {
  *
  * Resolution order:
  * 1. `CLOUDFLARE_API_KEY` environment variable
- * 2. `config.gemini.cloudflareApiKey`
+ * 2. `config.gemini.cloudflareApiKey` (passed through resolveApiKey for shell/env indirection)
  */
 export function getCloudflareApiKey(): string | null {
   return (
     normalizeString(process.env.CLOUDFLARE_API_KEY) ??
-    normalizeString(loadGeminiConfig().gemini?.cloudflareApiKey)
+    normalizeString(resolveApiKey(getGeminiConfig().cloudflareApiKey)) ??
+    null
   );
 }
 
@@ -265,7 +161,10 @@ export function getCloudflareApiKey(): string | null {
  * Returns true if the Gemini API is available (direct key or Cloudflare gateway).
  */
 export function isGeminiApiAvailable(): boolean {
-  return getApiKey() !== null || (isCloudflareGateway() && getCloudflareApiKey() !== null);
+  return (
+    getApiKey() !== null ||
+    (isCloudflareGateway() && getCloudflareApiKey() !== null)
+  );
 }
 
 /**
@@ -314,7 +213,10 @@ export async function queryGeminiApi(
   }
 
   const model = options.model ?? DEFAULT_MODEL;
-  const signal = withTimeout(options.signal, options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+  const signal = withTimeout(
+    options.signal,
+    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  );
   const url = `${getVersionedApiBase()}/models/${model}:generateContent${buildKeyParam(apiKey)}`;
 
   // Build fileData — include mimeType only if specified
@@ -676,9 +578,9 @@ describe("gemini-api", () => {
         body: "Rate limit exceeded",
       });
 
-      await expect(
-        queryGeminiApi("Test", "files/xyz"),
-      ).rejects.toThrow("Gemini API error 429");
+      await expect(queryGeminiApi("Test", "files/xyz")).rejects.toThrow(
+        "Gemini API error 429",
+      );
     });
 
     it("throws on empty response (no candidates)", async () => {
@@ -687,9 +589,9 @@ describe("gemini-api", () => {
         body: { candidates: [] },
       });
 
-      await expect(
-        queryGeminiApi("Test", "files/xyz"),
-      ).rejects.toThrow("Gemini API returned empty response");
+      await expect(queryGeminiApi("Test", "files/xyz")).rejects.toThrow(
+        "Gemini API returned empty response",
+      );
     });
 
     it("throws on empty response (null text in parts)", async () => {
@@ -700,9 +602,9 @@ describe("gemini-api", () => {
         },
       });
 
-      await expect(
-        queryGeminiApi("Test", "files/xyz"),
-      ).rejects.toThrow("Gemini API returned empty response");
+      await expect(queryGeminiApi("Test", "files/xyz")).rejects.toThrow(
+        "Gemini API returned empty response",
+      );
     });
 
     it("joins multiple text parts with newline", async () => {
@@ -728,9 +630,9 @@ describe("gemini-api", () => {
       delete process.env.GOOGLE_GEMINI_BASE_URL;
       delete process.env.CLOUDFLARE_API_KEY;
 
-      await expect(
-        queryGeminiApi("Test", "files/xyz"),
-      ).rejects.toThrow("Gemini API not configured");
+      await expect(queryGeminiApi("Test", "files/xyz")).rejects.toThrow(
+        "Gemini API not configured",
+      );
     });
 
     it("omits key param and uses CF headers for Cloudflare gateway", async () => {
@@ -817,6 +719,8 @@ git commit -m "feat(extract): add Gemini REST API client
 
 Phase 2 of content extraction:
 - Add src/extract/gemini-api.ts with generateContent client
+- Use loadConfig() + resolveApiKey() from config.ts for credential resolution
+- Reuse GeminiConfig type from Phase 1
 - Support direct API key auth (GEMINI_API_KEY / config.gemini.apiKey)
 - Support Cloudflare AI Gateway routing (GOOGLE_GEMINI_BASE_URL + CLOUDFLARE_API_KEY)
 - Export: getApiKey, getApiHost, getVersionedApiBase, getCloudflareApiKey,
@@ -834,19 +738,30 @@ Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.
 
 ### Config loading pattern
 
-The module uses a module-scoped `cachedConfig` pattern identical to the pi-web-access reference implementation. It reads the same `~/.pi/agent/extensions/tools.json` config file that `src/config.ts` uses. This avoids a circular dependency — `gemini-api.ts` imports only `resolveApiKey` from config (for shell command / env var indirection on the `gemini.apiKey` value) but loads its own section of the config file directly.
+The module delegates config loading to `loadConfig()` from `src/config.ts`, which handles:
 
-The `_resetConfigCache()` export is prefixed with underscore to signal it's for testing only. It allows tests to set env vars and have them take effect without stale cached values.
+- Global config path (`~/.pi/agent/extensions/tools.json`)
+- Legacy path fallback (`pi-tools.json`)
+- JSON parsing with proper error handling
+
+The loaded `PiToolsConfig.gemini` section (typed as `GeminiConfig` from Phase 1) is cached at module scope in `cachedGeminiConfig` for performance. The `_resetConfigCache()` export (underscore prefix signals test-only) clears this cache so tests can set env vars and have them take effect.
+
+Credentials from the config are passed through `resolveApiKey()` for shell command (`!op read ...`) and env var name (`GEMINI_API_KEY`) indirection — matching the resolution pattern used by all other pi-tools providers.
 
 ### Relationship to Phase 1 dependencies
 
-This module depends on `resolveApiKey()` from `src/config.ts` which already exists (implemented in the search providers Phase 1). The `GeminiConfig` interface mentioned in the parent plan is defined locally here as `GeminiApiConfig` — it's a minimal type covering only the `gemini` section fields needed by this module.
+This module uses two things from Phase 1:
 
-The full `PiToolsConfig` type in `src/config.ts` will be extended with the `gemini?` field in a future Phase 1 of content extraction (config/types phase). This module works independently because it reads the raw JSON and only accesses `gemini.*` fields.
+1. `loadConfig()` — returns `PiToolsConfig` which includes `gemini?: GeminiConfig`
+2. `resolveApiKey()` — handles shell commands, env var references, and literal strings
+3. `GeminiConfig` type — imported directly from `src/config.ts`
+
+No local config type definitions are needed since Phase 1 already defined `GeminiConfig` with `apiKey?`, `baseUrl?`, `cloudflareApiKey?`, `allowBrowserCookies?`, and `chromeProfile?` fields.
 
 ### Cloudflare AI Gateway detection
 
 The gateway is detected by checking if the resolved host URL contains `gateway.ai.cloudflare.com`. When detected:
+
 - The API key is **not** added as a `?key=` query parameter
 - Instead, `cf-aig-authorization: Bearer <cloudflare-api-key>` header is used
 - The Gemini API key itself may not even be needed (the gateway proxies auth)
@@ -860,19 +775,21 @@ The gateway is detected by checking if the resolved host URL contains `gateway.a
 
 ### Design decisions diverging from pi-web-access
 
-| Topic | pi-web-access | This plan | Rationale |
-|-------|--------------|-----------|-----------|
-| Function name | `queryGeminiApiWithVideo` | `queryGeminiApi` | Simpler — "with video" is implied by the videoUri param |
-| Config field names | `geminiApiKey` (flat) | `gemini.apiKey` (nested) | Matches pi-tools nested config style |
-| Config path | `getWebSearchConfigPath()` | Same `tools.json` path | Single config file for all pi-tools modules |
-| Export `API_BASE` | Yes (constant) | No (use `getVersionedApiBase()`) | Dynamic — supports runtime host override |
-| Test config reset | Not needed (single-run) | `_resetConfigCache()` | Vitest runs in single process, needs cache reset between tests |
+| Topic                  | pi-web-access                             | This plan                                   | Rationale                                                                        |
+| ---------------------- | ----------------------------------------- | ------------------------------------------- | -------------------------------------------------------------------------------- |
+| Function name          | `queryGeminiApiWithVideo`                 | `queryGeminiApi`                            | Simpler — "with video" is implied by the videoUri param                          |
+| Config loading         | Own `readFileSync` from `web-search.json` | `loadConfig()` from `src/config.ts`         | Reuse existing config infrastructure (path resolution, parsing, legacy fallback) |
+| Config field names     | `geminiApiKey` (flat)                     | `gemini.apiKey` (nested via `GeminiConfig`) | Matches pi-tools nested config style; reuses Phase 1 type                        |
+| Config type            | Local `GeminiApiConfig` (unknown fields)  | Imported `GeminiConfig` (typed fields)      | Type-safe; single source of truth from Phase 1                                   |
+| Credential indirection | Direct string from config                 | `resolveApiKey()` for all config values     | Supports `!shell` commands and env var names in config                           |
+| Export `API_BASE`      | Yes (constant)                            | No (use `getVersionedApiBase()`)            | Dynamic — supports runtime host override                                         |
+| Test config reset      | Not needed (single-run)                   | `_resetConfigCache()`                       | Vitest runs in single process, needs cache reset between tests                   |
 
 ---
 
 ## Summary of Changes
 
-| File | Change |
-| ---- | ------ |
-| `src/extract/gemini-api.ts` | New file — Gemini REST API client with key resolution, Cloudflare gateway support, and generateContent query function |
-| `tests/extract/gemini-api.test.ts` | New file — Full test coverage for all exports, auth modes, request building, response parsing, and error cases |
+| File                               | Change                                                                                                                                                       |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/extract/gemini-api.ts`        | New file — Gemini REST API client with key resolution via `loadConfig()` + `resolveApiKey()`, Cloudflare gateway support, and generateContent query function |
+| `tests/extract/gemini-api.test.ts` | New file — Full test coverage for all exports, auth modes, request building, response parsing, and error cases                                               |
