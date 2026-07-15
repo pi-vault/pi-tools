@@ -132,10 +132,9 @@ export function parseTimestampParam(
     const end = parseTimestamp(rangeMatch[2]);
     if (start === end) return [start];
     const n = count ?? DEFAULT_RANGE_FRAMES;
-    const clamped = Math.min(n, MAX_FRAMES);
-    if (clamped === 1) return [start];
-    const step = (end - start) / (clamped - 1);
-    return Array.from({ length: clamped }, (_, i) => Math.round(start + step * i));
+    if (n === 1) return [start];
+    const step = (end - start) / (n - 1);
+    return Array.from({ length: n }, (_, i) => Math.round(start + step * i));
   }
 
   // Single timestamp
@@ -143,8 +142,7 @@ export function parseTimestampParam(
 
   // Single timestamp + frames -> intervals of 5s
   if (count) {
-    const clamped = Math.min(count, MAX_FRAMES);
-    return Array.from({ length: clamped }, (_, i) => seconds + i * FRAME_INTERVAL_S);
+    return Array.from({ length: count }, (_, i) => seconds + i * FRAME_INTERVAL_S);
   }
 
   // Single timestamp only
@@ -258,6 +256,24 @@ function extractSingleFrame(source: string, timestampSec: number): Buffer | stri
   }
 }
 
+/** Shared loop: extract frames from a source, return partial results on failure. */
+function collectFrames(
+  source: string, timestamps: number[], duration: number | null, signal?: AbortSignal,
+): { frames: VideoFrame[]; duration: number | null; error: string | null } {
+  const frames: VideoFrame[] = [];
+  let firstError: string | null = null;
+  for (const t of timestamps) {
+    if (signal?.aborted) break;
+    const result = extractSingleFrame(source, t);
+    if (Buffer.isBuffer(result)) {
+      frames.push({ data: result.toString("base64"), mimeType: "image/jpeg", timestamp: formatSeconds(t) });
+    } else if (!firstError) {
+      firstError = result;
+    }
+  }
+  return { frames, duration, error: frames.length === 0 ? (firstError ?? "All frames failed to extract") : null };
+}
+
 /**
  * Extract frames from a YouTube video at the specified timestamps.
  *
@@ -274,29 +290,7 @@ export async function extractYouTubeFrames(
   if ("error" in info) {
     return { frames: [], duration: null, error: info.error };
   }
-
-  const frames: VideoFrame[] = [];
-  let firstError: string | null = null;
-
-  for (const t of timestamps) {
-    if (signal?.aborted) break;
-    const result = extractSingleFrame(info.streamUrl, t);
-    if (Buffer.isBuffer(result)) {
-      frames.push({
-        data: result.toString("base64"),
-        mimeType: "image/jpeg",
-        timestamp: formatSeconds(t),
-      });
-    } else if (!firstError) {
-      firstError = result;
-    }
-  }
-
-  return {
-    frames,
-    duration: info.duration,
-    error: frames.length === 0 ? (firstError ?? "All frames failed to extract") : null,
-  };
+  return collectFrames(info.streamUrl, timestamps, info.duration, signal);
 }
 
 /**
@@ -315,27 +309,5 @@ export async function extractLocalFrames(
   if (typeof durationResult !== "number") {
     return { frames: [], duration: null, error: durationResult.error };
   }
-
-  const frames: VideoFrame[] = [];
-  let firstError: string | null = null;
-
-  for (const t of timestamps) {
-    if (signal?.aborted) break;
-    const result = extractSingleFrame(filePath, t);
-    if (Buffer.isBuffer(result)) {
-      frames.push({
-        data: result.toString("base64"),
-        mimeType: "image/jpeg",
-        timestamp: formatSeconds(t),
-      });
-    } else if (!firstError) {
-      firstError = result;
-    }
-  }
-
-  return {
-    frames,
-    duration: durationResult,
-    error: frames.length === 0 ? (firstError ?? "All frames failed to extract") : null,
-  };
+  return collectFrames(filePath, timestamps, durationResult, signal);
 }

@@ -112,10 +112,6 @@ describe("getYouTubeStreamInfo", () => {
     vi.mocked(execFileSync).mockReset();
   });
 
-  afterEach(() => {
-    vi.mocked(execFileSync).mockReset();
-  });
-
   it("returns stream URL and duration on success", async () => {
     vi.mocked(execFileSync).mockReturnValue(
       "120\nhttps://rr4---sn.googlevideo.com/videoplayback?id=abc\n",
@@ -212,10 +208,6 @@ describe("getLocalVideoDuration", () => {
     vi.mocked(execFileSync).mockReset();
   });
 
-  afterEach(() => {
-    vi.mocked(execFileSync).mockReset();
-  });
-
   it("returns duration as number on success", async () => {
     vi.mocked(execFileSync).mockReturnValue("123.456\n");
     const result = await getLocalVideoDuration("/path/to/video.mp4");
@@ -254,10 +246,6 @@ describe("getLocalVideoDuration", () => {
 
 describe("extractYouTubeFrames", () => {
   beforeEach(() => {
-    vi.mocked(execFileSync).mockReset();
-  });
-
-  afterEach(() => {
     vi.mocked(execFileSync).mockReset();
   });
 
@@ -338,10 +326,6 @@ describe("extractYouTubeFrames", () => {
 
 describe("extractLocalFrames", () => {
   beforeEach(() => {
-    vi.mocked(execFileSync).mockReset();
-  });
-
-  afterEach(() => {
     vi.mocked(execFileSync).mockReset();
   });
 
