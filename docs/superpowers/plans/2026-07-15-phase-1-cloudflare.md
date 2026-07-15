@@ -23,6 +23,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { extractContent } from "../../src/extract/pipeline.ts";
 
+// Must be long enough for Readability (≥500 chars markdown output) to avoid
+// fallthrough to Jina Reader which would make extra fetch calls.
+const SUCCESS_HTML = `<!DOCTYPE html><html><head><title>Test Page</title></head><body>
+<article><h1>Hello From Retry</h1>
+<p>${"This is meaningful content about the topic that Readability can extract. ".repeat(20)}</p>
+</article></body></html>`;
+
 describe("Cloudflare bot retry", () => {
   const originalFetch = globalThis.fetch;
 
@@ -31,11 +38,11 @@ describe("Cloudflare bot retry", () => {
   });
 
   it("retries with honest User-Agent on 403 + cf-mitigated: challenge", async () => {
-    const calls: Request[] = [];
+    const calls: { url: string; headers?: Record<string, string> }[] = [];
     globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
       const headers = init?.headers as Record<string, string> | undefined;
-      calls.push({ url, headers } as unknown as Request);
+      calls.push({ url, headers });
 
       if (calls.length === 1) {
         return new Response("challenge", {
@@ -43,7 +50,7 @@ describe("Cloudflare bot retry", () => {
           headers: { "cf-mitigated": "challenge" },
         });
       }
-      return new Response("<html><body>Hello</body></html>", {
+      return new Response(SUCCESS_HTML, {
         status: 200,
         headers: { "content-type": "text/html" },
       });
@@ -53,10 +60,10 @@ describe("Cloudflare bot retry", () => {
 
     expect(calls).toHaveLength(2);
     // First call uses browser UA
-    expect((calls[0] as any).headers?.["User-Agent"]).toContain("Mozilla/5.0");
+    expect(calls[0].headers?.["User-Agent"]).toContain("Mozilla/5.0");
     // Retry uses honest UA
-    expect((calls[1] as any).headers?.["User-Agent"]).toContain("pi-tools");
-    expect(result.text).toContain("Hello");
+    expect(calls[1].headers?.["User-Agent"]).toContain("pi-tools");
+    expect(result.text).toContain("Hello From Retry");
   });
 
   it("does NOT retry on 403 without cf-mitigated header", async () => {
