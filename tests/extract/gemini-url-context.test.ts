@@ -1,6 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "../helpers.ts";
 import { _resetConfigCache } from "../../src/extract/gemini-api.ts";
+import { isGeminiWebAvailable, queryWithCookies } from "../../src/extract/gemini-web.ts";
+
+vi.mock("../../src/extract/gemini-web.ts", () => ({
+  isGeminiWebAvailable: vi.fn(),
+  queryWithCookies: vi.fn(),
+}));
 
 describe("extractWithUrlContext", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
@@ -91,6 +97,44 @@ describe("extractWithUrlContext", () => {
     });
 
     const result = await extractWithUrlContext("https://example.com");
+    expect(result).toBeNull();
+  });
+});
+
+describe("extractWithGeminiWeb", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns null when Gemini Web is unavailable (no cookies)", async () => {
+    vi.mocked(isGeminiWebAvailable).mockResolvedValue(null);
+    const { extractWithGeminiWeb } = await import("../../src/extract/gemini-url-context.ts");
+    const result = await extractWithGeminiWeb("https://example.com");
+    expect(result).toBeNull();
+  });
+
+  it("returns extracted content when cookies available and text is long enough", async () => {
+    vi.mocked(isGeminiWebAvailable).mockResolvedValue(
+      { cookie1: "value1" } as unknown as import("../../src/extract/chrome-cookies.ts").CookieMap,
+    );
+    vi.mocked(queryWithCookies).mockResolvedValue(
+      "# Page Title\n\nThis is a long enough extracted page content that definitely exceeds the 100 character threshold.",
+    );
+    const { extractWithGeminiWeb } = await import("../../src/extract/gemini-url-context.ts");
+    const result = await extractWithGeminiWeb("https://example.com/article");
+    expect(result).not.toBeNull();
+    expect(result!.extractionChain).toContain("html:gemini-web");
+    expect(result!.text).toContain("Page Title");
+    expect(result!.url).toBe("https://example.com/article");
+  });
+
+  it("returns null when response text is too short", async () => {
+    vi.mocked(isGeminiWebAvailable).mockResolvedValue(
+      { cookie1: "value1" } as unknown as import("../../src/extract/chrome-cookies.ts").CookieMap,
+    );
+    vi.mocked(queryWithCookies).mockResolvedValue("Brief.");
+    const { extractWithGeminiWeb } = await import("../../src/extract/gemini-url-context.ts");
+    const result = await extractWithGeminiWeb("https://example.com");
     expect(result).toBeNull();
   });
 });
