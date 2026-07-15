@@ -76,7 +76,7 @@ describe("prompt guidance overrides", () => {
   it("web_fetch uses defaults when no guidance provided", () => {
     const tool = createWebFetchTool(mockStore());
     expect(tool.promptSnippet).toBe(
-      "Fetch a URL and extract readable content as markdown. Supports HTML pages.",
+      "Fetch a URL and extract readable content as markdown. Supports HTML pages, YouTube videos (transcript + thumbnail), and local video files (Gemini analysis).",
     );
   });
 
