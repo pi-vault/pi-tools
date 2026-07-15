@@ -223,3 +223,119 @@ export async function getLocalVideoDuration(
     return { error: mapFfprobeError(err) };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Frame extraction
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract a single frame from a video source at the given timestamp.
+ * Returns the frame as a Buffer, or an error string on failure.
+ */
+function extractSingleFrame(source: string, timestampSec: number): Buffer | string {
+  try {
+    const buffer = execFileSync(
+      "ffmpeg",
+      [
+        "-ss", String(timestampSec),
+        "-i", source,
+        "-frames:v", "1",
+        "-f", "image2pipe",
+        "-vcodec", "mjpeg",
+        "pipe:1",
+      ],
+      {
+        maxBuffer: FFMPEG_MAX_BUFFER,
+        timeout: FFMPEG_FRAME_TIMEOUT,
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer, "binary");
+    if (buf.length === 0) return "ffmpeg failed: empty output";
+    return buf;
+  } catch (err) {
+    return mapFfmpegError(err);
+  }
+}
+
+/**
+ * Extract frames from a YouTube video at the specified timestamps.
+ *
+ * 1. Resolves stream URL via yt-dlp
+ * 2. Extracts each frame via ffmpeg from the stream URL
+ * 3. Returns partial results if some frames fail
+ */
+export async function extractYouTubeFrames(
+  videoId: string,
+  timestamps: number[],
+  signal?: AbortSignal,
+): Promise<{ frames: VideoFrame[]; duration: number | null; error: string | null }> {
+  const info = await getYouTubeStreamInfo(videoId);
+  if ("error" in info) {
+    return { frames: [], duration: null, error: info.error };
+  }
+
+  const frames: VideoFrame[] = [];
+  let firstError: string | null = null;
+
+  for (const t of timestamps) {
+    if (signal?.aborted) break;
+    const result = extractSingleFrame(info.streamUrl, t);
+    if (Buffer.isBuffer(result)) {
+      frames.push({
+        data: result.toString("base64"),
+        mimeType: "image/jpeg",
+        timestamp: formatSeconds(t),
+      });
+    } else if (!firstError) {
+      firstError = result;
+    }
+  }
+
+  return {
+    frames,
+    duration: info.duration,
+    error: frames.length === 0 ? (firstError ?? "All frames failed to extract") : null,
+  };
+}
+
+/**
+ * Extract frames from a local video file at the specified timestamps.
+ *
+ * 1. Gets video duration via ffprobe
+ * 2. Extracts each frame via ffmpeg directly from the file
+ * 3. Returns partial results if some frames fail
+ */
+export async function extractLocalFrames(
+  filePath: string,
+  timestamps: number[],
+  signal?: AbortSignal,
+): Promise<{ frames: VideoFrame[]; duration: number | null; error: string | null }> {
+  const durationResult = await getLocalVideoDuration(filePath);
+  if (typeof durationResult !== "number") {
+    return { frames: [], duration: null, error: durationResult.error };
+  }
+
+  const frames: VideoFrame[] = [];
+  let firstError: string | null = null;
+
+  for (const t of timestamps) {
+    if (signal?.aborted) break;
+    const result = extractSingleFrame(filePath, t);
+    if (Buffer.isBuffer(result)) {
+      frames.push({
+        data: result.toString("base64"),
+        mimeType: "image/jpeg",
+        timestamp: formatSeconds(t),
+      });
+    } else if (!firstError) {
+      firstError = result;
+    }
+  }
+
+  return {
+    frames,
+    duration: durationResult,
+    error: frames.length === 0 ? (firstError ?? "All frames failed to extract") : null,
+  };
+}
