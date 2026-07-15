@@ -21,6 +21,19 @@ describe("probeUrl", () => {
     expect(result.reason).toBe("binary content type");
   });
 
+  it("returns skip: true for application/octet-stream", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      new Response(null, {
+        status: 200,
+        headers: { "content-type": "application/octet-stream", "content-length": "2048" },
+      }),
+    ) as unknown as typeof fetch;
+
+    const result = await probeUrl("https://example.com/file.bin");
+    expect(result.skip).toBe(true);
+    expect(result.reason).toBe("binary content type");
+  });
+
   it("returns skip: false for text/html", async () => {
     globalThis.fetch = vi.fn(async () =>
       new Response(null, {

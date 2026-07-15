@@ -85,7 +85,9 @@ export async function probeUrl(
     response = await fetch(url, {
       method: "HEAD",
       headers: BROWSER_HEADERS,
-      signal: signal ?? AbortSignal.timeout(HEAD_TIMEOUT_MS),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(HEAD_TIMEOUT_MS)])
+        : AbortSignal.timeout(HEAD_TIMEOUT_MS),
       redirect: "follow",
     });
   } catch {
