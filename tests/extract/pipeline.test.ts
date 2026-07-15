@@ -243,9 +243,11 @@ describe("extractContent raw mode", () => {
       headers: { "content-type": "image/png" },
     });
 
+    // HEAD probe fires first (before raw mode is checked) and throws
+    // "Skipped: binary content type", so the broader /binary/i matches.
     await expect(
       extractContent("https://example.com/image", undefined, { raw: true }),
-    ).rejects.toThrow(/unsupported binary/i);
+    ).rejects.toThrow(/binary/i);
   });
 
   it("raw mode returns body for non-HTML content types", async () => {

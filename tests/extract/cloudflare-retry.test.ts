@@ -16,11 +16,23 @@ describe("Cloudflare bot retry", () => {
   });
 
   it("retries with honest User-Agent on 403 + cf-mitigated: challenge", async () => {
-    const calls: { url: string; headers?: Record<string, string> }[] = [];
+    // The HEAD probe fires before GET. We handle it separately so GET call
+    // indexes are not shifted by the probe.
+    const getCalls: { url: string; headers?: Record<string, string> }[] = [];
     globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      calls.push({ url: input as string, headers: init?.headers as Record<string, string> });
+      const method = (init as Record<string, unknown>)?.method ?? "GET";
 
-      if (calls.length === 1) {
+      // HEAD probe — return 200 text/html so probe returns skip: false
+      if (method === "HEAD") {
+        return new Response(null, {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        });
+      }
+
+      getCalls.push({ url: input as string, headers: init?.headers as Record<string, string> });
+
+      if (getCalls.length === 1) {
         return new Response("challenge", {
           status: 403,
           headers: { "cf-mitigated": "challenge" },
@@ -34,44 +46,48 @@ describe("Cloudflare bot retry", () => {
 
     const result = await extractContent("https://example.com");
 
-    expect(calls).toHaveLength(2);
-    // First call uses browser UA
-    expect(calls[0].headers?.["User-Agent"]).toContain("Mozilla/5.0");
+    expect(getCalls).toHaveLength(2);
+    // First GET uses browser UA
+    expect(getCalls[0].headers?.["User-Agent"]).toContain("Mozilla/5.0");
     // Retry uses honest UA
-    expect(calls[1].headers?.["User-Agent"]).toContain("pi-tools");
+    expect(getCalls[1].headers?.["User-Agent"]).toContain("pi-tools");
     expect(result.text).toContain("Hello From Retry");
     expect(result.extractionChain).toContain("cf-challenge");
   });
 
   it("does NOT retry on 403 without cf-mitigated header", async () => {
-    globalThis.fetch = vi.fn(async () => {
-      return new Response("Forbidden", {
-        status: 403,
-        headers: {},
-      });
+    let getCallCount = 0;
+    globalThis.fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const method = (init as Record<string, unknown>)?.method ?? "GET";
+      if (method === "HEAD") {
+        return new Response(null, { status: 200, headers: { "content-type": "text/html" } });
+      }
+      getCallCount++;
+      return new Response("Forbidden", { status: 403, headers: {} });
     }) as unknown as typeof fetch;
 
     await expect(extractContent("https://example.com")).rejects.toThrow("HTTP 403");
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    expect(getCallCount).toBe(1);
   });
 
   it("propagates error if retry also fails", async () => {
-    let callCount = 0;
-    globalThis.fetch = vi.fn(async () => {
-      callCount++;
-      if (callCount === 1) {
+    let getCallCount = 0;
+    globalThis.fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const method = (init as Record<string, unknown>)?.method ?? "GET";
+      if (method === "HEAD") {
+        return new Response(null, { status: 200, headers: { "content-type": "text/html" } });
+      }
+      getCallCount++;
+      if (getCallCount === 1) {
         return new Response("challenge", {
           status: 403,
           headers: { "cf-mitigated": "challenge" },
         });
       }
-      return new Response("Still blocked", {
-        status: 403,
-        headers: {},
-      });
+      return new Response("Still blocked", { status: 403, headers: {} });
     }) as unknown as typeof fetch;
 
     await expect(extractContent("https://example.com")).rejects.toThrow("HTTP 403");
-    expect(callCount).toBe(2);
+    expect(getCallCount).toBe(2);
   });
 });

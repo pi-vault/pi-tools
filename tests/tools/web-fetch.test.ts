@@ -511,8 +511,9 @@ describe("web_fetch multi-URL", () => {
     );
     // Should have results for all 3 input positions
     expect(result.details.urlResults).toHaveLength(3);
-    // But only 1 fetch should have occurred — verify via fetchStub call count
-    expect((globalThis.fetch as any).mock.calls.length).toBe(1);
+    // 1 unique URL → 1 HEAD probe + 1 GET = 2 fetch calls total
+    // (without deduplication it would be 3 HEAD + 3 GET = 6 calls)
+    expect((globalThis.fetch as any).mock.calls.length).toBe(2);
   });
 });
 
