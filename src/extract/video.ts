@@ -66,7 +66,8 @@ export function isVideoEnabled(): boolean {
  * 5. Size within config.video.maxSizeMB limit
  */
 export function isVideoFile(input: string): VideoFileInfo | null {
-  if (!isVideoEnabled()) return null;
+  const config = loadConfig();
+  if (config.video?.enabled === false) return null;
 
   // Must look like a local path
   const isLocalPath =
@@ -105,7 +106,6 @@ export function isVideoFile(input: string): VideoFileInfo | null {
   if (!stat.isFile()) return null;
 
   // Check size limit
-  const config = loadConfig();
   const maxSizeMB = config.video?.maxSizeMB ?? 50;
   const maxSizeBytes = maxSizeMB * 1024 * 1024;
   if (stat.size > maxSizeBytes) return null;
@@ -209,7 +209,8 @@ async function pollFileState(
       throw new Error("pollFileState aborted");
     }
 
-    const response = await fetch(`${apiBase}/${fileName}?key=${apiKey}`, {
+    const response = await fetch(`${apiBase}/${fileName}`, {
+      headers: { "x-goog-api-key": apiKey },
       signal,
     });
 
@@ -237,7 +238,10 @@ async function pollFileState(
  */
 function deleteGeminiFile(fileName: string, apiKey: string): void {
   const apiBase = getVersionedApiBase();
-  fetch(`${apiBase}/${fileName}?key=${apiKey}`, { method: "DELETE" }).catch((err) => {
+  fetch(`${apiBase}/${fileName}`, {
+    method: "DELETE",
+    headers: { "x-goog-api-key": apiKey },
+  }).catch((err) => {
     console.error(`[video] Failed to delete file ${fileName}:`, err?.message ?? err);
   });
 }
