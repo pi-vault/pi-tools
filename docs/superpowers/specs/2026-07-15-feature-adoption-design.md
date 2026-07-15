@@ -12,13 +12,13 @@ Adopt 11 features identified in the competitive analysis, organized into 5 atomi
 
 ### Phase Summary
 
-| Phase | Features | Est. Lines | Complexity |
-|-------|----------|-----------|------------|
-| 1 | Cloudflare Bot Retry, Cloudflare AI Gateway | ~40 | Trivial |
-| 2 | Content Negotiation, Dynamic Guidance Injection | ~120 | Small |
-| 3 | PDF OCR Fallback, Project Trust Gating, Large File Reorg | ~350 | Medium |
-| 4 | Ollama Support, OpenAI Native Web Search | ~500 | Large |
-| 5 | Interactive Setup, Activity Monitor Widget | ~700 | Complex |
+| Phase | Features                                                        | Est. Lines | Complexity |
+| ----- | --------------------------------------------------------------- | ---------- | ---------- |
+| 1     | Cloudflare Bot Retry, Cloudflare AI Gateway                     | ~50        | Trivial    |
+| 2     | Content Negotiation, Dynamic Guidance Injection                 | ~120       | Small      |
+| 3     | PDF OCR Fallback (dual), Project Trust Gating, Large File Reorg | ~450       | Medium     |
+| 4     | Ollama Support, OpenAI Native Web Search (layered)              | ~600       | Large      |
+| 5     | Interactive Setup, Activity Monitor Widget                      | ~600       | Complex    |
 
 ---
 
@@ -33,6 +33,7 @@ Adopt 11 features identified in the competitive analysis, organized into 5 atomi
 **Location:** `src/extract/pipeline.ts` (inside the HTTP fetch block, after the initial response check)
 
 **Logic:**
+
 ```
 if (response.status === 403) {
   const cfMitigated = response.headers.get("cf-mitigated");
@@ -50,6 +51,7 @@ if (response.status === 403) {
 **Fallback:** If the retry also fails, proceed to the existing error handling (non-retryable for 4xx, retryable for 5xx).
 
 **Tests:**
+
 - Mock a 403 with `cf-mitigated: challenge` header, verify retry fires
 - Mock a 403 without the header, verify no retry
 - Mock retry succeeding with 200
@@ -65,26 +67,38 @@ if (response.status === 403) {
 **Location:** `src/extract/gemini-api.ts` (where Gemini HTTP requests are made)
 
 **Config (already partially defined in config.ts):**
+
 ```typescript
 interface GeminiConfig {
   apiKey?: string;
-  baseUrl?: string;              // default: "https://generativelanguage.googleapis.com"
-  cloudflareApiKey?: string;     // injected as cf-aig-authorization when gateway detected
+  baseUrl?: string; // default: "https://generativelanguage.googleapis.com"
+  cloudflareApiKey?: string; // injected as cf-aig-authorization when gateway detected
   allowBrowserCookies?: boolean;
   chromeProfile?: string;
 }
 ```
 
 **Detection logic:**
+
 ```
-const isGateway = baseUrl.includes("aigateway") || baseUrl.includes("cloudflareai");
+const isGateway = baseUrl.includes("gateway.ai.cloudflare.com");
 if (isGateway && cloudflareApiKey) {
   headers["cf-aig-authorization"] = `Bearer ${cloudflareApiKey}`;
 }
 ```
 
+**Key detail:** When the gateway is active, the `?key=` query parameter must be **omitted** from the URL. Authentication is header-only via `cf-aig-authorization`. The Gemini API key is still needed for non-gateway use.
+
+```
+// In the URL-building code:
+const keyParam = isGateway ? "" : `?key=${apiKey}`;
+const url = `${baseUrl}/v1beta/models/${model}:generateContent${keyParam}`;
+```
+
 **Tests:**
-- Verify header injection when base URL contains "aigateway"
+
+- Verify header injection when base URL contains "gateway.ai.cloudflare.com"
+- Verify `?key=` param is omitted when gateway is active
 - Verify no injection for default googleapis URL
 - Verify no injection when cloudflareApiKey is missing
 
@@ -103,6 +117,7 @@ if (isGateway && cloudflareApiKey) {
 **New function: `probeUrl(url, signal) -> { contentType?, contentLength?, skip: boolean, reason? }`**
 
 **Logic:**
+
 1. HEAD request with same `BROWSER_HEADERS`, 5-second timeout
 2. If HEAD fails (405 Method Not Allowed, network error, timeout) → return `{ skip: false }` (fall through to GET)
 3. If content-type is binary (image/, audio/, video/, application/zip, application/gzip, application/octet-stream) AND NOT application/pdf → return `{ skip: true, reason: "binary content type" }`
@@ -111,6 +126,7 @@ if (isGateway && cloudflareApiKey) {
 6. Otherwise → return `{ skip: false, contentType, contentLength }`
 
 **Integration in pipeline.ts:**
+
 ```
 // Before the existing fetch() call:
 const probe = await probeUrl(url, signal);
@@ -123,6 +139,7 @@ if (probe.skip) {
 **Performance impact:** Adds ~50ms per request when HEAD succeeds. Saves potentially seconds on large binary downloads that would be rejected anyway.
 
 **Tests:**
+
 - HEAD returns image/png → skip
 - HEAD returns text/html → proceed
 - HEAD returns 405 → proceed (graceful fallback)
@@ -155,13 +172,14 @@ export function detectCapabilities(): EnvironmentCapabilities;
 
 **Guidance additions per tool:**
 
-| Tool | Capability | Added Guideline |
-|------|-----------|----------------|
-| web_fetch | hasGhCli | "For GitHub repository URLs, consider using the `gh` CLI directly for richer file access." |
-| web_fetch | hasYtDlp | "YouTube frame extraction is available (yt-dlp detected)." |
-| web_fetch | hasFfmpeg | "Local video analysis with frame extraction is available (ffmpeg detected)." |
+| Tool      | Capability | Added Guideline                                                                            |
+| --------- | ---------- | ------------------------------------------------------------------------------------------ |
+| web_fetch | hasGhCli   | "For GitHub repository URLs, consider using the `gh` CLI directly for richer file access." |
+| web_fetch | hasYtDlp   | "YouTube frame extraction is available (yt-dlp detected)."                                 |
+| web_fetch | hasFfmpeg  | "Local video analysis with frame extraction is available (ffmpeg detected)."               |
 
 **Integration in `src/index.ts`:**
+
 ```
 const caps = detectCapabilities();
 // Merge capability-based guidelines with static/config guidelines
@@ -174,6 +192,7 @@ const fetchGuidelines = [
 ```
 
 **Tests:**
+
 - Mock `which` to return success → guideline added
 - Mock `which` to return failure → guideline omitted
 - Verify guidelines array merges correctly with config overrides
@@ -182,73 +201,128 @@ const fetchGuidelines = [
 
 ## Phase 3: PDF OCR, Trust, File Reorg
 
-### 3a. PDF OCR Fallback via Gemini Vision
+### 3a. PDF OCR Fallback (Dual Strategy)
 
 **Problem:** Scanned PDFs yield empty text from `unpdf` extraction. Pi-tools has no fallback for image-based PDFs.
 
-**Solution:** When PDF text extraction yields < 100 characters from a multi-page PDF, rasterize pages and send to Gemini vision for OCR.
+**Solution:** Two-tier OCR strategy. When PDF text extraction looks like a scanned document, rasterize pages to PNG. First, try attaching images as content blocks in the tool result (letting the calling model OCR them via its vision capability). If the calling model doesn't support image input, fall back to calling Gemini vision API directly.
+
+**Scanned PDF heuristic:** `looksLikeScannedPdf(text, byteLength)`
+
+- Extracted text is empty after whitespace normalization, OR
+- PDF byte size > 5KB AND extracted text < 200 characters
 
 **New file: `src/extract/pdf-ocr.ts`**
 
 ```typescript
-export interface PdfOcrOptions {
-  maxPages: number;       // default: 5
-  geminiApiKey: string;
-  geminiBaseUrl?: string;
-  model?: string;         // default: "gemini-2.5-flash"
+export interface RasterizeOptions {
+  maxPages?: number; // default: 5, max: 20
+  dpi?: number; // default: 150, range: 72-300
 }
 
-// Returns extracted text from scanned PDF pages via vision API
-export async function extractPdfWithOcr(
+export interface PdfPageImage {
+  type: "image";
+  mimeType: "image/png";
+  data: string; // base64-encoded PNG
+  pageNumber: number;
+}
+
+export interface RasterizeResult {
+  pageCount: number;
+  images: PdfPageImage[];
+  truncated: boolean; // true if pageCount > maxPages
+}
+
+// Rasterize PDF pages to PNG using pdftoppm (poppler-utils)
+export async function rasterizePdfPages(
   pdfBuffer: Uint8Array,
-  options: PdfOcrOptions,
+  options?: RasterizeOptions,
+): Promise<RasterizeResult>;
+
+// Returns true if the calling model accepts image input
+export function modelSupportsImages(ctx: ExtensionContext): boolean;
+
+// OCR via Gemini vision (fallback when calling model lacks vision)
+export async function extractTextWithGeminiVision(
+  images: PdfPageImage[],
+  geminiApiKey: string,
+  options?: { geminiBaseUrl?: string; model?: string },
   signal?: AbortSignal,
 ): Promise<string | null>;
 ```
 
-**Logic:**
-1. Render first N pages to PNG using pdf.js canvas (via `unpdf`'s underlying pdfjs-dist)
-2. Encode each page as base64 PNG
-3. Send to Gemini vision API with prompt: "Extract all text from these document pages. Preserve structure, headings, and paragraphs. Output as plain text."
-4. Return concatenated response text
-5. If Gemini call fails → return null (caller falls through to error)
+**Rasterization method:** Uses `pdftoppm` CLI from poppler-utils (same approach as vanillagreen). Writes PDF to temp dir, runs `pdftoppm -png -r <dpi> -f 1 -l <lastPage>`, reads output PNGs as base64. Cleans up temp dir in `finally` block.
 
 **Integration in `pipeline.ts`:**
+
 ```
 // After existing PDF extraction attempt:
-if (text.length < 100 && pageCount > 1) {
-  chain.push("pdf:thin");
-  const geminiKey = resolveApiKey(geminiConfig?.apiKey);
-  if (geminiKey) {
-    const ocrText = await extractPdfWithOcr(buffer, {
+if (pdfConfig?.ocrEnabled !== false && looksLikeScannedPdf(text, buffer.byteLength)) {
+  chain.push("pdf:scanned");
+  try {
+    const result = await rasterizePdfPages(buffer, {
       maxPages: pdfConfig?.ocrMaxPages ?? 5,
-      geminiApiKey: geminiKey,
-      geminiBaseUrl: geminiConfig?.baseUrl,
-    }, signal);
-    if (ocrText && ocrText.length > 100) {
-      chain.push("pdf-ocr:gemini");
-      return { text: ocrText, ... };
+      dpi: pdfConfig?.ocrDpi ?? 150,
+    });
+
+    if (modelSupportsImages(ctx)) {
+      // Strategy 1: Attach images as content blocks, let the calling model OCR
+      chain.push("pdf-ocr:content-blocks");
+      const imagesNote = `\n\n[${result.images.length} scanned PDF page images attached for vision OCR]`;
+      return {
+        text: text + imagesNote,
+        images: result.images,  // attached as { type: "image", mimeType, data }
+        ...
+      };
     }
-    chain.push("pdf-ocr:fail");
+
+    // Strategy 2: Call Gemini vision API directly
+    const geminiKey = resolveApiKey(geminiConfig?.apiKey);
+    if (geminiKey) {
+      const ocrText = await extractTextWithGeminiVision(result.images, geminiKey, {
+        geminiBaseUrl: geminiConfig?.baseUrl,
+      }, signal);
+      if (ocrText && ocrText.length > 100) {
+        chain.push("pdf-ocr:gemini");
+        return { text: ocrText, ... };
+      }
+      chain.push("pdf-ocr:gemini-fail");
+    }
+  } catch (error) {
+    chain.push("pdf-ocr:error");
+    // pdftoppm not installed or other rasterization failure — fall through
   }
-  throw new Error(`Could not extract content from ${url}. Tried: ${chain.join(" -> ")}`);
+}
+```
+
+**Model vision detection:** Check `ctx.model?.input` array for `"image"`. Pi's `Model` interface includes `input: ("text" | "image")[]`.
+
+```typescript
+export function modelSupportsImages(ctx: ExtensionContext): boolean {
+  return ctx.model?.input?.includes("image") ?? false;
 }
 ```
 
 **Config additions:**
+
 ```typescript
 // In PiToolsConfig:
 pdf?: {
   ocrEnabled?: boolean;    // default: true
-  ocrMaxPages?: number;    // default: 5
+  ocrMaxPages?: number;    // default: 5, max: 20
+  ocrDpi?: number;         // default: 150, range: 72-300
 }
 ```
 
 **Tests:**
-- Mock a PDF buffer that yields empty text → OCR triggered
-- Mock Gemini returning text → OCR result returned
-- Mock Gemini failing → null returned, error thrown
-- PDF with good text extraction → OCR NOT triggered
+
+- Mock pdftoppm output → images rasterized correctly
+- Model supports images → content blocks returned (no Gemini call)
+- Model lacks images → Gemini vision API called
+- Gemini returns text → OCR result used
+- Gemini fails → falls through to error
+- Good text extraction → OCR NOT triggered (heuristic)
+- pdftoppm not installed → graceful fallback (no crash)
 - Config ocrEnabled: false → OCR skipped
 
 ---
@@ -260,6 +334,7 @@ pdf?: {
 **Solution:** Distinguish sensitive vs. non-sensitive config fields. Project config cannot override sensitive fields unless the project is explicitly trusted.
 
 **Sensitive fields (blocked from untrusted projects):**
+
 - `providers.*.apiKey`
 - `ssrf.allowRanges`
 - `gemini.apiKey`, `gemini.cloudflareApiKey`, `gemini.allowBrowserCookies`
@@ -267,40 +342,88 @@ pdf?: {
 - Any field path matching pattern: `*.apiKey`, `*.apiSecret`, `*.token`
 
 **Non-sensitive fields (always allowed from project config):**
+
 - `defaultProvider`, `selectionStrategy`
 - `providers.*.enabled`, `providers.*.monthlyQuota`
 - `guidance.*`, `combine.*`, `github.*`
 - `youtube.*`, `video.*`, `pdf.*`
 
-**Trust detection:**
-- Primary: Check `process.env.PI_PROJECT_TRUSTED === "1"` (set by Pi framework for trusted workspaces)
-- Fallback: Check if `.pi/trust` marker file exists in the project root
-- Default: untrusted (safe default)
+**Trust detection via Pi's ExtensionContext API:**
+
+Pi's framework provides `ctx.isProjectTrusted(): boolean` on the `ExtensionContext`. Trust state is stored in `~/.pi/agent/trust.json` (per-directory). Extensions do not check env vars or marker files — they use this API.
+
+Since `loadMergedConfig()` runs at startup (before tool execution context is available), we use a cached trust registry pattern (same approach as vanillagreen):
+
+```typescript
+// Global symbol registry for trust state (survives across event handlers)
+const TRUST_SYMBOL = Symbol.for("pi-tools.project-trust");
+
+interface TrustRegistry {
+  trusted?: Map<string, boolean>; // projectDir -> trusted
+}
+
+function trustRegistry(): TrustRegistry {
+  const host = globalThis as unknown as Record<
+    PropertyKey,
+    TrustRegistry | undefined
+  >;
+  return (host[TRUST_SYMBOL] ??= {});
+}
+
+// Called from event handlers that have ctx access
+export function recordProjectTrust(ctx: {
+  cwd?: string;
+  isProjectTrusted?: () => boolean;
+}): void {
+  if (!ctx.cwd) return;
+  const trusted = ctx.isProjectTrusted?.() === true;
+  const registry = trustRegistry();
+  registry.trusted ??= new Map();
+  registry.trusted.set(ctx.cwd, trusted);
+}
+
+// Called from loadMergedConfig() to check cached trust
+export function isProjectTrustedCached(cwd: string): boolean {
+  return trustRegistry().trusted?.get(cwd) === true;
+}
+```
+
+**Trust recording points (in `src/index.ts`):**
+
+- `pi.on("session_start", (_, ctx) => recordProjectTrust(ctx))`
+- `pi.on("model_select", (_, ctx) => recordProjectTrust(ctx))`
+- `pi.on("before_provider_request", (_, ctx) => recordProjectTrust(ctx))`
 
 **New helper in `src/config.ts`:**
+
 ```typescript
-const SENSITIVE_PATTERNS = [/\.apiKey$/, /\.apiSecret$/, /\.token$/, /^ssrf\.allowRanges$/, /^gemini\.(cloudflareApiKey|allowBrowserCookies)$/];
+const SENSITIVE_PATTERNS = [
+  /\.apiKey$/,
+  /\.apiSecret$/,
+  /\.token$/,
+  /^ssrf\.allowRanges$/,
+  /^gemini\.(cloudflareApiKey|allowBrowserCookies)$/,
+];
 
 // Recursively removes fields matching SENSITIVE_PATTERNS from config object.
 // Returns a shallow clone with sensitive keys omitted.
 export function stripSensitiveFields(
   config: Record<string, unknown>,
 ): Record<string, unknown>;
-
-export function isProjectTrusted(projectDir: string): boolean;
 ```
 
 **Integration in `loadMergedConfig()`:**
+
 ```
 // Layer 1: project config (highest priority)
 if (cwd) {
   const projectPath = findProjectConfigPath(cwd);
   if (projectPath) {
     const raw = JSON.parse(fs.readFileSync(projectPath, "utf-8"));
-    const trusted = isProjectTrusted(cwd);
+    const trusted = isProjectTrustedCached(cwd);
     const sanitized = trusted ? raw : stripSensitiveFields(raw);
     if (!trusted && raw !== sanitized) {
-      console.warn("[pi-tools] Untrusted project config: sensitive fields ignored. Trust the project to allow full config.");
+      console.warn("[pi-tools] Untrusted project: sensitive config fields ignored. Trust the project in Pi to allow full config.");
     }
     merged = deepMerge(merged, sanitized);
   }
@@ -308,11 +431,12 @@ if (cwd) {
 ```
 
 **Tests:**
+
 - Untrusted project with apiKey in config → field stripped
 - Trusted project with apiKey → field preserved
 - Untrusted project with `guidance` → field preserved (non-sensitive)
-- Trust detection via env var
-- Trust detection via marker file
+- Trust recording: mock ctx.isProjectTrusted() → cached correctly
+- Trust cache miss (first load before any event) → defaults to untrusted
 
 ---
 
@@ -324,11 +448,11 @@ if (cwd) {
 
 **File changes:**
 
-| Current | After | Responsibility |
-|---------|-------|---------------|
-| `src/tools/web-fetch.ts` (448 lines) | `src/tools/web-fetch.ts` (~200 lines) | Tool definition, single-URL path, buildResult, errorResult, rendering |
-| (same file) | `src/tools/web-fetch-multi.ts` (~150 lines) | Multi-URL orchestration, deduplication, manifest mode, per-URL caps |
-| (same file) | `src/utils/concurrency.ts` (~30 lines) | Generic `fetchWithConcurrencyLimit<T>()` |
+| Current                              | After                                       | Responsibility                                                        |
+| ------------------------------------ | ------------------------------------------- | --------------------------------------------------------------------- |
+| `src/tools/web-fetch.ts` (448 lines) | `src/tools/web-fetch.ts` (~200 lines)       | Tool definition, single-URL path, buildResult, errorResult, rendering |
+| (same file)                          | `src/tools/web-fetch-multi.ts` (~150 lines) | Multi-URL orchestration, deduplication, manifest mode, per-URL caps   |
+| (same file)                          | `src/utils/concurrency.ts` (~30 lines)      | Generic `fetchWithConcurrencyLimit<T>()`                              |
 
 **No behavioral changes.** Pure mechanical extraction. The `createWebFetchTool` factory in `web-fetch.ts` calls into `executeMultiUrl()` from `web-fetch-multi.ts` for the multi-URL path.
 
@@ -340,125 +464,235 @@ if (cwd) {
 
 ### 4a. Self-Hosted Ollama Support
 
-**Problem:** Users wanting local-first web tooling without external API keys have no option. Ollama provides local LLM inference with optional vision capabilities.
+**Problem:** Users wanting local-first web tooling without external API keys have no option. Ollama provides local inference with native web search and fetch capabilities.
 
-**Solution:** Add Ollama as a tier-3 search provider and as an alternative extraction backend for vision tasks (PDF OCR, video analysis).
+**Solution:** Add Ollama as a tier-3 search and fetch provider using Ollama's native web search/fetch API endpoints (not chat-based synthesis).
 
 **New file: `src/providers/ollama.ts`**
 
 ```typescript
-export function createOllamaProvider(config: OllamaConfig): {
-  search?: SearchProvider;
-  fetch?: FetchProvider;
-} | null;
+export class OllamaProvider implements SearchProvider, FetchProvider {
+  constructor(options: OllamaProviderOptions);
+  async search(
+    query: string,
+    maxResults: number,
+    signal?: AbortSignal,
+  ): Promise<SearchResponse>;
+  async fetch(
+    url: string,
+    raw: boolean,
+    signal?: AbortSignal,
+  ): Promise<FetchResponse>;
+}
 ```
 
-**Search Provider:**
-- Uses Ollama's `/api/chat` endpoint with a system prompt instructing the model to generate search-like results from its knowledge
-- Model: configurable (default: "llama3.1")
-- Response parsed into `SearchResult[]` format (title, url, snippet)
-- Caveat: Results are model-generated, not web-crawled. Quality depends on model's training data recency.
-- Marked as tier 3 (lowest priority) — only used when all web-based providers are exhausted
+**API Endpoints (verified against juicesharp's implementation):**
 
-**Extraction Backend:**
-- Vision-capable models (llava, llama3.2-vision) for:
-  - PDF OCR alternative (Phase 3a can route here instead of Gemini)
-  - Video frame analysis alternative
-- Endpoint: POST `{baseUrl}/api/chat` with base64 image attachments
-- Acts as a drop-in alternative to Gemini vision calls
+Ollama exposes dedicated web search/fetch endpoints (not `/api/chat`):
+
+| Endpoint | Cloud (ollama.com) | Local (localhost)              |
+| -------- | ------------------ | ------------------------------ |
+| Search   | `/api/web_search`  | `/api/experimental/web_search` |
+| Fetch    | `/api/web_fetch`   | `/api/experimental/web_fetch`  |
+
+**Local vs cloud detection:**
+
+```typescript
+function isLocalHost(baseUrl: string): boolean {
+  const hostname = new URL(baseUrl).hostname;
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "0.0.0.0" ||
+    hostname === "[::1]"
+  );
+}
+```
+
+Local instances use `/api/experimental/...` paths; cloud uses `/api/...` paths.
+
+**Search implementation:**
+
+```
+POST {baseUrl}{searchPath}
+Body: { query: string, max_results?: number }
+Response: { results: Array<{ title, url, snippet }> }
+```
+
+**Fetch implementation:**
+
+```
+POST {baseUrl}{fetchPath}
+Body: { url: string }
+Response: { title: string, content: string, links: string[] }
+```
 
 **Config additions:**
+
 ```typescript
 // In PiToolsConfig:
 ollama?: {
   enabled?: boolean;         // default: false (opt-in)
   baseUrl?: string;          // default: "http://localhost:11434"
-  model?: string;            // default: "llama3.1"
-  visionModel?: string;      // default: "llava"
   apiKey?: string;           // only for cloud Ollama instances
 }
 ```
 
 **Registration in `src/providers/all.ts`:**
+
 - Added to `allProviders` array with `tier: 3`, `monthlyQuota: null`, `requiresKey: false`
-- `create()` factory: check if Ollama is reachable (HEAD to baseUrl) before registering
-- If unreachable: skip silently (no error, no provider registered)
+- Env vars: `OLLAMA_HOST` (base URL), `OLLAMA_API_KEY` (optional)
+- `create()` factory: register when baseUrl is configured or env var is set
+- No startup connectivity check — fail at call time with actionable message
 
 **SSRF exception:** Ollama's `baseUrl` is exempt from SSRF validation (loopback is expected for local instances).
 
-**Error handling:**
-- Connection refused → helpful message: "Ollama not running. Start with `ollama serve`"
-- Model not found → suggest: "Run `ollama pull llama3.1` to download the model"
-- Timeout (30s default) → standard timeout error
+**Error handling — connection refused detection:**
+
+```typescript
+function isConnectionRefused(error: unknown): boolean {
+  if (error instanceof TypeError) {
+    const cause = (error as { cause?: { code?: string } }).cause;
+    return cause?.code === "ECONNREFUSED";
+  }
+  return false;
+}
+// → "Could not connect to Ollama at {host}. Make sure Ollama is running (ollama serve)."
+```
 
 **Tests:**
-- Mock Ollama chat response → parsed into SearchResult[]
-- Mock vision response → text extracted from image
-- Connection refused → provider not registered (graceful)
-- Invalid model → clear error message
+
+- Mock Ollama search response → parsed into SearchResult[]
+- Mock Ollama fetch response → title + content returned
+- Local host detection → uses experimental paths
+- Cloud host → uses stable paths
+- Connection refused → actionable error message
+- API key header included when configured
 
 ---
 
-### 4b. OpenAI Native Web Search Integration (Hybrid)
+### 4b. OpenAI Native Web Search Integration (Layered)
 
 **Problem:** When running on OpenAI/Codex models that include built-in web search, pi-tools still uses its own providers (costing API quota). The native search is free and well-integrated with the model.
 
-**Solution:** Register OpenAI native web search as a provider. On Codex models, route simple searches through the model's native capability. Advanced searches (fusion, domain filters) still use our provider pipeline.
+**Solution:** Two-layer approach: (1) a transparent payload rewrite that converts our `web_search` tool to OpenAI's native format when running on OpenAI models, and (2) a separate provider that calls OpenAI's Responses API directly as a fallback for non-OpenAI models with an OpenAI API key.
 
-**Relationship to existing `openai-codex` provider:** The existing `openai-codex.ts` provides code search via Pi-managed authentication. The new `openai-native.ts` is a separate search provider that uses OpenAI's Responses API with `web_search_preview` tool — a different endpoint and authentication path. They coexist without conflict.
+**Relationship to existing `openai-codex` provider:** The existing `openai-codex.ts` provides code search via Pi-managed authentication. This feature is about _web_ search, not code search. They coexist without conflict.
+
+#### Layer 1: Payload Rewrite (Primary — vanillagreen approach)
+
+**Mechanism:** Hook Pi's `before_provider_request` event. When the model is OpenAI/Codex, rewrite the `web_search` function tool definition in the LLM request payload to OpenAI's native web search format. The model then uses its built-in web search — no API call from us, no quota cost.
+
+**New file: `src/providers/openai-native-rewrite.ts`**
+
+```typescript
+// Detect OpenAI model from provider string
+export function isOpenAiNativeModel(
+  model: { provider?: string } | undefined,
+): boolean {
+  const provider = (model?.provider ?? "").toLowerCase();
+  return (
+    provider === "openai-codex" ||
+    provider === "openai" ||
+    provider.startsWith("openai-")
+  );
+}
+
+// Rewrite web_search function tool to native OpenAI format
+export function rewriteNativeWebSearch<T>(
+  payload: T,
+  options?: { externalWebAccess?: boolean },
+): { payload: T; rewritten: string[] };
+```
+
+**Rewrite logic:**
+
+```typescript
+// In the payload's tools array, find function tools named "web_search":
+//   { type: "function", function: { name: "web_search", ... } }
+// Replace with:
+//   { type: "web_search", external_web_access: true }
+```
+
+**Integration in `src/index.ts`:**
+
+```typescript
+pi.on("before_provider_request", (event, ctx) => {
+  const settings = configManager.current;
+  if (!settings.openaiNative?.rewriteEnabled) return undefined;
+  if (!isOpenAiNativeModel(ctx.model)) return undefined;
+  const result = rewriteNativeWebSearch(event.payload, {
+    externalWebAccess: settings.openaiNative?.externalWebAccess ?? true,
+  });
+  return result.rewritten.length > 0 ? result.payload : undefined;
+});
+```
+
+**What happens:** When the LLM request goes to OpenAI with `{ type: "web_search" }` in the tools array, the model uses its native web search capability. Results come back inline in the model's response with `url_citation` annotations. No parsing needed on our end — it's transparent.
+
+#### Layer 2: Separate Provider (Fallback)
+
+**Mechanism:** For cases where the user has an `OPENAI_API_KEY` but is running on a non-OpenAI model (e.g., Claude), register `openai-native` as a search provider that calls the OpenAI Responses API directly.
 
 **New file: `src/providers/openai-native.ts`**
 
 ```typescript
-export function createOpenAiNativeProvider(apiKey: string, config?: OpenAiNativeConfig): {
+export function createOpenAiNativeProvider(
+  apiKey: string,
+  config?: OpenAiNativeConfig,
+): {
   search: SearchProvider;
 };
 ```
 
 **Implementation:**
-- Makes a POST to OpenAI's `/v1/responses` endpoint with:
+
+- POST to OpenAI's `/v1/responses` endpoint:
   - `tools: [{ type: "web_search_preview" }]`
   - `input: query`
-- Parses the response: extracts citations and text into `SearchResult[]`
-- Each citation becomes a result: `{ title: annotation.title, url: annotation.url, snippet: surrounding_text }`
-
-**Config additions:**
-```typescript
-// In ProviderConfigEntry (already exists for openai-codex):
-// Uses existing "openai-codex" provider config or new:
-"openai-native"?: {
-  enabled: boolean;        // default: true when OPENAI_API_KEY available
-  apiKey?: string;         // default: "OPENAI_API_KEY" env var
-  model?: string;          // default: "gpt-4.1-mini" (cheapest with web search)
-}
-```
+  - `model: configurable (default "gpt-4.1-mini")`
+- Parse response: handles both JSON and SSE streaming responses
+- Extract results from two locations in the response:
+  1. Message content with `url_citation` annotations → `{ title, url, snippet }`
+  2. `web_search_call` output items with sources → `{ title, url }`
+- Deduplicate by URL
 
 **Registration:**
+
 - Tier 1 (highest priority when available)
 - No monthly quota (pay-per-use)
 - Requires: `OPENAI_API_KEY` environment variable or configured key
+- Only registered when `openaiNative.providerEnabled` is true
 
-**Smart routing in `web_search` execute:**
+**Config additions:**
+
+```typescript
+// In PiToolsConfig:
+openaiNative?: {
+  rewriteEnabled?: boolean;       // default: true (Layer 1)
+  externalWebAccess?: boolean;    // default: true (for the rewrite)
+  providerEnabled?: boolean;      // default: true (Layer 2)
+  apiKey?: string;                // default: "OPENAI_API_KEY" env var
+  model?: string;                 // default: "gpt-4.1-mini"
+}
 ```
-// In the execute function:
-const candidates = resolveCandidates(params.provider, combineActive);
 
-// If "openai-native" is in candidates and search is "simple":
-//   - No combine mode
-//   - No domain filters
-//   - No explicit provider override (or provider === "openai-native")
-// Then: openai-native is first candidate (natural tier-1 ordering handles this)
-```
+**How the layers interact:**
 
-Since openai-native is registered as tier 1, the existing `selectSearchCandidates()` logic already prioritizes it. No special routing needed — it naturally goes first.
-
-**Fallback:** If OpenAI native fails (rate limit, API error), the existing fallback chain tries the next provider. Standard `executeWithFallback` handles this.
+- On OpenAI models: Layer 1 fires via `before_provider_request`, tool is rewritten to native format. Our `web_search` execute function returns a notice message (never shown because the model uses native search instead).
+- On non-OpenAI models: Layer 1 doesn't fire (model detection fails). If `openai-native` is registered as a provider, Layer 2 kicks in via normal provider selection.
+- Both layers can be independently enabled/disabled via config.
 
 **Tests:**
-- Mock OpenAI response with citations → parsed into SearchResult[]
-- API error → fallback to next provider
-- Domain filters present → openai-native still works (filters are best-effort server-side)
-- Provider explicitly set to "brave" → openai-native not used
+
+- Payload rewrite: function web_search → native web_search format
+- Payload rewrite: non-web_search tools preserved unchanged
+- Model detection: openai-codex → true, anthropic → false
+- Provider: mock OpenAI response with citations → parsed into SearchResult[]
+- Provider: SSE streaming response → parsed correctly
+- Provider: API error → fallback to next provider
+- Config: rewriteEnabled false → no rewrite
+- Config: providerEnabled false → provider not registered
 
 ---
 
@@ -471,11 +705,13 @@ Since openai-native is registered as tier 1, the existing `selectSearchCandidate
 **Solution:** Enhance `/tools` with both a smart wizard (default action) and composable sub-commands for ongoing management.
 
 **File changes:**
+
 - Rewrite: `src/commands/tools.ts` (keep status table, enhance handler)
 - New: `src/commands/tools-setup.ts` (wizard logic)
 - New: `src/commands/tools-subcommands.ts` (sub-command handlers)
 
 **Sub-commands:**
+
 ```
 /tools                    → enhanced wizard (default)
 /tools status             → provider status table (existing)
@@ -489,6 +725,7 @@ Since openai-native is registered as tier 1, the existing `selectSearchCandidate
 ```
 
 **Enhanced Wizard (no args):**
+
 1. **Diagnostic preamble:**
    - Show detected environment keys (e.g., "BRAVE_API_KEY: detected")
    - Show config file status (exists? location?)
@@ -508,6 +745,7 @@ Since openai-native is registered as tier 1, the existing `selectSearchCandidate
 4. **Key display:** Mask middle characters: `BSA_xxxx...7x2f` (first 4 + last 4)
 
 **Arg parsing:**
+
 ```typescript
 function parseArgs(argsStr: string): { subcommand: string; rest: string[] } {
   const parts = argsStr.trim().split(/\s+/);
@@ -516,14 +754,16 @@ function parseArgs(argsStr: string): { subcommand: string; rest: string[] } {
 ```
 
 **Config write helper:**
+
 ```typescript
 // Read existing config, apply change, write back (atomic)
 function updateConfig(
-  updater: (config: Partial<PiToolsConfig>) => Partial<PiToolsConfig>
+  updater: (config: Partial<PiToolsConfig>) => Partial<PiToolsConfig>,
 ): void;
 ```
 
 **Tests:**
+
 - `/tools enable brave` → config file updated with brave.enabled = true
 - `/tools key brave BSA_xxx` → config file updated with brave.apiKey = "BSA_xxx"
 - `/tools test brave` → HTTP call to Brave API, report success/failure
@@ -537,100 +777,138 @@ function updateConfig(
 
 **Problem:** No real-time visibility into pi-tools' HTTP activity, provider selection decisions, or failure patterns during a session.
 
-**Solution:** An event-driven activity monitor that collects request telemetry and renders a toggle-able panel via Pi's TUI.
+**Solution:** An event-driven activity monitor that collects request telemetry and renders a toggle-able widget via Pi's `ctx.ui.setWidget()` API.
 
 **New files:**
-- `src/monitor/types.ts` — event type definitions
-- `src/monitor/event-bus.ts` — pub/sub event system
-- `src/monitor/activity-store.ts` — ring buffer for recent events
-- `src/monitor/widget.ts` — TUI rendering
 
-**Event types:**
+- `src/monitor/types.ts` — event/entry type definitions
+- `src/monitor/activity-monitor.ts` — entry store + listener pattern
+- `src/monitor/widget.ts` — TUI rendering via `Text` from `@earendil-works/pi-tui`
+
+**Entry type (unified start + end):**
+
 ```typescript
-interface RequestStartEvent {
+export interface ActivityEntry {
   id: string;
-  type: "search" | "fetch" | "extract";
-  provider: string;
-  target: string;         // query or URL
-  timestamp: number;
-}
+  type: "api" | "fetch"; // search provider call vs URL fetch
+  startTime: number;
+  endTime?: number;
 
-interface RequestEndEvent {
-  id: string;
-  provider: string;
-  latencyMs: number;
-  status: "success" | "error";
-  statusCode?: number;
-  resultCount?: number;
-  bytes?: number;
+  // For API calls
+  query?: string;
+
+  // For URL fetches
+  url?: string;
+
+  // Result
+  status: number | null; // HTTP code, null = pending
+  error?: string;
 }
 ```
 
-**EventBus (singleton):**
+**ActivityMonitor (singleton, replaces separate EventBus + Store):**
+
 ```typescript
-class ActivityEventBus {
-  private listeners: Set<(event: ActivityEvent) => void>;
-  emit(event: ActivityEvent): void;
-  subscribe(listener: (event: ActivityEvent) => void): () => void;  // returns unsubscribe
+export class ActivityMonitor {
+  private entries: ActivityEntry[] = []; // max 10 (ring buffer)
+  private listeners = new Set<() => void>();
+
+  logStart(partial: Omit<ActivityEntry, "id" | "startTime" | "status">): string;
+  logComplete(id: string, status: number): void;
+  logError(id: string, error: string): void;
+  getEntries(): ReadonlyArray<ActivityEntry>;
+  clear(): void;
+
+  onUpdate(callback: () => void): () => void; // returns unsubscribe
 }
 
-export const activityBus = new ActivityEventBus();
+export const activityMonitor = new ActivityMonitor();
 ```
 
-**ActivityStore (ring buffer):**
+**Instrumentation points (call `activityMonitor.logStart/logComplete/logError`):**
+
+| Location                                         | Entry Type           | Target         |
+| ------------------------------------------------ | -------------------- | -------------- |
+| `src/providers/execute.ts` (executeWithFallback) | `"api"`              | query          |
+| `src/providers/fusion.ts` (executeWithFusion)    | `"api"` per provider | query          |
+| `src/extract/pipeline.ts` (HTTP fetch)           | `"fetch"`            | URL            |
+| `src/extract/gemini-api.ts` (Gemini calls)       | `"api"`              | prompt summary |
+
+**Widget rendering (via `ctx.ui.setWidget()`):**
+
+Pi's framework provides `ctx.ui.setWidget(key, content, options?)` on the `ExtensionUIContext`. The `content` is a `Text` component from `@earendil-works/pi-tui`.
+
 ```typescript
-class ActivityStore {
-  private events: ActivityEvent[] = [];  // max 50
-  private providerStats: Map<string, { ok: number; fail: number; avgMs: number }>;
-  
-  record(event: ActivityEvent): void;
-  getRecent(n?: number): ActivityEvent[];
-  getProviderSummary(): Map<string, ProviderActivitySummary>;
+function updateWidget(ctx: ExtensionContext): void {
+  const theme = ctx.ui.theme;
+  const entries = activityMonitor.getEntries();
+  const lines: string[] = [];
+
+  lines.push(theme.fg("accent", "--- Web Tools Activity " + "-".repeat(37)));
+
+  if (entries.length === 0) {
+    lines.push(theme.fg("muted", "  No activity yet"));
+  } else {
+    for (const e of entries) {
+      lines.push("  " + formatEntryLine(e, theme));
+    }
+  }
+
+  lines.push(theme.fg("accent", "-".repeat(60)));
+  ctx.ui.setWidget("pi-tools-activity", new Text(lines.join("\n"), 0, 0));
 }
 ```
 
-**Instrumentation points (emit events from existing code):**
+**Entry line format:** `TYPE  TARGET                            STATUS  TIME  INDICATOR`
 
-| Location | Event |
-|----------|-------|
-| `src/providers/execute.ts` (executeWithFallback) | request_start, request_end |
-| `src/providers/fusion.ts` (executeWithFusion) | request_start per provider, request_end per provider |
-| `src/extract/pipeline.ts` (HTTP fetch) | request_start, request_end |
-| `src/extract/gemini-api.ts` (Gemini calls) | request_start, request_end |
-
-**Widget rendering:**
 ```
-┌─ Activity ──────────────────────────────────────────┐
-│ 14:23:01  brave     search "react hooks"   234ms  OK │
-│ 14:23:02  http:200  fetch  example.com      89ms  OK │
-│ 14:23:03  exa       search "typescript"       --  429│
-│─────────────────────────────────────────────────────── │
-│ Session: brave(3 OK) exa(1 FAIL) jina(2 OK)          │
-└───────────────────────────────────────────────────────┘
+  API  "react hooks"                        200  0.2s  ✓
+  GET  example.com/page                     200  0.1s  ✓
+  API  "typescript patterns"                429  1.2s  ✗
+  GET  video:demo.mp4                       ...  0.5s  ⋯
 ```
 
 **Toggle via `/tools monitor on|off`:**
-- `on`: Create ActivityStore, subscribe to EventBus, register widget with Pi TUI
-- `off`: Unsubscribe, deregister widget
-- Default: off (opt-in per session)
 
-**Pi TUI integration strategy:**
-- Primary: Use `pi.registerWidget()` if available in the ExtensionAPI
-- Fallback: If widget API not available, use `ctx.ui.notify()` to output last N events on toggle
-- Investigation needed: Determine exact Pi TUI widget registration API during implementation
+```typescript
+// In tools command handler:
+if (subcommand === "monitor") {
+  const action = rest[0];
+  if (action === "on") {
+    widgetVisible = true;
+    widgetUnsubscribe = activityMonitor.onUpdate(() => updateWidget(ctx));
+    updateWidget(ctx);
+    ctx.ui.notify("Activity monitor enabled");
+  } else if (action === "off") {
+    widgetVisible = false;
+    widgetUnsubscribe?.();
+    widgetUnsubscribe = null;
+    ctx.ui.setWidget("pi-tools-activity", undefined); // removes widget
+    ctx.ui.notify("Activity monitor disabled");
+  }
+}
+```
+
+**Session lifecycle:**
+
+- On `session_start` / `session_shutdown`: unsubscribe, clear monitor, reset visibility
+- On session change: re-subscribe with new ctx if widget was visible
 
 **Performance considerations:**
-- EventBus is synchronous fire-and-forget (no await)
-- Ring buffer caps at 50 events (no memory growth)
-- Widget re-renders only on new events (no polling)
-- When monitor is off, events still emit (other consumers could listen) but store doesn't accumulate
+
+- Listener callbacks are synchronous fire-and-forget (no await)
+- Ring buffer caps at 10 entries (no memory growth)
+- Widget re-renders only on new events (listener fires → updateWidget)
+- When monitor is off, no entries are logged (instrumentation checks `widgetVisible` flag)
 
 **Tests:**
-- EventBus: emit → listener called
-- ActivityStore: ring buffer eviction at capacity
-- ActivityStore: provider summary aggregation
+
+- ActivityMonitor: logStart → entry created with status null
+- ActivityMonitor: logComplete → entry updated with status + endTime
+- ActivityMonitor: ring buffer eviction at 10 entries
 - Widget rendering: format matches expected output
-- Toggle on/off: subscribe/unsubscribe lifecycle
+- Toggle on → widget visible; toggle off → widget removed
+- Session shutdown → monitor cleared
 
 ---
 
@@ -640,13 +918,13 @@ class ActivityStore {
 
 Each phase adds tests for its new functionality. No phase should break existing tests.
 
-| Phase | New Test Files | Existing Tests Modified |
-|-------|---------------|------------------------|
-| 1 | `tests/extract/cloudflare.test.ts` | None |
-| 2 | `tests/extract/head-probe.test.ts`, `tests/utils/capabilities.test.ts` | None |
-| 3 | `tests/extract/pdf-ocr.test.ts`, `tests/config-trust.test.ts` | `tests/tools/web-fetch.test.ts` (import path changes) |
-| 4 | `tests/providers/ollama.test.ts`, `tests/providers/openai-native.test.ts` | None |
-| 5 | `tests/commands/tools-setup.test.ts`, `tests/commands/tools-subcommands.test.ts`, `tests/monitor/*.test.ts` | `tests/commands/tools.test.ts` (updated for new arg parsing) |
+| Phase | New Test Files                                                                                                                                             | Existing Tests Modified                                      |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| 1     | `tests/extract/cloudflare.test.ts`                                                                                                                         | None                                                         |
+| 2     | `tests/extract/head-probe.test.ts`, `tests/utils/capabilities.test.ts`                                                                                     | None                                                         |
+| 3     | `tests/extract/pdf-ocr.test.ts`, `tests/config-trust.test.ts`                                                                                              | `tests/tools/web-fetch.test.ts` (import path changes)        |
+| 4     | `tests/providers/ollama.test.ts`, `tests/providers/openai-native.test.ts`, `tests/providers/openai-native-rewrite.test.ts`                                 | None                                                         |
+| 5     | `tests/commands/tools-setup.test.ts`, `tests/commands/tools-subcommands.test.ts`, `tests/monitor/activity-monitor.test.ts`, `tests/monitor/widget.test.ts` | `tests/commands/tools.test.ts` (updated for new arg parsing) |
 
 ### Config Schema Evolution
 
@@ -664,25 +942,26 @@ interface PiToolsConfig {
   ssrf: SsrfConfig;
   combine: CombineConfig;
   deepResearch: DeepResearchConfig;
-  gemini?: GeminiConfig;          // Phase 1b adds gatewayBaseUrl awareness
+  gemini?: GeminiConfig; // Phase 1b adds gateway awareness
   youtube?: YouTubeConfig;
   video?: VideoConfig;
 
   // New (added by phases)
-  pdf?: PdfConfig;                // Phase 3a
-  ollama?: OllamaConfig;         // Phase 4a
+  pdf?: PdfConfig; // Phase 3a: { ocrEnabled, ocrMaxPages, ocrDpi }
+  ollama?: OllamaConfig; // Phase 4a: { enabled, baseUrl, apiKey }
+  openaiNative?: OpenAiNativeConfig; // Phase 4b: { rewriteEnabled, externalWebAccess, providerEnabled, apiKey, model }
 }
 ```
 
 ### Dependency Changes
 
-| Phase | New Dependencies | Reason |
-|-------|-----------------|--------|
-| 1-2 | None | Uses existing Node APIs |
-| 3a | None | Uses existing unpdf + Gemini API |
-| 3b-3c | None | Pure logic |
-| 4 | None | HTTP calls to Ollama/OpenAI (no SDK) |
-| 5 | None | Uses existing Pi TUI framework |
+| Phase | New Dependencies | Reason                               |
+| ----- | ---------------- | ------------------------------------ |
+| 1-2   | None             | Uses existing Node APIs              |
+| 3a    | None             | Uses existing unpdf + Gemini API     |
+| 3b-3c | None             | Pure logic                           |
+| 4     | None             | HTTP calls to Ollama/OpenAI (no SDK) |
+| 5     | None             | Uses existing Pi TUI framework       |
 
 No new npm dependencies across all 5 phases. All features use `fetch()`, existing libraries, or Pi's framework APIs.
 
