@@ -168,3 +168,58 @@ export function formatSeconds(seconds: number): string {
   }
   return `${m}:${String(s).padStart(2, "0")}`;
 }
+
+// ---------------------------------------------------------------------------
+// Stream info functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Get the direct stream URL and duration for a YouTube video using yt-dlp.
+ * Runs: yt-dlp --print duration -g <url>
+ * Output: line 1 = duration (or "NA"), line 2 = stream URL
+ */
+export async function getYouTubeStreamInfo(
+  videoId: string,
+): Promise<{ streamUrl: string; duration: number | null } | { error: string }> {
+  try {
+    const output = execFileSync(
+      "yt-dlp",
+      ["--print", "duration", "-g", `https://www.youtube.com/watch?v=${videoId}`],
+      { timeout: YTDLP_TIMEOUT, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
+    ).trim();
+    const lines = output.split(/\r?\n/);
+    const rawDuration = lines[0]?.trim();
+    const streamUrl = lines[1]?.trim();
+    if (!streamUrl) return { error: "yt-dlp failed: missing stream URL" };
+    const parsedDuration = rawDuration && rawDuration !== "NA"
+      ? Number.parseFloat(rawDuration)
+      : Number.NaN;
+    const duration = Number.isFinite(parsedDuration) ? parsedDuration : null;
+    return { streamUrl, duration };
+  } catch (err) {
+    return { error: mapYtDlpError(err) };
+  }
+}
+
+/**
+ * Get the duration of a local video file using ffprobe.
+ * Runs: ffprobe -v quiet -show_entries format=duration -of csv=p=0 <filePath>
+ */
+export async function getLocalVideoDuration(
+  filePath: string,
+): Promise<number | { error: string }> {
+  try {
+    const output = execFileSync(
+      "ffprobe",
+      ["-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", filePath],
+      { timeout: FFPROBE_TIMEOUT, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] },
+    ).trim();
+    const duration = Number.parseFloat(output);
+    if (!Number.isFinite(duration)) {
+      return { error: `ffprobe failed: invalid duration output` };
+    }
+    return duration;
+  } catch (err) {
+    return { error: mapFfprobeError(err) };
+  }
+}
