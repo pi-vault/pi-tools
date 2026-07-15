@@ -302,6 +302,20 @@ describe("extractYouTubeFrames", () => {
     expect(result.frames).toEqual([]);
     expect(result.error).toBeTruthy();
   });
+
+  it("returns 403 error for expired stream URL", async () => {
+    const err = Object.assign(new Error("ffmpeg failed"), {
+      stderr: Buffer.from("HTTP 403: Forbidden"),
+    });
+    vi.mocked(execFileSync)
+      .mockReturnValueOnce("300\nhttps://stream.example.com/video\n") // yt-dlp
+      .mockImplementation(() => { throw err; }); // ffmpeg gets 403
+
+    const result = await extractYouTubeFrames("testVideo", [10]);
+    expect(result.frames).toEqual([]);
+    expect(result.error).toContain("403");
+    expect(result.error).toContain("expired");
+  });
 });
 
 describe("extractLocalFrames", () => {
