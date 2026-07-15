@@ -123,7 +123,8 @@ export async function extractContent(
         duration: dur,
       };
     }
-    // Not YouTube or local video — fall through to normal pipeline
+    // Not YouTube or local video — timestamp/frames options are ignored,
+    // fall through to normal HTML pipeline
   }
 
   // --- Local video file detection ---

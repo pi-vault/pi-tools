@@ -2,6 +2,8 @@ import { getApiKey, getVersionedApiBase } from "./gemini-api.ts";
 import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.ts";
 import type { ExtractedContent } from "./pipeline.ts";
 
+const MIN_CONTENT_LENGTH = 100;
+
 const EXTRACTION_PROMPT = `Extract the complete readable content from this URL as clean markdown.
 Include the page title, all text content, code blocks, and tables.
 Do not summarize — extract the full content.
@@ -70,7 +72,7 @@ export async function extractWithUrlContext(
       .filter(Boolean)
       .join("\n") ?? "";
 
-    if (!text || text.length < 100) return null;
+    if (!text || text.length < MIN_CONTENT_LENGTH) return null;
 
     const title = extractTitle(text, url);
     return {
@@ -90,6 +92,10 @@ export async function extractWithUrlContext(
  * Extract page content using Gemini Web (cookie-authenticated).
  * Appends the URL to the prompt — Gemini Web can browse URLs given in text.
  * Returns null if cookies are unavailable or extraction fails.
+ *
+ * Note: Uses "gemini-2.5-flash" because gemini-web.ts MODEL_HEADERS only
+ * supports gemini-3-pro, gemini-2.5-pro, and gemini-2.5-flash. Using an
+ * unsupported model name causes silent fallback to the default.
  */
 export async function extractWithGeminiWeb(
   url: string,
@@ -105,7 +111,7 @@ export async function extractWithGeminiWeb(
       timeoutMs: 60_000,
     });
 
-    if (!text || text.length < 100) return null;
+    if (!text || text.length < MIN_CONTENT_LENGTH) return null;
 
     const title = extractTitle(text, url);
     return {
