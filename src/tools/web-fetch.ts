@@ -251,6 +251,7 @@ export function createWebFetchTool(
 
       const urlResults: UrlResult[] = [];
       const outputParts: string[] = [];
+      const imageBlocks: Array<{ type: "image"; data: string; mimeType: string }> = [];
 
       for (const u of urls) {
         const outcome = resultByUrl.get(u)!;
@@ -285,6 +286,24 @@ export function createWebFetchTool(
         const header = extracted.title ? `## ${extracted.title}` : `## ${extracted.url}`;
         const meta = `Source: ${extracted.url} | ${extracted.chars} chars | contentId: ${contentId}`;
         outputParts.push(`${header}\n${meta}\n\n${preview}\n`);
+
+        // Collect thumbnail and frame image blocks
+        if (extracted.thumbnail) {
+          imageBlocks.push({
+            type: "image" as const,
+            data: extracted.thumbnail.data,
+            mimeType: extracted.thumbnail.mimeType,
+          });
+        }
+        if (extracted.frames) {
+          for (const frame of extracted.frames) {
+            imageBlocks.push({
+              type: "image" as const,
+              data: frame.data,
+              mimeType: frame.mimeType,
+            });
+          }
+        }
       }
 
       const failed = urlResults.filter((r) => r.error).length;
@@ -292,7 +311,10 @@ export function createWebFetchTool(
       const summary = `Fetched ${succeeded}/${urls.length} URLs successfully${failed > 0 ? ` (${failed} failed)` : ""}${isManifest ? ". Use web_read with contentId for full text." : ""}\n\n`;
 
       return {
-        content: [{ type: "text" as const, text: summary + outputParts.join("\n---\n\n") }],
+        content: [
+          { type: "text" as const, text: summary + outputParts.join("\n---\n\n") },
+          ...imageBlocks,
+        ],
         details: {
           url: urls[0],
           chars: urlResults.reduce((sum, r) => sum + r.chars, 0),
@@ -330,8 +352,8 @@ export function createWebFetchTool(
         return text;
       }
       const details = result.details;
+      const imageCount = result.content.filter((c: { type: string }) => c.type === "image").length;
       if (!details || details.chars === 0) {
-        const imageCount = result.content.filter((c: { type: string }) => c.type === "image").length;
         if (imageCount > 0) {
           text.setText(theme.fg("toolOutput", `${imageCount} frame(s) extracted`));
           return text;
@@ -344,7 +366,6 @@ export function createWebFetchTool(
         const lines = raw.split("\n").slice(0, 20);
         text.setText(lines.map((l: string) => theme.fg("toolOutput", l)).join("\n"));
       } else {
-        const imageCount = result.content.filter((c: { type: string }) => c.type === "image").length;
         const imageSuffix = imageCount > 0 ? ` + ${imageCount} image(s)` : "";
         const truncNote = details.truncated ? theme.fg("warning", " (truncated)") : "";
         text.setText(theme.fg("toolOutput", `${details.chars} chars${imageSuffix}`) + truncNote);
@@ -354,11 +375,23 @@ export function createWebFetchTool(
   };
 }
 
+type ToolResult = {
+  content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>;
+  details: {
+    url: string;
+    title?: string;
+    chars: number;
+    truncated: boolean;
+    contentId?: string;
+    extractionChain: string[];
+  };
+};
+
 function buildResult(
   extracted: ExtractedContent,
   originalUrl: string,
   store: ContentStore,
-) {
+): ToolResult {
   let contentId: string | undefined;
   let outputText: string;
   let truncated = extracted.truncated;

@@ -128,6 +128,42 @@ describe("web_fetch — video parameters and ImageContent", () => {
     expect(result.content[2]).toEqual({ type: "image", data: "frame2base64", mimeType: "image/jpeg" });
   });
 
+  it("renders frames as ImageContent in multi-URL mode", async () => {
+    vi.mocked(extractContent)
+      .mockImplementationOnce(async () => ({
+        text: "URL 1 content",
+        title: "Page 1",
+        url: "https://example.com/page1",
+        extractionChain: ["readability"],
+        chars: 13,
+        truncated: false,
+      }))
+      .mockImplementationOnce(async () => ({
+        text: "",
+        title: "YouTube Frames",
+        url: "https://www.youtube.com/watch?v=abc",
+        extractionChain: ["frames:youtube"],
+        chars: 0,
+        truncated: false,
+        frames: [{ data: "frameData", mimeType: "image/jpeg", timestamp: "0:30" }],
+      }));
+
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+
+    const result = await tool.execute(
+      "call-multi-1",
+      { urls: ["https://example.com/page1", "https://www.youtube.com/watch?v=abc"], frames: 1 },
+      undefined, undefined, ctx,
+    );
+
+    // Should have at least one image content block from the frames result
+    const imageBlocks = result.content.filter((c: { type: string }) => c.type === "image");
+    expect(imageBlocks).toHaveLength(1);
+    expect(imageBlocks[0]).toEqual({ type: "image", data: "frameData", mimeType: "image/jpeg" });
+  });
+
   it("renderResult shows frame count for frames-only result (chars=0 with images)", () => {
     // The renderResult function should handle chars=0 when images are present
     // We verify this via the details returned
