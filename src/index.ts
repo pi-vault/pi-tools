@@ -15,6 +15,7 @@ import { createWebReadTool } from "./tools/web-read.ts";
 import { createWebResearchTool } from "./tools/web-research.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { resolveApiKey } from "./config.ts";
+import { buildAugmentedGuidance, detectCapabilities } from "./utils/capabilities.ts";
 
 function isStoredContent(data: unknown): data is StoredContent {
   if (typeof data !== "object" || data === null) return false;
@@ -33,6 +34,9 @@ export default function createExtension(pi: ExtensionAPI): void {
   const store = new ContentStore((customType, data) => pi.appendEntry(customType, data));
   const registry = new ProviderRegistry(createFilePersistence());
   const configManager = new ConfigManager(process.cwd(), registry, allProviders);
+
+  // Detect environment capabilities once at startup
+  const caps = detectCapabilities();
 
   // Restore stored content from previous session
   pi.on("session_start", (_event, ctx) => {
@@ -87,7 +91,7 @@ export default function createExtension(pi: ExtensionAPI): void {
         return registry.selectFetchCandidates();
       },
       fetchCache,
-      configManager.current.guidance?.web_fetch,
+      buildAugmentedGuidance(configManager.current.guidance?.web_fetch, caps),
       configManager.current.github,
       configManager.current.ssrf.allowRanges,
     ),
