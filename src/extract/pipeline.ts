@@ -63,6 +63,8 @@ const BROWSER_HEADERS: Record<string, string> = {
   "Accept-Language": "en-US,en;q=0.5",
 };
 
+const HONEST_USER_AGENT = "pi-tools/0.3.0 (content extraction)";
+
 export interface ExtractOptions {
   raw?: boolean;
   github?: GitHubConfig;
@@ -171,6 +173,23 @@ export async function extractContent(
     });
   } catch (err) {
     throw new RetryableExtractionError(err instanceof Error ? err.message : String(err));
+  }
+
+  // Cloudflare bot challenge: retry once with honest User-Agent
+  if (
+    response.status === 403 &&
+    response.headers.get("cf-mitigated") === "challenge"
+  ) {
+    chain.push("cf-challenge");
+    try {
+      response = await fetch(url, {
+        headers: { ...BROWSER_HEADERS, "User-Agent": HONEST_USER_AGENT },
+        signal,
+        redirect: "follow",
+      });
+    } catch (err) {
+      throw new RetryableExtractionError(err instanceof Error ? err.message : String(err));
+    }
   }
 
   chain.push(`http:${response.status}`);
