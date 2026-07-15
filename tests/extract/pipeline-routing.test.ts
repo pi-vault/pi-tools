@@ -247,7 +247,7 @@ describe("extractContent — Gemini HTML fallback", () => {
     vi.clearAllMocks();
   });
 
-  it("uses Gemini URL context when Readability and Jina both fail", async () => {
+  it("uses Gemini URL context when Readability, RSC, and Jina all fail", async () => {
     const originalFetch = globalThis.fetch;
     // Return thin HTML that Readability won't extract
     globalThis.fetch = vi.fn().mockResolvedValue(
@@ -269,6 +269,8 @@ describe("extractContent — Gemini HTML fallback", () => {
 
     try {
       const result = await extractContent("https://example.com/article");
+      expect(result.extractionChain).toContain("readability:thin");
+      expect(result.extractionChain).toContain("jina-reader:fail");
       expect(result.extractionChain).toContain("html:gemini-url-context");
       expect(result.text).toContain("Full Article");
     } finally {
@@ -297,6 +299,7 @@ describe("extractContent — Gemini HTML fallback", () => {
 
     try {
       const result = await extractContent("https://example.com/page");
+      expect(result.extractionChain).toContain("jina-reader:fail");
       expect(result.extractionChain).toContain("html:gemini-web");
     } finally {
       globalThis.fetch = originalFetch;
@@ -317,6 +320,7 @@ describe("extractContent — Gemini HTML fallback", () => {
 
     try {
       const result = await extractContent("https://example.com/raw");
+      expect(result.extractionChain).toContain("jina-reader:fail");
       expect(result.extractionChain).toContain("raw-text");
       expect(result.extractionChain).not.toContain("html:gemini-url-context");
     } finally {
