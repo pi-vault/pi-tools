@@ -126,7 +126,7 @@ export function parseTimestampParam(
   }
 
   // Has timestamp — check for range (contains "-" but not just a negative number)
-  const rangeMatch = timestamp!.match(/^([^-]+)-(.+)$/);
+  const rangeMatch = timestamp?.match(/^([^-]+)-(.+)$/);
   if (rangeMatch && rangeMatch[1].length > 0) {
     const start = parseTimestamp(rangeMatch[1]);
     const end = parseTimestamp(rangeMatch[2]);
@@ -139,7 +139,7 @@ export function parseTimestampParam(
   }
 
   // Single timestamp
-  const seconds = parseTimestamp(timestamp!);
+  const seconds = parseTimestamp(timestamp as string);
 
   // Single timestamp + frames -> intervals of 5s
   if (count) {
