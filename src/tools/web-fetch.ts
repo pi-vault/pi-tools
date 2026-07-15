@@ -30,6 +30,19 @@ const WebFetchParams = Type.Object({
     Type.Boolean({ default: false, description: "Return raw HTTP body without extraction" }),
   ),
   fresh: Type.Optional(Type.Boolean({ default: false, description: "Bypass content cache" })),
+  // Video/YouTube parameters
+  prompt: Type.Optional(
+    Type.String({ description: "Question or instruction for video/YouTube analysis." }),
+  ),
+  timestamp: Type.Optional(
+    Type.String({ description: "Extract frame(s): '1:23:45' (single), '23:41-25:00' (range)." }),
+  ),
+  frames: Type.Optional(
+    Type.Integer({ minimum: 1, maximum: 12, description: "Number of frames to extract." }),
+  ),
+  model: Type.Optional(
+    Type.String({ description: "Override Gemini model for video/YouTube analysis." }),
+  ),
 });
 
 interface UrlResult {
@@ -92,7 +105,14 @@ export function createWebFetchTool(
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
   async function executeSingleUrl(
     url: string,
-    params: { raw?: boolean; fresh?: boolean },
+    params: {
+      raw?: boolean;
+      fresh?: boolean;
+      prompt?: string;
+      timestamp?: string;
+      frames?: number;
+      model?: string;
+    },
     signal: AbortSignal | undefined,
   ) {
     try {
@@ -108,6 +128,10 @@ export function createWebFetchTool(
         raw: params.raw,
         github: githubConfig,
         allowRanges: ssrfAllowRanges,
+        prompt: params.prompt,
+        timestamp: params.timestamp,
+        frames: params.frames,
+        model: params.model,
       });
 
       // Write to cache
@@ -159,10 +183,11 @@ export function createWebFetchTool(
   return {
     name: "web_fetch",
     label: "Web Fetch",
-    description: "Fetch a URL and extract readable content as markdown. Supports HTML pages.",
+    description:
+      "Fetch a URL and extract readable content as markdown. Supports HTML pages, YouTube videos (transcript + thumbnail), and local video files (Gemini analysis).",
     promptSnippet:
       guidance?.promptSnippet ??
-      "Fetch a URL and extract readable content as markdown. Supports HTML pages.",
+      "Fetch a URL and extract readable content as markdown. Supports HTML pages, YouTube videos (transcript + thumbnail), and local video files (Gemini analysis).",
     promptGuidelines: guidance?.promptGuidelines ?? [
       "Use web_fetch when you have a specific URL to read.",
       "For large pages, use web_read with the returned contentId to retrieve the full text.",
@@ -206,6 +231,10 @@ export function createWebFetchTool(
           raw: params.raw,
           github: githubConfig,
           allowRanges: ssrfAllowRanges,
+          prompt: params.prompt,
+          timestamp: params.timestamp,
+          frames: params.frames,
+          model: params.model,
         });
 
         cache?.set(u, extracted);
@@ -302,16 +331,23 @@ export function createWebFetchTool(
       }
       const details = result.details;
       if (!details || details.chars === 0) {
+        const imageCount = result.content.filter((c: { type: string }) => c.type === "image").length;
+        if (imageCount > 0) {
+          text.setText(theme.fg("toolOutput", `${imageCount} frame(s) extracted`));
+          return text;
+        }
         text.setText(theme.fg("error", "fetch error"));
         return text;
       }
       if (options.expanded) {
         const raw = result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
         const lines = raw.split("\n").slice(0, 20);
-        text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));
+        text.setText(lines.map((l: string) => theme.fg("toolOutput", l)).join("\n"));
       } else {
+        const imageCount = result.content.filter((c: { type: string }) => c.type === "image").length;
+        const imageSuffix = imageCount > 0 ? ` + ${imageCount} image(s)` : "";
         const truncNote = details.truncated ? theme.fg("warning", " (truncated)") : "";
-        text.setText(theme.fg("toolOutput", `${details.chars} chars`) + truncNote);
+        text.setText(theme.fg("toolOutput", `${details.chars} chars${imageSuffix}`) + truncNote);
       }
       return text;
     },
@@ -319,14 +355,7 @@ export function createWebFetchTool(
 }
 
 function buildResult(
-  extracted: {
-    text: string;
-    title?: string;
-    url: string;
-    extractionChain: string[];
-    chars: number;
-    truncated: boolean;
-  },
+  extracted: ExtractedContent,
   originalUrl: string,
   store: ContentStore,
 ) {
@@ -351,11 +380,36 @@ function buildResult(
     extracted.title ? `# ${extracted.title}` : `# ${extracted.url}`,
     `Source: ${extracted.url}`,
     `Chars: ${extracted.chars}${truncated ? ` (truncated, use web_read with contentId "${contentId}" for full text)` : ""}`,
+    extracted.duration !== undefined ? `Duration: ${extracted.duration}s` : "",
     "",
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const content: Array<
+    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
+  > = [{ type: "text" as const, text: header + outputText }];
+
+  if (extracted.thumbnail) {
+    content.push({
+      type: "image" as const,
+      data: extracted.thumbnail.data,
+      mimeType: extracted.thumbnail.mimeType,
+    });
+  }
+
+  if (extracted.frames) {
+    for (const frame of extracted.frames) {
+      content.push({
+        type: "image" as const,
+        data: frame.data,
+        mimeType: frame.mimeType,
+      });
+    }
+  }
 
   return {
-    content: [{ type: "text" as const, text: header + outputText }],
+    content,
     details: {
       url: originalUrl,
       title: extracted.title,
