@@ -6,6 +6,7 @@ import { loadConfig } from "../config.ts";
 import type { ExtractedContent, ExtractOptions } from "./pipeline.ts";
 import { queryGeminiApi, getApiKey, getVersionedApiBase } from "./gemini-api.ts";
 import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.ts";
+import { extractHeadingTitle } from "./youtube.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -250,11 +251,6 @@ function deleteGeminiFile(fileName: string, apiKey: string): void {
 // Auto-Thumbnail
 // ---------------------------------------------------------------------------
 
-interface FrameResult {
-  data: string; // base64
-  mimeType: "image/jpeg";
-}
-
 /**
  * Extract a single video frame at the specified timestamp via ffmpeg.
  * Returns base64 JPEG data or null on failure.
@@ -263,7 +259,7 @@ interface FrameResult {
 function extractVideoFrame(
   filePath: string,
   seconds = 1,
-): FrameResult | null {
+): { data: string; mimeType: "image/jpeg" } | null {
   try {
     const buffer = execFileSync(
       "ffmpeg",
@@ -281,19 +277,6 @@ function extractVideoFrame(
   } catch {
     return null;
   }
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Extract the first `# ` heading from markdown text as a title.
- * Returns null if no heading found.
- */
-function extractHeadingTitle(text: string): string | null {
-  const match = text.match(/^#\s+(.+)$/m);
-  return match ? match[1].trim() : null;
 }
 
 // ---------------------------------------------------------------------------
