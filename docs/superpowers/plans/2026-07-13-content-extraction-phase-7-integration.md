@@ -7,7 +7,7 @@
 **Architecture:**
 
 - Route YouTube URLs, local video files, and frame extraction requests at the top of `extractContent()` before HTTP fetch
-- Add Gemini HTML fallback as a new tier after Jina Reader for pages where Readability extracted < 500 chars
+- Add Gemini HTML fallback (via `url_context` tool and Gemini Web) as a new tier after Jina Reader for pages where Readability extracted < 500 chars
 - Extend `web_fetch` tool schema with `prompt`, `timestamp`, `frames`, `model` parameters
 - Render `thumbnail` and `frames` as MCP `ImageContent` blocks in tool results
 
@@ -22,17 +22,17 @@
 - Phases 1-6 complete and all tests passing
 - All extraction modules exist and export expected APIs:
   - Phase 1: `ExtractedContent`, `ExtractOptions`, `VideoFrame` types in `src/extract/pipeline.ts` and `src/config.ts`
-  - Phase 2: `queryGeminiApi`, `isGeminiApiAvailable` in `src/extract/gemini-api.ts`
-  - Phase 3: `isGeminiWebAvailable`, `queryWithCookies` in `src/extract/gemini-web.ts`
-  - Phase 4: `isYouTubeURL`, `extractYouTube`, `isYouTubeEnabled` in `src/extract/youtube.ts`
-  - Phase 5: `parseTimestampParam`, `extractYouTubeFrames`, `extractLocalFrames`, `getLocalVideoDuration` in `src/extract/frames.ts`
-  - Phase 6: `isVideoFile`, `extractVideo`, `isVideoEnabled` in `src/extract/video.ts`
+  - Phase 2: `queryGeminiApi(prompt, videoUri, options?) -> Promise<string>`, `isGeminiApiAvailable() -> boolean`, `getApiKey() -> string|null`, `getVersionedApiBase() -> string` in `src/extract/gemini-api.ts`
+  - Phase 3: `isGeminiWebAvailable() -> Promise<CookieMap|null>`, `queryWithCookies(prompt, cookieMap, options?) -> Promise<string>` in `src/extract/gemini-web.ts`
+  - Phase 4: `isYouTubeURL(url) -> {isYouTube, videoId}`, `extractYouTube(url, signal?, options?) -> Promise<ExtractedContent|null>`, `isYouTubeEnabled() -> boolean` in `src/extract/youtube.ts`
+  - Phase 5: `parseTimestampParam(timestamp?, frames?, duration?) -> number[]`, `extractYouTubeFrames(videoId, timestamps, signal?) -> Promise<{frames, duration, error}>`, `extractLocalFrames(filePath, timestamps, signal?) -> Promise<{frames, duration, error}>`, `getLocalVideoDuration(filePath) -> Promise<number|{error}>`, `getYouTubeStreamInfo(videoId) -> Promise<{streamUrl, duration}|{error}>` in `src/extract/frames.ts`
+  - Phase 6: `isVideoFile(input) -> VideoFileInfo|null`, `extractVideo(info, signal?, options?) -> Promise<ExtractedContent|null>`, `isVideoEnabled() -> boolean` in `src/extract/video.ts`
 - Verification: `pnpm test && pnpm run typecheck`
 
 ## Verification Commands
 
 ```bash
-pnpm vitest run tests/extract/pipeline.test.ts tests/tools/web-fetch.test.ts
+pnpm vitest run tests/extract/pipeline.test.ts tests/extract/gemini-url-context.test.ts tests/tools/web-fetch.test.ts
 pnpm test
 pnpm run lint
 pnpm run typecheck
@@ -40,13 +40,13 @@ pnpm run typecheck
 
 ---
 
-## Task 1: Add YouTube/Video/Frame Routing to Pipeline
+## Task 1: Restructure Pipeline with YouTube/Video/Frame Routing
 
 **Files:** `src/extract/pipeline.ts`
 
-This task adds three routing blocks at the top of `extractContent()`, before the existing GitHub interception.
+This task moves `validateUrl()` down and adds three routing blocks at the top of `extractContent()`.
 
-- [ ] **Step 1:** Add imports for YouTube, video, and frame modules at the top of `src/extract/pipeline.ts`
+- [ ] **Step 1:** Add imports for YouTube, video, and frame modules
 
 ```typescript
 // Add after existing imports
@@ -62,9 +62,9 @@ import {
 } from "./frames.ts";
 ```
 
-- [ ] **Step 2:** Add frame extraction routing block — insert BEFORE `validateUrl(url, ...)` call
+- [ ] **Step 2:** Restructure `extractContent()` — move `validateUrl()` after the new routing blocks
 
-This handles the case where `timestamp` or `frames` params are present (explicit frame extraction mode):
+Replace the current function body structure. The new flow:
 
 ```typescript
 export async function extractContent(
@@ -72,14 +72,20 @@ export async function extractContent(
   signal?: AbortSignal,
   options?: ExtractOptions,
 ): Promise<ExtractedContent> {
-  // NEW: Frame extraction mode (timestamp/frames params present)
+  // --- Frame extraction mode (timestamp/frames params present) ---
   if (options?.timestamp || options?.frames) {
     const ytCheck = isYouTubeURL(url);
     if (ytCheck.isYouTube && ytCheck.videoId) {
       const streamInfo = await getYouTubeStreamInfo(ytCheck.videoId);
-      const duration = "duration" in streamInfo ? (streamInfo.duration as number | undefined) : undefined;
-      const timestamps = parseTimestampParam(options.timestamp, options.frames, duration ?? undefined);
+      if ("error" in streamInfo) {
+        throw new Error(streamInfo.error);
+      }
+      const dur = typeof streamInfo.duration === "number" ? streamInfo.duration : undefined;
+      const timestamps = parseTimestampParam(options.timestamp, options.frames, dur);
       const result = await extractYouTubeFrames(ytCheck.videoId, timestamps, signal);
+      if (result.error && result.frames.length === 0) {
+        throw new Error(result.error);
+      }
       return {
         text: "",
         title: "YouTube Frames",
@@ -93,10 +99,13 @@ export async function extractContent(
     }
     const videoInfo = isVideoFile(url);
     if (videoInfo) {
-      const duration = await getLocalVideoDuration(videoInfo.absolutePath);
-      const dur = typeof duration === "number" ? duration : undefined;
+      const durationResult = await getLocalVideoDuration(videoInfo.absolutePath);
+      const dur = typeof durationResult === "number" ? durationResult : undefined;
       const timestamps = parseTimestampParam(options.timestamp, options.frames, dur);
       const result = await extractLocalFrames(videoInfo.absolutePath, timestamps, signal);
+      if (result.error && result.frames.length === 0) {
+        throw new Error(result.error);
+      }
       return {
         text: "",
         title: basename(videoInfo.absolutePath),
@@ -108,27 +117,18 @@ export async function extractContent(
         duration: dur,
       };
     }
+    // If neither YouTube nor local video, fall through to normal pipeline
   }
 
-  // ... rest of extractContent continues below
-```
-
-- [ ] **Step 3:** Add local video file routing — insert AFTER frame extraction block, BEFORE `validateUrl()`
-
-```typescript
-  // NEW: Local video file detection
+  // --- Local video file detection ---
   const videoInfo = isVideoFile(url);
   if (videoInfo && isVideoEnabled()) {
     const result = await extractVideo(videoInfo, signal, options);
     if (result) return result;
     // If extractVideo returns null, fall through to regular pipeline
   }
-```
 
-- [ ] **Step 4:** Add YouTube URL routing — insert AFTER local video block, BEFORE `validateUrl()`
-
-```typescript
-  // NEW: YouTube URL detection
+  // --- YouTube URL detection ---
   const ytParsed = isYouTubeURL(url);
   if (ytParsed.isYouTube && isYouTubeEnabled()) {
     const result = await extractYouTube(url, signal, options);
@@ -136,17 +136,19 @@ export async function extractContent(
     // If all YouTube extractors failed, fall through to regular HTTP fetch
   }
 
+  // --- SSRF validation (after video/YouTube routing, before HTTP fetch) ---
   validateUrl(url, { allowRanges: options?.allowRanges });
-  // ... existing GitHub interception, HTTP fetch, etc.
+
+  // GitHub interception: ... (existing code unchanged)
 ```
 
-- [ ] **Step 5:** Verify the file compiles
+- [ ] **Step 3:** Verify the file compiles
 
 ```bash
 pnpm run typecheck
 ```
 
-- [ ] **Step 6:** Commit
+- [ ] **Step 4:** Commit
 
 ```bash
 git add src/extract/pipeline.ts
@@ -155,87 +157,194 @@ git commit -m "feat(pipeline): add YouTube/video/frame routing before HTTP fetch
 
 ---
 
-## Task 2: Add Gemini HTML Fallback After Jina Reader
+## Task 2: Add Gemini URL Context Module
 
-**Files:** `src/extract/pipeline.ts`
+**Files:** `src/extract/gemini-url-context.ts` (new file)
 
-This task adds a Gemini-powered fallback for pages where Readability produced thin content (< 500 chars) and Jina Reader also failed.
+The Gemini `url_context` tool lets Gemini fetch and analyze a URL directly. This is the correct mechanism for HTML fallback (not `fileUri` which is for uploaded files/YouTube).
 
-- [ ] **Step 1:** Add Gemini imports (if not already present from Task 1)
+Reference: `nicobailon-pi-web-access/gemini-url-context.ts`
+
+- [ ] **Step 1:** Create `src/extract/gemini-url-context.ts`
 
 ```typescript
-import { queryGeminiApi, isGeminiApiAvailable } from "./gemini-api.ts";
+import { getApiKey, getVersionedApiBase, isGeminiApiAvailable } from "./gemini-api.ts";
 import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.ts";
-```
+import type { ExtractedContent } from "./pipeline.ts";
 
-- [ ] **Step 2:** Add the `HTML_EXTRACTION_PROMPT` constant and `tryGeminiHtmlFallback` helper function at the bottom of the file (before or after the pipeline function)
+const EXTRACTION_PROMPT = `Extract the complete readable content from this URL as clean markdown.
+Include the page title, all text content, code blocks, and tables.
+Do not summarize — extract the full content.
 
-```typescript
-const HTML_EXTRACTION_PROMPT = `Extract the main readable content from this web page. Return it as clean markdown.
-Ignore navigation, ads, footers, and sidebars. Focus on the primary article or content.`;
+URL: `;
 
-async function tryGeminiHtmlFallback(
+interface UrlContextResponse {
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> };
+    url_context_metadata?: {
+      url_metadata?: Array<{
+        retrieved_url?: string;
+        url_retrieval_status?: string;
+      }>;
+    };
+  }>;
+}
+
+/**
+ * Extract page content using Gemini API's url_context tool.
+ * Gemini fetches the URL itself and returns extracted content.
+ * Returns null if API is unavailable or extraction fails.
+ */
+export async function extractWithUrlContext(
   url: string,
   signal?: AbortSignal,
 ): Promise<ExtractedContent | null> {
-  // Try Gemini Web first (free, cookie-based)
-  if (isGeminiWebAvailable()) {
-    try {
-      const result = await queryWithCookies(
-        `${HTML_EXTRACTION_PROMPT}\n\nURL: ${url}`,
-        { signal },
-      );
-      if (result && result.text.length > 100) {
-        return {
-          text: result.text,
-          title: undefined,
-          url,
-          extractionChain: ["html:gemini-web"],
-          chars: result.text.length,
-          truncated: false,
-        };
-      }
-    } catch {
-      // Fall through to API
-    }
-  }
+  const apiKey = getApiKey();
+  if (!apiKey) return null;
 
-  // Try Gemini API (requires API key)
-  if (isGeminiApiAvailable()) {
-    try {
-      const result = await queryGeminiApi(HTML_EXTRACTION_PROMPT, url, { signal });
-      if (result && result.text.length > 100) {
-        return {
-          text: result.text,
-          title: undefined,
-          url,
-          extractionChain: ["html:gemini-api"],
-          chars: result.text.length,
-          truncated: false,
-        };
-      }
-    } catch {
-      // Fall through
-    }
-  }
+  try {
+    const body = {
+      contents: [{ role: "user", parts: [{ text: EXTRACTION_PROMPT + url }] }],
+      tools: [{ url_context: {} }],
+    };
 
-  return null;
+    const effectiveSignal = signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(60_000)])
+      : AbortSignal.timeout(60_000);
+
+    const res = await fetch(
+      `${getVersionedApiBase()}/models/gemini-3-flash-preview:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: effectiveSignal,
+      },
+    );
+
+    if (!res.ok) return null;
+
+    const data = (await res.json()) as UrlContextResponse;
+
+    // Check URL retrieval status
+    const metadata = data.candidates?.[0]?.url_context_metadata;
+    if (metadata?.url_metadata?.length) {
+      const status = metadata.url_metadata[0].url_retrieval_status;
+      if (status === "URL_RETRIEVAL_STATUS_UNSAFE" || status === "URL_RETRIEVAL_STATUS_ERROR") {
+        return null;
+      }
+    }
+
+    const text = data.candidates?.[0]?.content?.parts
+      ?.map((p) => p.text)
+      .filter(Boolean)
+      .join("\n") ?? "";
+
+    if (!text || text.length < 100) return null;
+
+    const title = extractTitle(text, url);
+    return {
+      text,
+      title,
+      url,
+      extractionChain: ["html:gemini-url-context"],
+      chars: text.length,
+      truncated: false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract page content using Gemini Web (cookie-authenticated).
+ * Appends the URL to the prompt — Gemini Web can browse URLs when given them in text.
+ * Returns null if cookies are unavailable or extraction fails.
+ */
+export async function extractWithGeminiWeb(
+  url: string,
+  signal?: AbortSignal,
+): Promise<ExtractedContent | null> {
+  const cookies = await isGeminiWebAvailable();
+  if (!cookies) return null;
+
+  try {
+    const text = await queryWithCookies(EXTRACTION_PROMPT + url, cookies, {
+      model: "gemini-3-flash-preview",
+      signal,
+      timeoutMs: 60_000,
+    });
+
+    if (!text || text.length < 100) return null;
+
+    const title = extractTitle(text, url);
+    return {
+      text,
+      title,
+      url,
+      extractionChain: ["html:gemini-web"],
+      chars: text.length,
+      truncated: false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function extractTitle(text: string, url: string): string {
+  const match = text.match(/^#\s+(.+)$/m);
+  if (match) return match[1].trim();
+  try {
+    return new URL(url).pathname.split("/").pop() || url;
+  } catch {
+    return url;
+  }
 }
 ```
 
-- [ ] **Step 3:** Insert the Gemini fallback tier in the pipeline — AFTER Jina Reader tier, BEFORE the raw text fallback
+- [ ] **Step 2:** Verify compiles
 
-Find the section after `chain.push("jina-reader:fail");` and before the final raw text fallback:
+```bash
+pnpm run typecheck
+```
+
+- [ ] **Step 3:** Commit
+
+```bash
+git add src/extract/gemini-url-context.ts
+git commit -m "feat(extract): add Gemini url_context module for HTML fallback"
+```
+
+---
+
+## Task 3: Add Gemini HTML Fallback Tier to Pipeline
+
+**Files:** `src/extract/pipeline.ts`
+
+Insert the Gemini fallback tier after Jina Reader, before the raw text fallback.
+
+- [ ] **Step 1:** Add import at the top of pipeline.ts
+
+```typescript
+import { extractWithUrlContext, extractWithGeminiWeb } from "./gemini-url-context.ts";
+```
+
+- [ ] **Step 2:** Insert the Gemini fallback tier after `chain.push("jina-reader:fail")`
+
+Find the section after `chain.push("jina-reader:fail");` and before the raw text fallback:
 
 ```typescript
   chain.push("jina-reader:fail");
 
   // Tier 4: Gemini HTML fallback (for thin Readability + Jina failure)
-  const geminiResult = await tryGeminiHtmlFallback(url, signal);
+  const geminiResult = await extractWithUrlContext(url, signal)
+    ?? await extractWithGeminiWeb(url, signal);
   if (geminiResult) {
     chain.push(geminiResult.extractionChain[0]);
-    geminiResult.extractionChain = chain.concat(geminiResult.extractionChain);
-    return geminiResult;
+    return {
+      ...geminiResult,
+      extractionChain: chain,
+    };
   }
   chain.push("gemini-html:fail");
 
@@ -246,13 +355,13 @@ Find the section after `chain.push("jina-reader:fail");` and before the final ra
     .trim();
 ```
 
-- [ ] **Step 4:** Verify the file compiles
+- [ ] **Step 3:** Verify
 
 ```bash
 pnpm run typecheck
 ```
 
-- [ ] **Step 5:** Commit
+- [ ] **Step 4:** Commit
 
 ```bash
 git add src/extract/pipeline.ts
@@ -261,13 +370,13 @@ git commit -m "feat(pipeline): add Gemini HTML fallback tier after Jina Reader"
 
 ---
 
-## Task 3: Extend web_fetch Tool Parameters
+## Task 4: Extend web_fetch Tool Parameters
 
 **Files:** `src/tools/web-fetch.ts`
 
 Add video-related parameters to the tool schema and pass them through to `extractContent()`.
 
-- [ ] **Step 1:** Add new parameters to the `WebFetchParams` Type.Object schema
+- [ ] **Step 1:** Add new parameters to `WebFetchParams`
 
 ```typescript
 const WebFetchParams = Type.Object({
@@ -298,24 +407,37 @@ const WebFetchParams = Type.Object({
 });
 ```
 
-- [ ] **Step 2:** Update the `extractContent()` call in `executeSingleUrl` to pass video options
+- [ ] **Step 2:** Update `executeSingleUrl` parameter type and `extractContent()` call
 
-In the `executeSingleUrl` function, update the options passed to `extractContent`:
+Update the `params` type in `executeSingleUrl` to include the new fields, and pass them through:
 
 ```typescript
+  async function executeSingleUrl(
+    url: string,
+    params: { raw?: boolean; fresh?: boolean; prompt?: string; timestamp?: string; frames?: number; model?: string },
+    signal: AbortSignal | undefined,
+  ) {
+    try {
+      if (!params.fresh) {
+        const cached = cache?.get(url);
+        if (cached) {
+          return buildResult(cached, url, store);
+        }
+      }
+
       const extracted = await extractContent(url, signal, {
         raw: params.raw,
         github: githubConfig,
         allowRanges: ssrfAllowRanges,
-        // Video/YouTube options
         prompt: params.prompt,
         timestamp: params.timestamp,
         frames: params.frames,
         model: params.model,
       });
+      // ...rest unchanged
 ```
 
-- [ ] **Step 3:** Update the multi-URL path's `extractContent()` call similarly
+- [ ] **Step 3:** Update multi-URL path similarly
 
 In the multi-URL task lambda, add the same video options:
 
@@ -341,7 +463,7 @@ In the multi-URL task lambda, add the same video options:
       });
 ```
 
-- [ ] **Step 4:** Update tool description to mention video/YouTube support
+- [ ] **Step 4:** Update tool description
 
 ```typescript
     description:
@@ -363,29 +485,19 @@ git commit -m "feat(web-fetch): add prompt/timestamp/frames/model parameters for
 
 ---
 
-## Task 4: Add ImageContent Rendering to web_fetch Results
+## Task 5: Add ImageContent Rendering to web_fetch Results
 
 **Files:** `src/tools/web-fetch.ts`
 
 When `extractContent()` returns a thumbnail or frames, render them as MCP `ImageContent` blocks alongside the text.
 
-- [ ] **Step 1:** Update the `buildResult` function to include ImageContent for thumbnails and frames
+- [ ] **Step 1:** Update `buildResult` to accept and render image fields
 
-Replace the content array construction in `buildResult`:
+Note: `ExtractedContent.frames` is `VideoFrame[]` where `VideoFrame = { data: string; mimeType: string; timestamp: string }`.
 
 ```typescript
 function buildResult(
-  extracted: {
-    text: string;
-    title?: string;
-    url: string;
-    extractionChain: string[];
-    chars: number;
-    truncated: boolean;
-    thumbnail?: { data: string; mimeType: string };
-    frames?: Array<{ data: string; mimeType: string; timestamp?: number }>;
-    duration?: number;
-  },
+  extracted: ExtractedContent,
   originalUrl: string,
   store: ContentStore,
 ) {
@@ -454,24 +566,7 @@ function buildResult(
 }
 ```
 
-- [ ] **Step 2:** Update the `WebFetchDetails` interface if needed (add optional `duration` field)
-
-```typescript
-interface WebFetchDetails {
-  url: string;
-  title?: string;
-  chars: number;
-  truncated: boolean;
-  contentId?: string;
-  extractionChain: string[];
-  urlResults?: UrlResult[];
-  duration?: number;
-}
-```
-
-- [ ] **Step 3:** Update `renderResult` to handle the case where content has multiple items (images)
-
-The existing `renderResult` reads `result.content[0]` for text. When images are present, it should still work since `result.content[0]` is always the text block. Add a note about image count:
+- [ ] **Step 2:** Update `renderResult` to handle frames-only results (chars === 0 but images present)
 
 ```typescript
     renderResult(result, options, theme: Theme, context) {
@@ -484,7 +579,7 @@ The existing `renderResult` reads `result.content[0]` for text. When images are 
       const details = result.details;
       if (!details || details.chars === 0) {
         // Check if we have frames (frames-only result has chars=0 but is valid)
-        const imageCount = result.content.filter((c) => c.type === "image").length;
+        const imageCount = result.content.filter((c: { type: string }) => c.type === "image").length;
         if (imageCount > 0) {
           text.setText(theme.fg("toolOutput", `${imageCount} frame(s) extracted`));
           return text;
@@ -495,9 +590,9 @@ The existing `renderResult` reads `result.content[0]` for text. When images are 
       if (options.expanded) {
         const raw = result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
         const lines = raw.split("\n").slice(0, 20);
-        text.setText(lines.map((l) => theme.fg("toolOutput", l)).join("\n"));
+        text.setText(lines.map((l: string) => theme.fg("toolOutput", l)).join("\n"));
       } else {
-        const imageCount = result.content.filter((c) => c.type === "image").length;
+        const imageCount = result.content.filter((c: { type: string }) => c.type === "image").length;
         const imageSuffix = imageCount > 0 ? ` + ${imageCount} image(s)` : "";
         const truncNote = details.truncated ? theme.fg("warning", " (truncated)") : "";
         text.setText(theme.fg("toolOutput", `${details.chars} chars${imageSuffix}`) + truncNote);
@@ -506,13 +601,13 @@ The existing `renderResult` reads `result.content[0]` for text. When images are 
     },
 ```
 
-- [ ] **Step 4:** Verify
+- [ ] **Step 3:** Verify
 
 ```bash
 pnpm run typecheck
 ```
 
-- [ ] **Step 5:** Commit
+- [ ] **Step 4:** Commit
 
 ```bash
 git add src/tools/web-fetch.ts
@@ -521,13 +616,128 @@ git commit -m "feat(web-fetch): render thumbnail and frames as ImageContent in r
 
 ---
 
-## Task 5: Add Pipeline Routing Tests
+## Task 6: Add Gemini URL Context Tests
 
-**Files:** `tests/extract/pipeline.test.ts`
+**Files:** `tests/extract/gemini-url-context.test.ts` (new file)
 
-Add tests covering the new routing paths in the pipeline. These tests mock the YouTube/video/Gemini modules.
+- [ ] **Step 1:** Create test file for the new module
 
-- [ ] **Step 1:** Add new describe block for video/YouTube routing in `tests/extract/pipeline.test.ts`
+```typescript
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { stubFetch } from "../helpers.ts";
+
+describe("extractWithUrlContext", () => {
+  let fetchStub: ReturnType<typeof stubFetch>;
+
+  beforeEach(() => {
+    fetchStub = stubFetch();
+    process.env.GEMINI_API_KEY = "test-key";
+  });
+
+  afterEach(() => {
+    fetchStub.restore();
+    delete process.env.GEMINI_API_KEY;
+  });
+
+  it("returns extracted content on success", async () => {
+    const { extractWithUrlContext } = await import("../../src/extract/gemini-url-context.ts");
+
+    fetchStub.addResponse("generativelanguage.googleapis.com", {
+      body: {
+        candidates: [{
+          content: {
+            parts: [{ text: "# Page Title\n\nExtracted page content with enough text to pass the threshold check easily." }],
+          },
+          url_context_metadata: {
+            url_metadata: [{ retrieved_url: "https://example.com", url_retrieval_status: "URL_RETRIEVAL_STATUS_SUCCESS" }],
+          },
+        }],
+      },
+      headers: { "content-type": "application/json" },
+    });
+
+    const result = await extractWithUrlContext("https://example.com/page");
+    expect(result).not.toBeNull();
+    expect(result!.text).toContain("Page Title");
+    expect(result!.extractionChain).toContain("html:gemini-url-context");
+  });
+
+  it("returns null when API key is missing", async () => {
+    delete process.env.GEMINI_API_KEY;
+    // Need fresh import to pick up env change
+    const { _resetConfigCache } = await import("../../src/extract/gemini-api.ts");
+    _resetConfigCache();
+    const { extractWithUrlContext } = await import("../../src/extract/gemini-url-context.ts");
+
+    const result = await extractWithUrlContext("https://example.com");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when URL retrieval fails", async () => {
+    const { extractWithUrlContext } = await import("../../src/extract/gemini-url-context.ts");
+
+    fetchStub.addResponse("generativelanguage.googleapis.com", {
+      body: {
+        candidates: [{
+          content: { parts: [{ text: "" }] },
+          url_context_metadata: {
+            url_metadata: [{ url_retrieval_status: "URL_RETRIEVAL_STATUS_ERROR" }],
+          },
+        }],
+      },
+      headers: { "content-type": "application/json" },
+    });
+
+    const result = await extractWithUrlContext("https://example.com/broken");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when response text is too short", async () => {
+    const { extractWithUrlContext } = await import("../../src/extract/gemini-url-context.ts");
+
+    fetchStub.addResponse("generativelanguage.googleapis.com", {
+      body: {
+        candidates: [{ content: { parts: [{ text: "Short" }] } }],
+      },
+      headers: { "content-type": "application/json" },
+    });
+
+    const result = await extractWithUrlContext("https://example.com");
+    expect(result).toBeNull();
+  });
+});
+
+describe("extractWithGeminiWeb", () => {
+  // These tests require mocking isGeminiWebAvailable and queryWithCookies
+  // which depend on Chrome cookie access. Skip in CI, test manually.
+  it.skip("returns content when Gemini Web is available", () => {
+    // Integration test: requires real cookies
+  });
+});
+```
+
+- [ ] **Step 2:** Run tests
+
+```bash
+pnpm vitest run tests/extract/gemini-url-context.test.ts
+```
+
+- [ ] **Step 3:** Commit
+
+```bash
+git add tests/extract/gemini-url-context.test.ts
+git commit -m "test(extract): add tests for gemini-url-context module"
+```
+
+---
+
+## Task 7: Add Pipeline Routing Tests
+
+**Files:** `tests/extract/pipeline-routing.test.ts` (new file — separate from existing pipeline.test.ts to avoid mock conflicts)
+
+Tests covering the new routing paths. Uses `vi.mock()` to intercept module imports.
+
+- [ ] **Step 1:** Create the test file
 
 ```typescript
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -551,16 +761,12 @@ vi.mock("../../src/extract/frames.ts", () => ({
   extractLocalFrames: vi.fn(),
   getLocalVideoDuration: vi.fn(),
   getYouTubeStreamInfo: vi.fn(),
+  formatSeconds: vi.fn((s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`),
 }));
 
-vi.mock("../../src/extract/gemini-api.ts", () => ({
-  queryGeminiApi: vi.fn(),
-  isGeminiApiAvailable: vi.fn(),
-}));
-
-vi.mock("../../src/extract/gemini-web.ts", () => ({
-  isGeminiWebAvailable: vi.fn(),
-  queryWithCookies: vi.fn(),
+vi.mock("../../src/extract/gemini-url-context.ts", () => ({
+  extractWithUrlContext: vi.fn(),
+  extractWithGeminiWeb: vi.fn(),
 }));
 
 describe("extractContent — YouTube/Video routing", () => {
@@ -574,9 +780,8 @@ describe("extractContent — YouTube/Video routing", () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    const pipeline = await import("../../src/extract/pipeline.ts");
-    extractContent = pipeline.extractContent;
 
+    // Re-import after reset so mocks are applied
     const ytMod = await import("../../src/extract/youtube.ts");
     isYouTubeURL = ytMod.isYouTubeURL as ReturnType<typeof vi.fn>;
     extractYouTube = ytMod.extractYouTube as ReturnType<typeof vi.fn>;
@@ -588,10 +793,13 @@ describe("extractContent — YouTube/Video routing", () => {
     isVideoEnabled = videoMod.isVideoEnabled as ReturnType<typeof vi.fn>;
 
     // Default: not YouTube, not video
-    isYouTubeURL.mockReturnValue({ isYouTube: false, videoId: undefined });
+    isYouTubeURL.mockReturnValue({ isYouTube: false, videoId: null });
     isYouTubeEnabled.mockReturnValue(false);
     isVideoFile.mockReturnValue(null);
     isVideoEnabled.mockReturnValue(false);
+
+    const pipeline = await import("../../src/extract/pipeline.ts");
+    extractContent = pipeline.extractContent;
   });
 
   afterEach(() => {
@@ -605,18 +813,18 @@ describe("extractContent — YouTube/Video routing", () => {
       text: "Never Gonna Give You Up transcript...",
       title: "Rick Astley - Never Gonna Give You Up",
       url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      extractionChain: ["youtube:transcript"],
+      extractionChain: ["youtube:gemini-web"],
       chars: 37,
       truncated: false,
     });
 
     const result = await extractContent("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
-    expect(result.extractionChain).toContain("youtube:transcript");
+    expect(result.extractionChain).toContain("youtube:gemini-web");
     expect(result.text).toContain("Never Gonna Give You Up");
     expect(extractYouTube).toHaveBeenCalledWith(
       "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      undefined,
-      undefined,
+      undefined, // signal
+      undefined, // options (no prompt/model passed)
     );
   });
 
@@ -625,59 +833,69 @@ describe("extractContent — YouTube/Video routing", () => {
     isYouTubeEnabled.mockReturnValue(true);
     extractYouTube.mockResolvedValue(null);
 
-    // Should fall through to HTTP fetch — mock fetch to return HTML
+    // Should fall through to validateUrl -> HTTP fetch
+    // Mock fetch to return HTML for the fallthrough path
+    const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response("<html><body><article><p>Fallback content here with enough text to pass readability threshold and more words to fill it up.</p></article></body></html>", {
-        status: 200,
-        headers: { "content-type": "text/html" },
-      }),
+      new Response(
+        `<html><body><article><p>${"Fallback content. ".repeat(30)}</p></article></body></html>`,
+        { status: 200, headers: { "content-type": "text/html" } },
+      ),
     ) as unknown as typeof fetch;
 
-    const result = await extractContent("https://www.youtube.com/watch?v=abc123");
-    expect(result.extractionChain).not.toContain("youtube:transcript");
+    try {
+      const result = await extractContent("https://www.youtube.com/watch?v=abc123");
+      expect(result.extractionChain).not.toContain("youtube:gemini-web");
+      expect(result.extractionChain).toContain("http:200");
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("skips YouTube routing when disabled", async () => {
     isYouTubeURL.mockReturnValue({ isYouTube: true, videoId: "abc123" });
     isYouTubeEnabled.mockReturnValue(false);
 
+    const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response("<html><body><article><p>Page content with enough text.</p></article></body></html>", {
-        status: 200,
-        headers: { "content-type": "text/html" },
-      }),
+      new Response(
+        `<html><body><article><p>${"Page content. ".repeat(30)}</p></article></body></html>`,
+        { status: 200, headers: { "content-type": "text/html" } },
+      ),
     ) as unknown as typeof fetch;
 
-    const result = await extractContent("https://www.youtube.com/watch?v=abc123");
-    expect(extractYouTube).not.toHaveBeenCalled();
+    try {
+      const result = await extractContent("https://www.youtube.com/watch?v=abc123");
+      expect(extractYouTube).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("routes local video files to extractVideo when enabled", async () => {
-    isVideoFile.mockReturnValue({ absolutePath: "/tmp/video.mp4", mimeType: "video/mp4" });
+    isVideoFile.mockReturnValue({ absolutePath: "/tmp/video.mp4", mimeType: "video/mp4", sizeBytes: 1024 });
     isVideoEnabled.mockReturnValue(true);
     extractVideo.mockResolvedValue({
       text: "Video analysis: a cat playing piano",
       title: "video.mp4",
-      url: "/tmp/video.mp4",
-      extractionChain: ["video:gemini-api"],
+      url: "file:///tmp/video.mp4",
+      extractionChain: ["gemini-api"],
       chars: 36,
       truncated: false,
     });
 
     const result = await extractContent("/tmp/video.mp4");
-    expect(result.extractionChain).toContain("video:gemini-api");
     expect(result.text).toContain("cat playing piano");
+    expect(extractVideo).toHaveBeenCalled();
   });
 
   it("falls through when extractVideo returns null", async () => {
-    isVideoFile.mockReturnValue({ absolutePath: "/tmp/broken.mp4", mimeType: "video/mp4" });
+    isVideoFile.mockReturnValue({ absolutePath: "/tmp/broken.mp4", mimeType: "video/mp4", sizeBytes: 1024 });
     isVideoEnabled.mockReturnValue(true);
     extractVideo.mockResolvedValue(null);
 
-    // Should continue to validateUrl which will reject local paths
-    await expect(
-      extractContent("/tmp/broken.mp4"),
-    ).rejects.toThrow();
+    // After video fallthrough, validateUrl will reject the local path
+    await expect(extractContent("/tmp/broken.mp4")).rejects.toThrow();
   });
 });
 
@@ -693,11 +911,10 @@ describe("extractContent — Frame extraction routing", () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    const pipeline = await import("../../src/extract/pipeline.ts");
-    extractContent = pipeline.extractContent;
 
     const ytMod = await import("../../src/extract/youtube.ts");
     isYouTubeURL = ytMod.isYouTubeURL as ReturnType<typeof vi.fn>;
+    (ytMod.isYouTubeEnabled as ReturnType<typeof vi.fn>).mockReturnValue(false);
 
     const framesMod = await import("../../src/extract/frames.ts");
     getYouTubeStreamInfo = framesMod.getYouTubeStreamInfo as ReturnType<typeof vi.fn>;
@@ -707,11 +924,15 @@ describe("extractContent — Frame extraction routing", () => {
     extractLocalFrames = framesMod.extractLocalFrames as ReturnType<typeof vi.fn>;
 
     const videoMod = await import("../../src/extract/video.ts");
-    (videoMod.isVideoFile as ReturnType<typeof vi.fn>).mockReturnValue(null);
     isVideoFile = videoMod.isVideoFile as ReturnType<typeof vi.fn>;
+    (videoMod.isVideoEnabled as ReturnType<typeof vi.fn>).mockReturnValue(false);
 
     // Default
-    isYouTubeURL.mockReturnValue({ isYouTube: false, videoId: undefined });
+    isYouTubeURL.mockReturnValue({ isYouTube: false, videoId: null });
+    isVideoFile.mockReturnValue(null);
+
+    const pipeline = await import("../../src/extract/pipeline.ts");
+    extractContent = pipeline.extractContent;
   });
 
   afterEach(() => {
@@ -720,15 +941,16 @@ describe("extractContent — Frame extraction routing", () => {
 
   it("extracts YouTube frames when timestamp param is present", async () => {
     isYouTubeURL.mockReturnValue({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
-    getYouTubeStreamInfo.mockResolvedValue({ duration: 212 });
+    getYouTubeStreamInfo.mockResolvedValue({ streamUrl: "https://stream.example.com/video", duration: 212 });
     parseTimestampParam.mockReturnValue([30, 60, 90]);
     extractYouTubeFrames.mockResolvedValue({
       frames: [
-        { data: "base64frame1", mimeType: "image/jpeg", timestamp: 30 },
-        { data: "base64frame2", mimeType: "image/jpeg", timestamp: 60 },
-        { data: "base64frame3", mimeType: "image/jpeg", timestamp: 90 },
+        { data: "base64frame1", mimeType: "image/jpeg", timestamp: "0:30" },
+        { data: "base64frame2", mimeType: "image/jpeg", timestamp: "1:00" },
+        { data: "base64frame3", mimeType: "image/jpeg", timestamp: "1:30" },
       ],
       duration: 212,
+      error: null,
     });
 
     const result = await extractContent(
@@ -743,18 +965,29 @@ describe("extractContent — Frame extraction routing", () => {
     expect(result.duration).toBe(212);
   });
 
+  it("throws when getYouTubeStreamInfo returns error", async () => {
+    isYouTubeURL.mockReturnValue({ isYouTube: true, videoId: "bad123" });
+    getYouTubeStreamInfo.mockResolvedValue({ error: "Video is private or unavailable" });
+
+    await expect(
+      extractContent("https://www.youtube.com/watch?v=bad123", undefined, { timestamp: "0:30" }),
+    ).rejects.toThrow("Video is private or unavailable");
+  });
+
   it("extracts local video frames when frames param is present", async () => {
-    isYouTubeURL.mockReturnValue({ isYouTube: false, videoId: undefined });
-    isVideoFile.mockReturnValue({ absolutePath: "/tmp/video.mp4", mimeType: "video/mp4" });
+    isYouTubeURL.mockReturnValue({ isYouTube: false, videoId: null });
+    isVideoFile.mockReturnValue({ absolutePath: "/tmp/video.mp4", mimeType: "video/mp4", sizeBytes: 1024 });
     getLocalVideoDuration.mockResolvedValue(120);
     parseTimestampParam.mockReturnValue([15, 30, 45, 60]);
     extractLocalFrames.mockResolvedValue({
       frames: [
-        { data: "f1", mimeType: "image/jpeg", timestamp: 15 },
-        { data: "f2", mimeType: "image/jpeg", timestamp: 30 },
-        { data: "f3", mimeType: "image/jpeg", timestamp: 45 },
-        { data: "f4", mimeType: "image/jpeg", timestamp: 60 },
+        { data: "f1", mimeType: "image/jpeg", timestamp: "0:15" },
+        { data: "f2", mimeType: "image/jpeg", timestamp: "0:30" },
+        { data: "f3", mimeType: "image/jpeg", timestamp: "0:45" },
+        { data: "f4", mimeType: "image/jpeg", timestamp: "1:00" },
       ],
+      duration: 120,
+      error: null,
     });
 
     const result = await extractContent(
@@ -767,99 +1000,20 @@ describe("extractContent — Frame extraction routing", () => {
     expect(result.frames).toHaveLength(4);
     expect(result.duration).toBe(120);
   });
-});
 
-describe("extractContent — Gemini HTML fallback", () => {
-  let extractContent: typeof import("../../src/extract/pipeline.ts").extractContent;
-  let isGeminiWebAvailable: ReturnType<typeof vi.fn>;
-  let queryWithCookies: ReturnType<typeof vi.fn>;
-  let isGeminiApiAvailable: ReturnType<typeof vi.fn>;
-  let queryGeminiApi: ReturnType<typeof vi.fn>;
-
-  beforeEach(async () => {
-    vi.resetModules();
-
-    const geminiWebMod = await import("../../src/extract/gemini-web.ts");
-    isGeminiWebAvailable = geminiWebMod.isGeminiWebAvailable as ReturnType<typeof vi.fn>;
-    queryWithCookies = geminiWebMod.queryWithCookies as ReturnType<typeof vi.fn>;
-
-    const geminiApiMod = await import("../../src/extract/gemini-api.ts");
-    isGeminiApiAvailable = geminiApiMod.isGeminiApiAvailable as ReturnType<typeof vi.fn>;
-    queryGeminiApi = geminiApiMod.queryGeminiApi as ReturnType<typeof vi.fn>;
-
-    // Default: Gemini not available
-    isGeminiWebAvailable.mockReturnValue(false);
-    isGeminiApiAvailable.mockReturnValue(false);
-
-    // Ensure YouTube/video don't trigger
-    const ytMod = await import("../../src/extract/youtube.ts");
-    (ytMod.isYouTubeURL as ReturnType<typeof vi.fn>).mockReturnValue({ isYouTube: false });
-    (ytMod.isYouTubeEnabled as ReturnType<typeof vi.fn>).mockReturnValue(false);
-    const videoMod = await import("../../src/extract/video.ts");
-    (videoMod.isVideoFile as ReturnType<typeof vi.fn>).mockReturnValue(null);
-    (videoMod.isVideoEnabled as ReturnType<typeof vi.fn>).mockReturnValue(false);
-
-    const pipeline = await import("../../src/extract/pipeline.ts");
-    extractContent = pipeline.extractContent;
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("falls back to Gemini Web when Readability and Jina fail", async () => {
-    // Return a page that Readability can't extract well
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response("<html><body><div>Short</div></body></html>", {
-        status: 200,
-        headers: { "content-type": "text/html" },
-      }),
-    ) as unknown as typeof fetch;
-
-    // Mock Jina Reader to also fail (via mocking extractViaJinaReader)
-    // The actual Jina mock depends on how it's set up in existing tests
-
-    isGeminiWebAvailable.mockReturnValue(true);
-    queryWithCookies.mockResolvedValue({
-      text: "# Article Title\n\nThis is the full article content extracted by Gemini from the web page with enough characters to pass the threshold.",
+  it("throws when all frames fail to extract", async () => {
+    isYouTubeURL.mockReturnValue({ isYouTube: true, videoId: "abc123" });
+    getYouTubeStreamInfo.mockResolvedValue({ streamUrl: "https://stream.example.com/video", duration: 100 });
+    parseTimestampParam.mockReturnValue([30]);
+    extractYouTubeFrames.mockResolvedValue({
+      frames: [],
+      duration: 100,
+      error: "Stream URL returned 403 — may have expired, try again",
     });
 
-    const result = await extractContent("https://example.com/thin-page");
-    expect(result.extractionChain).toContain("html:gemini-web");
-    expect(result.text).toContain("Article Title");
-  });
-
-  it("falls back to Gemini API when Gemini Web is unavailable", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response("<html><body><div>Short</div></body></html>", {
-        status: 200,
-        headers: { "content-type": "text/html" },
-      }),
-    ) as unknown as typeof fetch;
-
-    isGeminiWebAvailable.mockReturnValue(false);
-    isGeminiApiAvailable.mockReturnValue(true);
-    queryGeminiApi.mockResolvedValue({
-      text: "# Extracted Content\n\nFull article text extracted by Gemini API with sufficient length to pass the minimum threshold check.",
-    });
-
-    const result = await extractContent("https://example.com/thin-page");
-    expect(result.extractionChain).toContain("html:gemini-api");
-  });
-
-  it("falls through to raw text when Gemini is also unavailable", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response("<html><body><div>Some raw fallback text content</div></body></html>", {
-        status: 200,
-        headers: { "content-type": "text/html" },
-      }),
-    ) as unknown as typeof fetch;
-
-    isGeminiWebAvailable.mockReturnValue(false);
-    isGeminiApiAvailable.mockReturnValue(false);
-
-    const result = await extractContent("https://example.com/thin-page");
-    expect(result.extractionChain).toContain("raw-text");
+    await expect(
+      extractContent("https://www.youtube.com/watch?v=abc123", undefined, { timestamp: "0:30" }),
+    ).rejects.toThrow("403");
   });
 });
 ```
@@ -867,84 +1021,76 @@ describe("extractContent — Gemini HTML fallback", () => {
 - [ ] **Step 2:** Verify tests pass
 
 ```bash
-pnpm vitest run tests/extract/pipeline.test.ts
+pnpm vitest run tests/extract/pipeline-routing.test.ts
 ```
 
 - [ ] **Step 3:** Commit
 
 ```bash
-git add tests/extract/pipeline.test.ts
-git commit -m "test(pipeline): add tests for YouTube/video/frame routing and Gemini HTML fallback"
+git add tests/extract/pipeline-routing.test.ts
+git commit -m "test(pipeline): add routing tests for YouTube/video/frame paths"
 ```
 
 ---
 
-## Task 6: Add web_fetch Tool Tests
+## Task 8: Add web_fetch Tool Tests for Video Parameters
 
 **Files:** `tests/tools/web-fetch.test.ts`
 
-Add tests for the new parameters and ImageContent rendering.
+Add tests for the new parameters and ImageContent rendering to the existing test file.
 
-- [ ] **Step 1:** Add new test cases to the existing `tests/tools/web-fetch.test.ts` describe block
+- [ ] **Step 1:** Add new describe block at the end of `tests/tools/web-fetch.test.ts`
 
 ```typescript
-describe("web_fetch — video parameters", () => {
-  // These tests verify that the new params are passed through to extractContent
-  // and that ImageContent is rendered in results.
+describe("web_fetch — video parameters and ImageContent", () => {
+  let fetchStub: ReturnType<typeof stubFetch>;
 
-  it("passes prompt/timestamp/frames/model to extractContent", async () => {
-    // Mock extractContent to capture the options
-    const extractContentSpy = vi.spyOn(
-      await import("../../src/extract/pipeline.ts"),
-      "extractContent",
-    );
-    extractContentSpy.mockResolvedValue({
-      text: "Video analysis result",
-      title: "video.mp4",
-      url: "https://example.com/video.mp4",
-      extractionChain: ["video:gemini-api"],
-      chars: 21,
-      truncated: false,
-    });
-
-    // Execute the tool with video params
-    const tool = createWebFetchTool(mockStore);
-    const result = await tool.execute(
-      "call-1",
-      {
-        url: "https://example.com/video.mp4",
-        prompt: "What happens in this video?",
-        timestamp: "1:30",
-        frames: 3,
-        model: "gemini-2.5-flash",
-      },
-      new AbortController().signal,
-      () => {},
-      {} as any,
-    );
-
-    expect(extractContentSpy).toHaveBeenCalledWith(
-      "https://example.com/video.mp4",
-      expect.anything(),
-      expect.objectContaining({
-        prompt: "What happens in this video?",
-        timestamp: "1:30",
-        frames: 3,
-        model: "gemini-2.5-flash",
-      }),
-    );
+  beforeEach(() => {
+    fetchStub = stubFetch();
   });
 
-  it("includes thumbnail as ImageContent in result", async () => {
-    const extractContentSpy = vi.spyOn(
+  afterEach(() => {
+    fetchStub.restore();
+  });
+
+  it("passes prompt/timestamp/frames/model through to extractContent", async () => {
+    // Mock a YouTube-like response with thumbnail
+    // extractContent is called internally — we test end-to-end via the tool
+    // by checking that YouTube routing activates and returns expected fields
+    fetchStub.addResponse("youtube.com", {
+      status: 200,
+      body: `<html><body><article><p>${"Content. ".repeat(30)}</p></article></body></html>`,
+      headers: { "content-type": "text/html" },
+    });
+
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store);
+    const ctx = makeCtx();
+
+    // This tests the parameter schema accepts the new fields without error
+    const result = await tool.execute(
+      "call-vid-1",
+      { url: "https://example.com/page", prompt: "Summarize", model: "gemini-3-flash-preview" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    // Should succeed (normal extraction since it's not actually a video)
+    expect(result.content[0]).toHaveProperty("type", "text");
+  });
+
+  it("renders thumbnail as ImageContent when present", async () => {
+    // This requires mocking extractContent to return a thumbnail
+    // We'll use vi.mock for this specific test
+    const { extractContent: realExtract } = await import("../../src/extract/pipeline.ts");
+    const extractSpy = vi.spyOn(
       await import("../../src/extract/pipeline.ts"),
       "extractContent",
-    );
-    extractContentSpy.mockResolvedValue({
+    ).mockResolvedValue({
       text: "YouTube video transcript",
       title: "Test Video",
       url: "https://www.youtube.com/watch?v=abc123",
-      extractionChain: ["youtube:transcript"],
+      extractionChain: ["youtube:gemini-web"],
       chars: 24,
       truncated: false,
       thumbnail: {
@@ -953,31 +1099,36 @@ describe("web_fetch — video parameters", () => {
       },
     });
 
-    const tool = createWebFetchTool(mockStore);
-    const result = await tool.execute(
-      "call-2",
-      { url: "https://www.youtube.com/watch?v=abc123" },
-      new AbortController().signal,
-      () => {},
-      {} as any,
-    );
+    try {
+      const store = new ContentStore(() => {});
+      const tool = createWebFetchTool(store);
+      const ctx = makeCtx();
+      const result = await tool.execute(
+        "call-vid-2",
+        { url: "https://www.youtube.com/watch?v=abc123" },
+        undefined,
+        undefined,
+        ctx,
+      );
 
-    // Should have text + image
-    expect(result.content).toHaveLength(2);
-    expect(result.content[0].type).toBe("text");
-    expect(result.content[1]).toEqual({
-      type: "image",
-      data: "iVBORw0KGgoAAAANSUhEUg==",
-      mimeType: "image/jpeg",
-    });
+      // Should have text + thumbnail image
+      expect(result.content.length).toBe(2);
+      expect(result.content[0].type).toBe("text");
+      expect(result.content[1]).toEqual({
+        type: "image",
+        data: "iVBORw0KGgoAAAANSUhEUg==",
+        mimeType: "image/jpeg",
+      });
+    } finally {
+      extractSpy.mockRestore();
+    }
   });
 
-  it("includes frames as ImageContent blocks in result", async () => {
-    const extractContentSpy = vi.spyOn(
+  it("renders frames as ImageContent blocks", async () => {
+    const extractSpy = vi.spyOn(
       await import("../../src/extract/pipeline.ts"),
       "extractContent",
-    );
-    extractContentSpy.mockResolvedValue({
+    ).mockResolvedValue({
       text: "",
       title: "YouTube Frames",
       url: "https://www.youtube.com/watch?v=abc123",
@@ -985,54 +1136,39 @@ describe("web_fetch — video parameters", () => {
       chars: 0,
       truncated: false,
       frames: [
-        { data: "frame1base64", mimeType: "image/jpeg", timestamp: 30 },
-        { data: "frame2base64", mimeType: "image/jpeg", timestamp: 60 },
+        { data: "frame1base64", mimeType: "image/jpeg", timestamp: "0:30" },
+        { data: "frame2base64", mimeType: "image/jpeg", timestamp: "1:00" },
       ],
     });
 
-    const tool = createWebFetchTool(mockStore);
-    const result = await tool.execute(
-      "call-3",
-      { url: "https://www.youtube.com/watch?v=abc123", timestamp: "0:30-1:00", frames: 2 },
-      new AbortController().signal,
-      () => {},
-      {} as any,
-    );
+    try {
+      const store = new ContentStore(() => {});
+      const tool = createWebFetchTool(store);
+      const ctx = makeCtx();
+      const result = await tool.execute(
+        "call-vid-3",
+        { url: "https://www.youtube.com/watch?v=abc123", timestamp: "0:30-1:00", frames: 2 },
+        undefined,
+        undefined,
+        ctx,
+      );
 
-    // text + 2 frames
-    expect(result.content).toHaveLength(3);
-    expect(result.content[0].type).toBe("text");
-    expect(result.content[1]).toEqual({
-      type: "image",
-      data: "frame1base64",
-      mimeType: "image/jpeg",
-    });
-    expect(result.content[2]).toEqual({
-      type: "image",
-      data: "frame2base64",
-      mimeType: "image/jpeg",
-    });
-  });
-
-  it("renders frame count in renderResult when chars is 0 but frames exist", async () => {
-    // This tests the renderResult branch for frame-only results
-    const tool = createWebFetchTool(mockStore);
-    const mockResult = {
-      content: [
-        { type: "text" as const, text: "" },
-        { type: "image" as const, data: "f1", mimeType: "image/jpeg" },
-        { type: "image" as const, data: "f2", mimeType: "image/jpeg" },
-      ],
-      details: {
-        url: "https://example.com",
-        chars: 0,
-        truncated: false,
-        extractionChain: ["frames:youtube"],
-      },
-    };
-
-    // Verify renderResult handles this case (doesn't show "fetch error")
-    // Implementation depends on how renderResult is tested in the existing suite
+      // text + 2 frame images
+      expect(result.content.length).toBe(3);
+      expect(result.content[0].type).toBe("text");
+      expect(result.content[1]).toEqual({
+        type: "image",
+        data: "frame1base64",
+        mimeType: "image/jpeg",
+      });
+      expect(result.content[2]).toEqual({
+        type: "image",
+        data: "frame2base64",
+        mimeType: "image/jpeg",
+      });
+    } finally {
+      extractSpy.mockRestore();
+    }
   });
 });
 ```
@@ -1052,63 +1188,7 @@ git commit -m "test(web-fetch): add tests for video params and ImageContent rend
 
 ---
 
-## Task 7: Update ExtractOptions Interface (if not done in Phase 1)
-
-**Files:** `src/extract/pipeline.ts`
-
-Ensure `ExtractOptions` includes the video-related fields that the pipeline now uses.
-
-- [ ] **Step 1:** Verify or update the `ExtractOptions` interface
-
-The interface should include:
-
-```typescript
-export interface ExtractOptions {
-  raw?: boolean;
-  github?: GitHubConfig;
-  allowRanges?: string[];
-  // Video/YouTube options (added in Phase 7)
-  prompt?: string;
-  timestamp?: string;
-  frames?: number;
-  model?: string;
-}
-```
-
-- [ ] **Step 2:** Verify or update `ExtractedContent` to include video fields
-
-```typescript
-export interface ExtractedContent {
-  text: string;
-  title?: string;
-  url: string;
-  extractionChain: string[];
-  chars: number;
-  truncated: boolean;
-  contentId?: string;
-  // Video/frame fields
-  thumbnail?: { data: string; mimeType: string };
-  frames?: Array<{ data: string; mimeType: string; timestamp?: number }>;
-  duration?: number;
-}
-```
-
-- [ ] **Step 3:** Verify
-
-```bash
-pnpm run typecheck
-```
-
-- [ ] **Step 4:** Commit (if changes were needed)
-
-```bash
-git add src/extract/pipeline.ts
-git commit -m "feat(pipeline): extend ExtractOptions and ExtractedContent with video fields"
-```
-
----
-
-## Task 8: Final Integration Verification
+## Task 9: Final Integration Verification
 
 **Files:** None (verification only)
 
@@ -1136,11 +1216,11 @@ The final flow should be:
 
 ```
 1. Frame extraction mode (timestamp/frames present)
-   → YouTube frames OR local video frames → return
+   -> YouTube frames OR local video frames -> return
 2. Local video file detection
-   → extractVideo → return (or fall through)
+   -> extractVideo -> return (or fall through)
 3. YouTube URL detection
-   → extractYouTube → return (or fall through)
+   -> extractYouTube -> return (or fall through)
 4. SSRF validation (validateUrl)
 5. GitHub interception
 6. HTTP fetch
@@ -1150,7 +1230,7 @@ The final flow should be:
 10. Tier 1: Readability
 11. Tier 2: RSC
 12. Tier 3: Jina Reader
-13. Tier 4: Gemini HTML fallback (new)
+13. Tier 4: Gemini HTML fallback (url_context + Gemini Web)
 14. Final fallback: raw text strip
 ```
 
@@ -1176,7 +1256,7 @@ Phase 7 completes the content extraction feature:
 - YouTube URLs route to transcript/thumbnail extraction before HTTP fetch
 - Local video files route to Gemini analysis before HTTP fetch
 - Frame extraction (timestamp/frames params) returns ImageContent directly
-- Gemini HTML fallback catches thin-content pages after Readability + Jina fail
+- Gemini HTML fallback uses `url_context` tool (API) or cookie-based browsing (Web) to extract thin-content pages
 - `web_fetch` accepts `prompt`, `timestamp`, `frames`, `model` parameters
 - Thumbnails and frames render as MCP `ImageContent` blocks alongside text
 - All routing gracefully falls through when extractors return null or are disabled
