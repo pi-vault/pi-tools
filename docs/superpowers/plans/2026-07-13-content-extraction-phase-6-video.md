@@ -17,8 +17,10 @@
 - Phases 1-5 complete (config types, gemini-api, gemini-web, youtube, frames)
 - Available from Phase 1: `VideoConfig`, `DEFAULT_VIDEO_CONFIG` from `src/config.ts`
 - Available from Phase 1: `ExtractedContent`, `ExtractOptions` from `src/extract/pipeline.ts`
-- Available from Phase 2: `queryGeminiApi`, `getApiKey`, `getVersionedApiBase` from `src/extract/gemini-api.ts`
-- Available from Phase 3: `isGeminiWebAvailable`, `queryWithCookies` from `src/extract/gemini-web.ts`
+- Available from Phase 2: `queryGeminiApi(prompt, videoUri, options)` from `src/extract/gemini-api.ts`
+- Available from Phase 2: `getApiKey()`, `getVersionedApiBase()` from `src/extract/gemini-api.ts`
+- Available from Phase 3: `isGeminiWebAvailable(): Promise<CookieMap | null>` from `src/extract/gemini-web.ts`
+- Available from Phase 3: `queryWithCookies(prompt, cookieMap, options)` from `src/extract/gemini-web.ts`
 - All tests passing: `pnpm test`
 
 ## Exports
@@ -58,8 +60,9 @@ pnpm run typecheck
 
 ```typescript
 import { execFileSync } from "node:child_process";
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { readFileSync, statSync } from "node:fs";
+import { basename, extname, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
 import { loadConfig } from "../config.ts";
 import type { ExtractedContent, ExtractOptions } from "./pipeline.ts";
 import { queryGeminiApi, getApiKey, getVersionedApiBase } from "./gemini-api.ts";
@@ -89,6 +92,7 @@ const VIDEO_EXTENSIONS: Record<string, string> = {
   ".wmv": "video/x-ms-wmv",
   ".flv": "video/x-flv",
   ".3gp": "video/3gpp",
+  ".3gpp": "video/3gpp",
 };
 
 const DEFAULT_PROMPT = `Extract the complete content of this video. Include:
@@ -137,27 +141,24 @@ export function isVideoFile(input: string): VideoFileInfo | null {
   let filePath = input;
   if (filePath.startsWith("file://")) {
     try {
-      filePath = decodeURIComponent(filePath.slice("file://".length));
+      filePath = decodeURIComponent(new URL(input).pathname);
     } catch {
       return null;
     }
   }
 
-  // Unicode space normalization (non-breaking space → regular space)
-  filePath = filePath.replace(/\u00A0/g, " ");
-
   // Check extension
-  const ext = path.extname(filePath).toLowerCase();
+  const ext = extname(filePath).toLowerCase();
   const mimeType = VIDEO_EXTENSIONS[ext];
   if (!mimeType) return null;
 
   // Resolve to absolute path
-  const absolutePath = path.resolve(filePath);
+  const absolutePath = resolve(filePath);
 
   // Check file exists and get size
-  let stat: fs.Stats;
+  let stat: ReturnType<typeof statSync>;
   try {
-    stat = fs.statSync(absolutePath);
+    stat = statSync(absolutePath);
   } catch {
     return null;
   }
@@ -208,26 +209,27 @@ async function uploadToFilesApi(
   signal?: AbortSignal,
 ): Promise<FileUploadResult> {
   const uploadBase = "https://generativelanguage.googleapis.com/upload/v1beta/files";
+  const displayName = basename(info.absolutePath);
 
   // Step 1: Initiate resumable upload
-  const initResponse = await fetch(`${uploadBase}?key=${apiKey}`, {
+  const initResponse = await fetch(uploadBase, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
       "X-Goog-Upload-Protocol": "resumable",
       "X-Goog-Upload-Command": "start",
       "X-Goog-Upload-Header-Content-Length": String(info.sizeBytes),
       "X-Goog-Upload-Header-Content-Type": info.mimeType,
+      "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      file: { displayName: path.basename(info.absolutePath) },
-    }),
+    body: JSON.stringify({ file: { display_name: displayName } }),
     signal,
   });
 
   if (!initResponse.ok) {
+    const text = await initResponse.text();
     throw new Error(
-      `Files API upload init failed: ${initResponse.status} ${initResponse.statusText}`,
+      `Files API upload init failed: ${initResponse.status} (${text.slice(0, 200)})`,
     );
   }
 
@@ -237,7 +239,7 @@ async function uploadToFilesApi(
   }
 
   // Step 2: Upload file data
-  const fileData = fs.readFileSync(info.absolutePath);
+  const fileData = await readFile(info.absolutePath);
   const uploadResponse = await fetch(uploadUrl, {
     method: "PUT",
     headers: {
@@ -250,8 +252,9 @@ async function uploadToFilesApi(
   });
 
   if (!uploadResponse.ok) {
+    const text = await uploadResponse.text();
     throw new Error(
-      `Files API upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`,
+      `Files API upload failed: ${uploadResponse.status} (${text.slice(0, 200)})`,
     );
   }
 
@@ -407,6 +410,13 @@ pnpm run typecheck
 
 **Files:** `src/extract/video.ts`
 
+**Key API contracts (verified against actual source):**
+- `queryGeminiApi(prompt: string, videoUri: string, options?: GeminiApiOptions): Promise<string>` — videoUri is a positional arg
+- `isGeminiWebAvailable(): Promise<CookieMap | null>` — async, returns CookieMap or null
+- `queryWithCookies(prompt: string, cookieMap: CookieMap, options?: GeminiWebOptions): Promise<string>` — cookieMap is positional
+- `ExtractedContent.thumbnail` is already a built-in field
+- `ExtractOptions.prompt` and `ExtractOptions.model` are already typed fields
+
 - [ ] **Step 1:** Add the main `extractVideo()` function with Gemini API primary path and Gemini Web fallback
 
 ```typescript
@@ -429,9 +439,8 @@ export async function extractVideo(
   options?: ExtractOptions,
 ): Promise<ExtractedContent | null> {
   const config = loadConfig();
-  const effectivePrompt = (options as Record<string, unknown>)?.prompt as string | undefined
-    ?? DEFAULT_PROMPT;
-  const effectiveModel = config.video?.preferredModel ?? "gemini-3-flash-preview";
+  const effectivePrompt = options?.prompt ?? DEFAULT_PROMPT;
+  const effectiveModel = options?.model ?? config.video?.preferredModel ?? "gemini-3-flash-preview";
 
   let text: string | null = null;
   const chain: string[] = [];
@@ -448,13 +457,11 @@ export async function extractVideo(
       await pollFileState(uploaded.name, apiKey, signal);
       chain.push("gemini-files-poll");
 
-      // Query with file reference
-      const response = await queryGeminiApi(effectivePrompt, {
+      // Query with file reference (videoUri positional, mimeType in options)
+      const response = await queryGeminiApi(effectivePrompt, uploaded.uri, {
         model: effectiveModel,
-        apiKey,
+        mimeType: info.mimeType,
         signal,
-        fileUri: uploaded.uri,
-        fileMimeType: info.mimeType,
       });
       text = response;
       chain.push("gemini-api");
@@ -470,21 +477,24 @@ export async function extractVideo(
   }
 
   // ----- Strategy 2: Gemini Web fallback -----
-  if (!text && isGeminiWebAvailable()) {
-    try {
-      const webResult = await queryWithCookies(effectivePrompt, {
-        files: [info.absolutePath],
-        signal,
-      });
-      if (webResult) {
-        text = webResult;
-        chain.push("gemini-web");
+  if (!text) {
+    const cookies = await isGeminiWebAvailable();
+    if (cookies) {
+      try {
+        const webResult = await queryWithCookies(effectivePrompt, cookies, {
+          files: [info.absolutePath],
+          signal,
+        });
+        if (webResult) {
+          text = webResult;
+          chain.push("gemini-web");
+        }
+      } catch (err) {
+        console.error(
+          `[video] Gemini Web failed for ${info.absolutePath}:`,
+          err instanceof Error ? err.message : err,
+        );
       }
-    } catch (err) {
-      console.error(
-        `[video] Gemini Web failed for ${info.absolutePath}:`,
-        err instanceof Error ? err.message : err,
-      );
     }
   }
 
@@ -494,7 +504,7 @@ export async function extractVideo(
   const thumbnail = extractVideoFrame(info.absolutePath, 1);
 
   // ----- Build result -----
-  const title = extractHeadingTitle(text) ?? path.basename(info.absolutePath);
+  const title = extractHeadingTitle(text) ?? basename(info.absolutePath);
 
   const result: ExtractedContent = {
     text,
@@ -503,12 +513,8 @@ export async function extractVideo(
     extractionChain: chain,
     chars: text.length,
     truncated: false,
+    thumbnail: thumbnail ?? undefined,
   };
-
-  // Attach thumbnail if available (extended field)
-  if (thumbnail) {
-    (result as Record<string, unknown>).thumbnail = thumbnail;
-  }
 
   return result;
 }
@@ -554,7 +560,6 @@ describe("isVideoFile", () => {
 
   it("detects a valid .mp4 path", () => {
     const testPath = "/tmp/test-video.mp4";
-    // Create a temporary file for the test
     fs.writeFileSync(testPath, Buffer.alloc(1024));
 
     try {
@@ -572,7 +577,6 @@ describe("isVideoFile", () => {
     const testPath = "/tmp/test-rel-video.webm";
     fs.writeFileSync(testPath, Buffer.alloc(512));
 
-    // Mock path.resolve to handle relative paths
     const spy = vi.spyOn(path, "resolve").mockReturnValue(testPath);
 
     try {
@@ -616,8 +620,6 @@ describe("isVideoFile", () => {
 
   it("returns null when file exceeds maxSizeMB", () => {
     const testPath = "/tmp/test-big-video.mp4";
-    // Write file larger than 50MB limit (write just enough to test the check)
-    // We'll mock statSync instead to avoid creating a large file
     const statSpy = vi.spyOn(fs, "statSync").mockReturnValue({
       isFile: () => true,
       size: 60 * 1024 * 1024, // 60MB > 50MB limit
@@ -639,22 +641,8 @@ describe("isVideoFile", () => {
     expect(isVideoFile("/tmp/video.mp4")).toBeNull();
   });
 
-  it("handles Unicode non-breaking spaces in paths", () => {
-    const testPath = "/tmp/test video.mp4"; // regular space
-    fs.writeFileSync(testPath, Buffer.alloc(128));
-
-    try {
-      // Input has non-breaking space (\u00A0) which should be normalized
-      const result = isVideoFile("/tmp/test\u00A0video.mp4");
-      expect(result).not.toBeNull();
-      expect(result!.absolutePath).toBe(testPath);
-    } finally {
-      fs.unlinkSync(testPath);
-    }
-  });
-
   it("recognizes all supported extensions", () => {
-    const extensions = [".mp4", ".mov", ".webm", ".avi", ".mpeg", ".mpg", ".wmv", ".flv", ".3gp"];
+    const extensions = [".mp4", ".mov", ".webm", ".avi", ".mpeg", ".mpg", ".wmv", ".flv", ".3gp", ".3gpp"];
     const statSpy = vi.spyOn(fs, "statSync").mockReturnValue({
       isFile: () => true,
       size: 1024,
@@ -718,9 +706,9 @@ vi.mock("../../src/extract/gemini-api.ts", () => ({
   getVersionedApiBase: vi.fn(() => "https://generativelanguage.googleapis.com/v1beta"),
 }));
 
-// Mock gemini-web module
+// Mock gemini-web module (isGeminiWebAvailable is async, returns CookieMap | null)
 vi.mock("../../src/extract/gemini-web.ts", () => ({
-  isGeminiWebAvailable: vi.fn(() => false),
+  isGeminiWebAvailable: vi.fn(async () => null),
   queryWithCookies: vi.fn(),
 }));
 
@@ -746,7 +734,7 @@ describe("extractVideo", () => {
     mockGetVersionedApiBase.mockReturnValue(
       "https://generativelanguage.googleapis.com/v1beta",
     );
-    mockIsGeminiWebAvailable.mockReturnValue(false);
+    mockIsGeminiWebAvailable.mockResolvedValue(null);
 
     // Mock global fetch for Files API operations
     global.fetch = vi.fn();
@@ -765,6 +753,7 @@ describe("extractVideo", () => {
       headers: new Headers({
         "x-goog-upload-url": "https://upload.example.com/resume/123",
       }),
+      text: async () => "",
     } as Response);
 
     // Mock upload PUT response
@@ -789,14 +778,9 @@ describe("extractVideo", () => {
     // Mock delete (fire-and-forget)
     mockFetch.mockResolvedValueOnce({ ok: true } as Response);
 
-    // Mock ffmpeg (extractVideoFrame) — execFileSync
-    const { execFileSync } = await import("node:child_process");
-    vi.mock("node:child_process", () => ({
-      execFileSync: vi.fn(() => Buffer.from("fake-jpeg-data")),
-    }));
-
-    // Mock fs.readFileSync for file upload
-    vi.spyOn(fs, "readFileSync").mockReturnValue(Buffer.alloc(testInfo.sizeBytes));
+    // Mock fs.readFile for file upload (node:fs/promises)
+    const fsPromises = await import("node:fs/promises");
+    vi.spyOn(fsPromises, "readFile").mockResolvedValue(Buffer.alloc(testInfo.sizeBytes));
 
     const result = await extractVideo(testInfo);
 
@@ -809,6 +793,15 @@ describe("extractVideo", () => {
     expect(result!.extractionChain).toContain("gemini-api");
     expect(result!.chars).toBeGreaterThan(0);
     expect(result!.truncated).toBe(false);
+
+    // Verify queryGeminiApi was called with correct positional args
+    expect(mockQueryGeminiApi).toHaveBeenCalledWith(
+      expect.any(String),         // prompt
+      "gs://files/abc123",        // videoUri (positional)
+      expect.objectContaining({   // options
+        mimeType: "video/mp4",
+      }),
+    );
   });
 
   it("returns null when both Gemini API and Web fail", async () => {
@@ -819,10 +812,11 @@ describe("extractVideo", () => {
       ok: false,
       status: 500,
       statusText: "Internal Server Error",
+      text: async () => "server error",
     } as Response);
 
-    // No web available
-    mockIsGeminiWebAvailable.mockReturnValue(false);
+    // No web available (async returns null)
+    mockIsGeminiWebAvailable.mockResolvedValue(null);
 
     const result = await extractVideo(testInfo);
     expect(result).toBeNull();
@@ -837,6 +831,7 @@ describe("extractVideo", () => {
       headers: new Headers({
         "x-goog-upload-url": "https://upload.example.com/resume/456",
       }),
+      text: async () => "",
     } as Response);
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -853,7 +848,8 @@ describe("extractVideo", () => {
     // Response without markdown heading
     mockQueryGeminiApi.mockResolvedValueOnce("Just plain text content without a heading.");
 
-    vi.spyOn(fs, "readFileSync").mockReturnValue(Buffer.alloc(testInfo.sizeBytes));
+    const fsPromises = await import("node:fs/promises");
+    vi.spyOn(fsPromises, "readFile").mockResolvedValue(Buffer.alloc(testInfo.sizeBytes));
 
     const result = await extractVideo(testInfo);
     expect(result).not.toBeNull();
@@ -891,7 +887,9 @@ describe("extractVideo — Gemini Web fallback", () => {
 
   it("uses Gemini Web when API key is unavailable", async () => {
     mockGetApiKey.mockReturnValue(null);
-    mockIsGeminiWebAvailable.mockReturnValue(true);
+    // isGeminiWebAvailable is async and returns CookieMap
+    const fakeCookies = { "__Secure-1PSID": "abc", "__Secure-1PSIDTS": "xyz" };
+    mockIsGeminiWebAvailable.mockResolvedValue(fakeCookies);
     mockQueryWithCookies.mockResolvedValueOnce(
       "# Screen Recording\n\nUser demonstrates VS Code shortcuts.",
     );
@@ -903,9 +901,10 @@ describe("extractVideo — Gemini Web fallback", () => {
     expect(result!.extractionChain).toContain("gemini-web");
     expect(result!.extractionChain).not.toContain("gemini-api");
 
-    // Verify queryWithCookies was called with file path
+    // Verify queryWithCookies was called with cookieMap and file path
     expect(mockQueryWithCookies).toHaveBeenCalledWith(
-      expect.any(String),
+      expect.any(String),       // prompt
+      fakeCookies,              // cookieMap (positional)
       expect.objectContaining({ files: [testInfo.absolutePath] }),
     );
   });
@@ -919,10 +918,12 @@ describe("extractVideo — Gemini Web fallback", () => {
       ok: false,
       status: 403,
       statusText: "Forbidden",
+      text: async () => "forbidden",
     } as Response);
 
     // Gemini Web succeeds
-    mockIsGeminiWebAvailable.mockReturnValue(true);
+    const fakeCookies = { "__Secure-1PSID": "abc", "__Secure-1PSIDTS": "xyz" };
+    mockIsGeminiWebAvailable.mockResolvedValue(fakeCookies);
     mockQueryWithCookies.mockResolvedValueOnce("# Fallback Result\n\nContent here.");
 
     const result = await extractVideo(testInfo);
@@ -931,19 +932,20 @@ describe("extractVideo — Gemini Web fallback", () => {
     expect(result!.extractionChain).toContain("gemini-web");
   });
 
-  it("returns null when Gemini Web also fails", async () => {
+  it("returns null when Gemini Web returns empty", async () => {
     mockGetApiKey.mockReturnValue(null);
-    mockIsGeminiWebAvailable.mockReturnValue(true);
-    mockQueryWithCookies.mockResolvedValueOnce(null);
+    const fakeCookies = { "__Secure-1PSID": "abc", "__Secure-1PSIDTS": "xyz" };
+    mockIsGeminiWebAvailable.mockResolvedValue(fakeCookies);
+    // queryWithCookies throws when response is empty (per actual implementation)
+    mockQueryWithCookies.mockRejectedValueOnce(new Error("Gemini Web returned empty response"));
 
     const result = await extractVideo(testInfo);
     expect(result).toBeNull();
   });
 
-  it("returns null when Gemini Web throws", async () => {
+  it("returns null when no cookies available and no API key", async () => {
     mockGetApiKey.mockReturnValue(null);
-    mockIsGeminiWebAvailable.mockReturnValue(true);
-    mockQueryWithCookies.mockRejectedValueOnce(new Error("Cookie expired"));
+    mockIsGeminiWebAvailable.mockResolvedValue(null);
 
     const result = await extractVideo(testInfo);
     expect(result).toBeNull();
@@ -976,26 +978,28 @@ describe("uploadToFilesApi (via extractVideo internals)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetApiKey.mockReturnValue("test-api-key");
-    mockIsGeminiWebAvailable.mockReturnValue(false);
+    mockIsGeminiWebAvailable.mockResolvedValue(null);
     global.fetch = vi.fn();
-    vi.spyOn(fs, "readFileSync").mockReturnValue(Buffer.alloc(testInfo.sizeBytes));
+
+    const fsPromises = require("node:fs/promises");
+    vi.spyOn(fsPromises, "readFile").mockResolvedValue(Buffer.alloc(testInfo.sizeBytes));
   });
 
-  it("throws when upload init returns no upload URL header", async () => {
+  it("fails gracefully when upload init returns no upload URL header", async () => {
     const mockFetch = vi.mocked(global.fetch);
 
     // Init response missing x-goog-upload-url
     mockFetch.mockResolvedValueOnce({
       ok: true,
       headers: new Headers({}),
+      text: async () => "",
     } as Response);
 
     const result = await extractVideo(testInfo);
-    // Should fail gracefully (caught internally) → null result
     expect(result).toBeNull();
   });
 
-  it("throws when upload PUT returns non-ok", async () => {
+  it("fails gracefully when upload PUT returns non-ok", async () => {
     const mockFetch = vi.mocked(global.fetch);
 
     mockFetch.mockResolvedValueOnce({
@@ -1003,6 +1007,7 @@ describe("uploadToFilesApi (via extractVideo internals)", () => {
       headers: new Headers({
         "x-goog-upload-url": "https://upload.example.com/resume/789",
       }),
+      text: async () => "",
     } as Response);
 
     // PUT fails
@@ -1010,6 +1015,7 @@ describe("uploadToFilesApi (via extractVideo internals)", () => {
       ok: false,
       status: 413,
       statusText: "Payload Too Large",
+      text: async () => "payload too large",
     } as Response);
 
     const result = await extractVideo(testInfo);
@@ -1027,9 +1033,11 @@ describe("pollFileState (via extractVideo internals)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetApiKey.mockReturnValue("test-api-key");
-    mockIsGeminiWebAvailable.mockReturnValue(false);
+    mockIsGeminiWebAvailable.mockResolvedValue(null);
     global.fetch = vi.fn();
-    vi.spyOn(fs, "readFileSync").mockReturnValue(Buffer.alloc(testInfo.sizeBytes));
+
+    const fsPromises = require("node:fs/promises");
+    vi.spyOn(fsPromises, "readFile").mockResolvedValue(Buffer.alloc(testInfo.sizeBytes));
     vi.useFakeTimers();
   });
 
@@ -1046,6 +1054,7 @@ describe("pollFileState (via extractVideo internals)", () => {
       headers: new Headers({
         "x-goog-upload-url": "https://upload.example.com/resume/poll1",
       }),
+      text: async () => "",
     } as Response);
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -1079,6 +1088,7 @@ describe("pollFileState (via extractVideo internals)", () => {
       headers: new Headers({
         "x-goog-upload-url": "https://upload.example.com/resume/poll2",
       }),
+      text: async () => "",
     } as Response);
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -1141,9 +1151,11 @@ describe("extractVideo — auto-thumbnail", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetApiKey.mockReturnValue("test-api-key");
-    mockIsGeminiWebAvailable.mockReturnValue(false);
+    mockIsGeminiWebAvailable.mockResolvedValue(null);
     global.fetch = vi.fn();
-    vi.spyOn(fs, "readFileSync").mockReturnValue(Buffer.alloc(testInfo.sizeBytes));
+
+    const fsPromises = require("node:fs/promises");
+    vi.spyOn(fsPromises, "readFile").mockResolvedValue(Buffer.alloc(testInfo.sizeBytes));
   });
 
   it("includes thumbnail when ffmpeg succeeds", async () => {
@@ -1155,6 +1167,7 @@ describe("extractVideo — auto-thumbnail", () => {
       headers: new Headers({
         "x-goog-upload-url": "https://upload.example.com/resume/thumb1",
       }),
+      text: async () => "",
     } as Response);
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -1177,13 +1190,9 @@ describe("extractVideo — auto-thumbnail", () => {
 
     const result = await extractVideo(testInfo);
     expect(result).not.toBeNull();
-    const thumbnail = (result as Record<string, unknown>).thumbnail as {
-      data: string;
-      mimeType: string;
-    } | undefined;
-    expect(thumbnail).toBeDefined();
-    expect(thumbnail!.mimeType).toBe("image/jpeg");
-    expect(thumbnail!.data).toBeTruthy();
+    expect(result!.thumbnail).toBeDefined();
+    expect(result!.thumbnail!.mimeType).toBe("image/jpeg");
+    expect(result!.thumbnail!.data).toBeTruthy();
   });
 
   it("still returns content when ffmpeg fails (thumbnail is optional)", async () => {
@@ -1195,6 +1204,7 @@ describe("extractVideo — auto-thumbnail", () => {
       headers: new Headers({
         "x-goog-upload-url": "https://upload.example.com/resume/thumb2",
       }),
+      text: async () => "",
     } as Response);
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -1218,8 +1228,7 @@ describe("extractVideo — auto-thumbnail", () => {
     const result = await extractVideo(testInfo);
     expect(result).not.toBeNull();
     expect(result!.text).toContain("Analysis");
-    const thumbnail = (result as Record<string, unknown>).thumbnail;
-    expect(thumbnail).toBeUndefined();
+    expect(result!.thumbnail).toBeUndefined();
   });
 });
 ```
@@ -1279,3 +1288,15 @@ git commit -m "feat(extract): add local video file detection and Gemini analysis
 3. **Non-blocking thumbnail**: ffmpeg failure is caught silently; text result is always returned if Gemini succeeds
 4. **Fire-and-forget cleanup**: `deleteGeminiFile` errors are logged but never block the response
 5. **Fallback order**: API key path first (more reliable), cookie-auth Web second (no upload quota)
+
+### Corrections from Original Plan (cross-checked against actual source)
+
+1. **`queryGeminiApi(prompt, videoUri, options)`** — `videoUri` is positional, not in options; options has `mimeType` not `fileMimeType`
+2. **`isGeminiWebAvailable()`** — is async, returns `Promise<CookieMap | null>`, not a sync boolean
+3. **`queryWithCookies(prompt, cookieMap, options)`** — `cookieMap` is positional, not omitted
+4. **`ExtractedContent.thumbnail`** — already a built-in field, no casting needed
+5. **`ExtractOptions.prompt` / `.model`** — already typed on the interface, no `as Record<...>` cast needed
+6. **Upload auth** — uses `x-goog-api-key` header (per reference), not `?key=` query param
+7. **File read** — uses async `readFile` from `node:fs/promises` for large video files
+8. **Extensions** — includes `.3gpp` (per reference implementation)
+9. **`file://` parsing** — uses `new URL(input).pathname` (robust, per reference)
