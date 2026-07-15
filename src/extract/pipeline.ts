@@ -1,3 +1,4 @@
+import { basename } from "node:path";
 import { DEFAULT_GITHUB_CONFIG, type GitHubConfig } from "../config.ts";
 import { validateUrl } from "../utils/ssrf.ts";
 import { extractGitHub, parseGitHubUrl } from "./github.ts";
@@ -5,6 +6,16 @@ import { extractHtml } from "./html.ts";
 import { extractPdf } from "./pdf.ts";
 import { extractRsc } from "./rsc.ts";
 import { extractViaJinaReader } from "./jina-reader.ts";
+import { isYouTubeURL, extractYouTube, isYouTubeEnabled } from "./youtube.ts";
+import { isVideoFile, extractVideo, isVideoEnabled } from "./video.ts";
+import {
+  parseTimestampParam,
+  extractYouTubeFrames,
+  extractLocalFrames,
+  getLocalVideoDuration,
+  getYouTubeStreamInfo,
+} from "./frames.ts";
+import { extractWithUrlContext, extractWithGeminiWeb } from "./gemini-url-context.ts";
 
 /**
  * Error thrown when the HTTP fetch fails in a way that a different fetch
@@ -67,6 +78,73 @@ export async function extractContent(
   signal?: AbortSignal,
   options?: ExtractOptions,
 ): Promise<ExtractedContent> {
+  // --- Frame extraction mode (timestamp/frames params present) ---
+  if (options?.timestamp || options?.frames) {
+    const ytCheck = isYouTubeURL(url);
+    if (ytCheck.isYouTube && ytCheck.videoId) {
+      const streamInfo = await getYouTubeStreamInfo(ytCheck.videoId);
+      if ("error" in streamInfo) {
+        throw new Error(streamInfo.error);
+      }
+      const dur = typeof streamInfo.duration === "number" ? streamInfo.duration : undefined;
+      const timestamps = parseTimestampParam(options.timestamp, options.frames, dur);
+      const result = await extractYouTubeFrames(ytCheck.videoId, timestamps, signal);
+      if (result.error && result.frames.length === 0) {
+        throw new Error(result.error);
+      }
+      return {
+        text: "",
+        title: "YouTube Frames",
+        url,
+        extractionChain: ["frames:youtube"],
+        chars: 0,
+        truncated: false,
+        frames: result.frames,
+        duration: result.duration ?? undefined,
+      };
+    }
+    const videoInfo = isVideoFile(url);
+    if (videoInfo) {
+      const durationResult = await getLocalVideoDuration(videoInfo.absolutePath);
+      const dur = typeof durationResult === "number" ? durationResult : undefined;
+      const timestamps = parseTimestampParam(options.timestamp, options.frames, dur);
+      const result = await extractLocalFrames(videoInfo.absolutePath, timestamps, signal);
+      if (result.error && result.frames.length === 0) {
+        throw new Error(result.error);
+      }
+      return {
+        text: "",
+        title: basename(videoInfo.absolutePath),
+        url,
+        extractionChain: ["frames:local"],
+        chars: 0,
+        truncated: false,
+        frames: result.frames,
+        duration: dur,
+      };
+    }
+    // Not YouTube or local video — fall through to normal pipeline
+  }
+
+  // --- Local video file detection ---
+  {
+    const videoInfo = isVideoFile(url);
+    if (videoInfo && isVideoEnabled()) {
+      const result = await extractVideo(videoInfo, signal, options);
+      if (result) return result;
+    }
+  }
+
+  // --- YouTube URL detection ---
+  {
+    const ytParsed = isYouTubeURL(url);
+    if (ytParsed.isYouTube && isYouTubeEnabled()) {
+      const result = await extractYouTube(url, signal, options);
+      if (result) return result;
+    }
+  }
+
+  // --- SSRF validation (after video/YouTube routing, before HTTP fetch) ---
   validateUrl(url, { allowRanges: options?.allowRanges });
 
   // GitHub interception: try structured extraction before HTML scraping.
@@ -202,6 +280,18 @@ export async function extractContent(
     };
   }
   chain.push("jina-reader:fail");
+
+  // Tier 4: Gemini HTML fallback
+  const geminiResult =
+    (await extractWithUrlContext(url, signal)) ?? (await extractWithGeminiWeb(url, signal));
+  if (geminiResult) {
+    chain.push(geminiResult.extractionChain[0]);
+    return {
+      ...geminiResult,
+      extractionChain: chain,
+    };
+  }
+  chain.push("gemini-html:fail");
 
   // Final fallback: raw text stripped of HTML
   const rawText = body
