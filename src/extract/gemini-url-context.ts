@@ -15,7 +15,6 @@ interface UrlContextResponse {
     content?: { parts?: Array<{ text?: string }> };
     url_context_metadata?: {
       url_metadata?: Array<{
-        retrieved_url?: string;
         url_retrieval_status?: string;
       }>;
     };

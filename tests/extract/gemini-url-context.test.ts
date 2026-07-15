@@ -2,11 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { stubFetch } from "../helpers.ts";
 import { _resetConfigCache } from "../../src/extract/gemini-api.ts";
 import { isGeminiWebAvailable, queryWithCookies } from "../../src/extract/gemini-web.ts";
+import type { CookieMap } from "../../src/extract/chrome-cookies.ts";
 
 vi.mock("../../src/extract/gemini-web.ts", () => ({
   isGeminiWebAvailable: vi.fn(),
   queryWithCookies: vi.fn(),
 }));
+
+const mockCookies = { cookie1: "value1" } as unknown as CookieMap;
 
 describe("extractWithUrlContext", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
@@ -114,9 +117,7 @@ describe("extractWithGeminiWeb", () => {
   });
 
   it("returns extracted content when cookies available and text is long enough", async () => {
-    vi.mocked(isGeminiWebAvailable).mockResolvedValue(
-      { cookie1: "value1" } as unknown as import("../../src/extract/chrome-cookies.ts").CookieMap,
-    );
+    vi.mocked(isGeminiWebAvailable).mockResolvedValue(mockCookies);
     vi.mocked(queryWithCookies).mockResolvedValue(
       "# Page Title\n\nThis is a long enough extracted page content that definitely exceeds the 100 character threshold.",
     );
@@ -129,9 +130,7 @@ describe("extractWithGeminiWeb", () => {
   });
 
   it("returns null when response text is too short", async () => {
-    vi.mocked(isGeminiWebAvailable).mockResolvedValue(
-      { cookie1: "value1" } as unknown as import("../../src/extract/chrome-cookies.ts").CookieMap,
-    );
+    vi.mocked(isGeminiWebAvailable).mockResolvedValue(mockCookies);
     vi.mocked(queryWithCookies).mockResolvedValue("Brief.");
     const { extractWithGeminiWeb } = await import("../../src/extract/gemini-url-context.ts");
     const result = await extractWithGeminiWeb("https://example.com");

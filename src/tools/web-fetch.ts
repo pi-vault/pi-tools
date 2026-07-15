@@ -251,7 +251,7 @@ export function createWebFetchTool(
 
       const urlResults: UrlResult[] = [];
       const outputParts: string[] = [];
-      const imageBlocks: Array<{ type: "image"; data: string; mimeType: string }> = [];
+      const imageBlocks: ImageBlock[] = [];
 
       for (const u of urls) {
         const outcome = resultByUrl.get(u)!;
@@ -286,24 +286,7 @@ export function createWebFetchTool(
         const header = extracted.title ? `## ${extracted.title}` : `## ${extracted.url}`;
         const meta = `Source: ${extracted.url} | ${extracted.chars} chars | contentId: ${contentId}`;
         outputParts.push(`${header}\n${meta}\n\n${preview}\n`);
-
-        // Collect thumbnail and frame image blocks
-        if (extracted.thumbnail) {
-          imageBlocks.push({
-            type: "image" as const,
-            data: extracted.thumbnail.data,
-            mimeType: extracted.thumbnail.mimeType,
-          });
-        }
-        if (extracted.frames) {
-          for (const frame of extracted.frames) {
-            imageBlocks.push({
-              type: "image" as const,
-              data: frame.data,
-              mimeType: frame.mimeType,
-            });
-          }
-        }
+        imageBlocks.push(...collectImageBlocks(extracted));
       }
 
       const failed = urlResults.filter((r) => r.error).length;
@@ -375,8 +358,23 @@ export function createWebFetchTool(
   };
 }
 
+type ImageBlock = { type: "image"; data: string; mimeType: string };
+
+function collectImageBlocks(extracted: ExtractedContent): ImageBlock[] {
+  const blocks: ImageBlock[] = [];
+  if (extracted.thumbnail) {
+    blocks.push({ type: "image", data: extracted.thumbnail.data, mimeType: extracted.thumbnail.mimeType });
+  }
+  if (extracted.frames) {
+    for (const frame of extracted.frames) {
+      blocks.push({ type: "image", data: frame.data, mimeType: frame.mimeType });
+    }
+  }
+  return blocks;
+}
+
 type ToolResult = {
-  content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>;
+  content: Array<{ type: "text"; text: string } | ImageBlock>;
   details: {
     url: string;
     title?: string;
@@ -419,27 +417,10 @@ function buildResult(
     .filter(Boolean)
     .join("\n");
 
-  const content: Array<
-    { type: "text"; text: string } | { type: "image"; data: string; mimeType: string }
-  > = [{ type: "text" as const, text: header + outputText }];
-
-  if (extracted.thumbnail) {
-    content.push({
-      type: "image" as const,
-      data: extracted.thumbnail.data,
-      mimeType: extracted.thumbnail.mimeType,
-    });
-  }
-
-  if (extracted.frames) {
-    for (const frame of extracted.frames) {
-      content.push({
-        type: "image" as const,
-        data: frame.data,
-        mimeType: frame.mimeType,
-      });
-    }
-  }
+  const content: ToolResult["content"] = [
+    { type: "text" as const, text: header + outputText },
+    ...collectImageBlocks(extracted),
+  ];
 
   return {
     content,

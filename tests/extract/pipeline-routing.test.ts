@@ -38,6 +38,12 @@ import {
 } from "../../src/extract/frames.ts";
 import { extractWithUrlContext, extractWithGeminiWeb } from "../../src/extract/gemini-url-context.ts";
 
+async function withMockFetch(response: Response, fn: () => Promise<void>) {
+  const orig = globalThis.fetch;
+  globalThis.fetch = vi.fn().mockResolvedValue(response) as unknown as typeof fetch;
+  try { await fn(); } finally { globalThis.fetch = orig; }
+}
+
 describe("extractContent — YouTube/Video routing", () => {
   beforeEach(() => {
     // Default: not YouTube, not video
@@ -80,41 +86,33 @@ describe("extractContent — YouTube/Video routing", () => {
     vi.mocked(isYouTubeEnabled).mockReturnValue(true);
     vi.mocked(extractYouTube).mockResolvedValue(null);
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockResolvedValue(
+    await withMockFetch(
       new Response(
         `<html><body><article><h1>Title</h1><p>${"Fallback content that is long enough. ".repeat(20)}</p></article></body></html>`,
         { status: 200, headers: { "content-type": "text/html" } },
       ),
-    ) as unknown as typeof fetch;
-
-    try {
-      const result = await extractContent("https://www.youtube.com/watch?v=abc123");
-      expect(extractYouTube).toHaveBeenCalled();
-      expect(result.extractionChain).toContain("readability");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+      async () => {
+        const result = await extractContent("https://www.youtube.com/watch?v=abc123");
+        expect(extractYouTube).toHaveBeenCalled();
+        expect(result.extractionChain).toContain("readability");
+      },
+    );
   });
 
   it("skips YouTube routing when isYouTubeEnabled returns false", async () => {
     vi.mocked(isYouTubeURL).mockReturnValue({ isYouTube: true, videoId: "abc123" });
     vi.mocked(isYouTubeEnabled).mockReturnValue(false);
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockResolvedValue(
+    await withMockFetch(
       new Response(
         `<html><body><article><p>${"Content. ".repeat(40)}</p></article></body></html>`,
         { status: 200, headers: { "content-type": "text/html" } },
       ),
-    ) as unknown as typeof fetch;
-
-    try {
-      await extractContent("https://www.youtube.com/watch?v=abc123");
-      expect(extractYouTube).not.toHaveBeenCalled();
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+      async () => {
+        await extractContent("https://www.youtube.com/watch?v=abc123");
+        expect(extractYouTube).not.toHaveBeenCalled();
+      },
+    );
   });
 
   it("routes local video files to extractVideo when enabled", async () => {
@@ -248,15 +246,6 @@ describe("extractContent — Gemini HTML fallback", () => {
   });
 
   it("uses Gemini URL context when Readability, RSC, and Jina all fail", async () => {
-    const originalFetch = globalThis.fetch;
-    // Return thin HTML that Readability won't extract
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response("<html><body><p>hi</p></body></html>", {
-        status: 200,
-        headers: { "content-type": "text/html" },
-      }),
-    ) as unknown as typeof fetch;
-
     vi.mocked(extractWithUrlContext).mockResolvedValue({
       text: "# Full Article\n\nThis is the complete content extracted by Gemini URL context.",
       title: "Full Article",
@@ -267,26 +256,23 @@ describe("extractContent — Gemini HTML fallback", () => {
     });
     vi.mocked(extractWithGeminiWeb).mockResolvedValue(null);
 
-    try {
-      const result = await extractContent("https://example.com/article");
-      expect(result.extractionChain).toContain("readability:thin");
-      expect(result.extractionChain).toContain("jina-reader:fail");
-      expect(result.extractionChain).toContain("html:gemini-url-context");
-      expect(result.text).toContain("Full Article");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
-  });
-
-  it("falls back to Gemini Web when URL context fails", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response("<html><body><p>short</p></body></html>", {
+    // Thin HTML that Readability won't extract
+    await withMockFetch(
+      new Response("<html><body><p>hi</p></body></html>", {
         status: 200,
         headers: { "content-type": "text/html" },
       }),
-    ) as unknown as typeof fetch;
+      async () => {
+        const result = await extractContent("https://example.com/article");
+        expect(result.extractionChain).toContain("readability:thin");
+        expect(result.extractionChain).toContain("jina-reader:fail");
+        expect(result.extractionChain).toContain("html:gemini-url-context");
+        expect(result.text).toContain("Full Article");
+      },
+    );
+  });
 
+  it("falls back to Gemini Web when URL context fails", async () => {
     vi.mocked(extractWithUrlContext).mockResolvedValue(null);
     vi.mocked(extractWithGeminiWeb).mockResolvedValue({
       text: "# Page\n\nGemini Web extracted this content from the page.",
@@ -297,34 +283,34 @@ describe("extractContent — Gemini HTML fallback", () => {
       truncated: false,
     });
 
-    try {
-      const result = await extractContent("https://example.com/page");
-      expect(result.extractionChain).toContain("jina-reader:fail");
-      expect(result.extractionChain).toContain("html:gemini-web");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    await withMockFetch(
+      new Response("<html><body><p>short</p></body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }),
+      async () => {
+        const result = await extractContent("https://example.com/page");
+        expect(result.extractionChain).toContain("jina-reader:fail");
+        expect(result.extractionChain).toContain("html:gemini-web");
+      },
+    );
   });
 
   it("falls through to raw-text when all Gemini options fail", async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockResolvedValue(
+    vi.mocked(extractWithUrlContext).mockResolvedValue(null);
+    vi.mocked(extractWithGeminiWeb).mockResolvedValue(null);
+
+    await withMockFetch(
       new Response("<html><body>raw content</body></html>", {
         status: 200,
         headers: { "content-type": "text/html" },
       }),
-    ) as unknown as typeof fetch;
-
-    vi.mocked(extractWithUrlContext).mockResolvedValue(null);
-    vi.mocked(extractWithGeminiWeb).mockResolvedValue(null);
-
-    try {
-      const result = await extractContent("https://example.com/raw");
-      expect(result.extractionChain).toContain("jina-reader:fail");
-      expect(result.extractionChain).toContain("raw-text");
-      expect(result.extractionChain).not.toContain("html:gemini-url-context");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+      async () => {
+        const result = await extractContent("https://example.com/raw");
+        expect(result.extractionChain).toContain("jina-reader:fail");
+        expect(result.extractionChain).toContain("raw-text");
+        expect(result.extractionChain).not.toContain("html:gemini-url-context");
+      },
+    );
   });
 });

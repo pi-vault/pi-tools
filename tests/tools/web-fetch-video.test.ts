@@ -164,27 +164,4 @@ describe("web_fetch — video parameters and ImageContent", () => {
     expect(imageBlocks[0]).toEqual({ type: "image", data: "frameData", mimeType: "image/jpeg" });
   });
 
-  it("renderResult shows frame count for frames-only result (chars=0 with images)", () => {
-    // The renderResult function should handle chars=0 when images are present
-    // We verify this via the details returned
-    // Note: renderResult itself uses TUI components (Text from pi-tui), hard to unit test
-    // Verify instead that details.chars=0 with content including images is structurally valid
-    const mockResult = {
-      content: [
-        { type: "text" as const, text: "" },
-        { type: "image" as const, data: "f1", mimeType: "image/jpeg" },
-      ],
-      details: {
-        url: "https://example.com",
-        chars: 0,
-        truncated: false,
-        extractionChain: ["frames:youtube"],
-      },
-    };
-
-    // Verify structure: text block + image block
-    expect(mockResult.content[0].type).toBe("text");
-    expect(mockResult.content[1].type).toBe("image");
-    expect(mockResult.details.chars).toBe(0);
-  });
 });
