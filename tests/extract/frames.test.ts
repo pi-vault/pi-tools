@@ -168,6 +168,24 @@ describe("getYouTubeStreamInfo", () => {
     });
   });
 
+  it("returns error on AbortError", async () => {
+    const err = Object.assign(new Error("aborted"), { name: "AbortError" });
+    vi.mocked(execFileSync).mockImplementation(() => { throw err; });
+    const result = await getYouTubeStreamInfo("abc123");
+    expect(result).toEqual({
+      error: "yt-dlp timed out fetching video info",
+    });
+  });
+
+  it("returns error on ETIMEDOUT", async () => {
+    const err = Object.assign(new Error("timed out"), { code: "ETIMEDOUT" });
+    vi.mocked(execFileSync).mockImplementation(() => { throw err; });
+    const result = await getYouTubeStreamInfo("abc123");
+    expect(result).toEqual({
+      error: "yt-dlp timed out fetching video info",
+    });
+  });
+
   it("returns descriptive error for private video", async () => {
     const err = Object.assign(new Error("yt-dlp error"), {
       stderr: Buffer.from("ERROR: Private video. Sign in if you've been granted access."),

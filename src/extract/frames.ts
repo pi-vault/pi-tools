@@ -42,7 +42,7 @@ function isTimeoutError(err: unknown): boolean {
 }
 
 function trimErrorText(text: string, maxLen = 200): string {
-  const trimmed = text.trim().split("\n")[0] ?? "";
+  const trimmed = text.trim().split(/\r?\n/)[0] ?? "";
   return trimmed.length > maxLen ? `${trimmed.slice(0, maxLen)}...` : trimmed;
 }
 
