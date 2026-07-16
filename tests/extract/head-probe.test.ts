@@ -44,7 +44,6 @@ describe("probeUrl", () => {
 
     const result = await probeUrl("https://example.com/page");
     expect(result.skip).toBe(false);
-    expect(result.contentType).toBe("text/html");
   });
 
   it("returns skip: false when HEAD returns 405", async () => {

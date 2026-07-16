@@ -72,8 +72,6 @@ const HEAD_TIMEOUT_MS = 5_000;
 export interface ProbeResult {
   skip: boolean;
   reason?: string;
-  contentType?: string;
-  contentLength?: number;
 }
 
 export async function probeUrl(
@@ -119,7 +117,7 @@ export async function probeUrl(
     }
   }
 
-  return { skip: false, contentType: contentType || undefined, contentLength };
+  return { skip: false };
 }
 
 export interface ExtractOptions {
