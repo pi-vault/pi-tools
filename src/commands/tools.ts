@@ -1,16 +1,23 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { getConfigPath } from "../config.ts";
 import type { ProviderRegistry } from "../providers/registry.ts";
 import type { ProviderTier } from "../providers/types.ts";
+import {
+  parseArgs,
+  handleToggle,
+  handleKey,
+  handleDefault,
+  handleTest,
+} from "./tools-subcommands.ts";
+import { handleEnhancedSetup } from "./tools-setup.ts";
+import { activityMonitor } from "../monitor/activity-monitor.ts";
+import { renderWidgetLines } from "../monitor/widget.ts";
 
 function formatNumber(n: number): string {
   if (!Number.isFinite(n)) return "unlimited";
   return n.toLocaleString("en-US");
 }
 
-function buildStatusTable(
+export function buildStatusTable(
   registry: ProviderRegistry,
   tierMap: ReadonlyMap<string, ProviderTier>,
 ): string {
@@ -89,52 +96,18 @@ function buildStatusTable(
   return [headerLine, divider, ...dataLines].join("\n");
 }
 
-async function handleInteractiveSetup(
-  ctx: ExtensionCommandContext,
-  allProviderNames: string[],
-): Promise<void> {
-  if (allProviderNames.length === 0) {
-    ctx.ui.notify("No providers available for configuration.");
-    return;
-  }
+const USAGE = `Usage: /tools [subcommand]
 
-  // Step 1: Ask about each provider
-  const providers: Record<string, { enabled: boolean; apiKey?: string }> = {};
-  const enabledNames: string[] = [];
-
-  for (const name of allProviderNames) {
-    const enabled = await ctx.ui.confirm("Provider setup", `Enable ${name}?`);
-    providers[name] = { enabled };
-
-    if (enabled) {
-      enabledNames.push(name);
-      const apiKey = await ctx.ui.input(`API key for ${name}`, "Leave empty to skip");
-      if (apiKey && apiKey.trim().length > 0) {
-        providers[name].apiKey = apiKey.trim();
-      }
-    }
-  }
-
-  // Step 2: Select default provider
-  const defaultOptions = ["auto", ...enabledNames];
-  const defaultProvider = (await ctx.ui.select("Default provider:", defaultOptions)) ?? "auto";
-
-  // Step 3: Build and write config
-  const config = {
-    defaultProvider,
-    providers,
-  };
-
-  const configPath = getConfigPath();
-  try {
-    fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-    ctx.ui.notify(`Configuration saved to ${configPath}`);
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    ctx.ui.notify(`Failed to save configuration: ${msg}`);
-  }
-}
+Subcommands:
+  (no args)          Interactive setup wizard
+  status             Show provider status table
+  reload             Refresh config from disk
+  enable <name>      Enable a provider
+  disable <name>     Disable a provider
+  key <name> <value> Set API key for a provider
+  test [name]        Test provider connection
+  default <name>     Set default provider
+  monitor [on|off]   Toggle activity monitor widget`;
 
 export function createToolsCommand(
   registry: ProviderRegistry,
@@ -142,25 +115,102 @@ export function createToolsCommand(
   allProviderNames?: string[],
   onReload?: () => void,
 ) {
+  let monitorUnsubscribe: (() => void) | null = null;
+
   return {
     name: "tools",
     description:
-      "Manage search/fetch providers. Use --status to see provider status, --reload to refresh config.",
+      "Manage search/fetch providers. Run with no args for setup wizard, or use subcommands (status, enable, disable, key, test, default, reload, monitor).",
+
     async handler(args: string, ctx: ExtensionCommandContext) {
-      if (args.includes("--reload")) {
+      const providers = allProviderNames ?? [];
+      const { subcommand, rest } = parseArgs(args);
+
+      // Legacy flag support
+      if (subcommand === "--status") {
+        ctx.ui.notify(buildStatusTable(registry, tierMap));
+        return;
+      }
+      if (subcommand === "--reload") {
         onReload?.();
-        const table = buildStatusTable(registry, tierMap);
-        ctx.ui.notify(table);
+        ctx.ui.notify(buildStatusTable(registry, tierMap));
         return;
       }
 
-      if (args.includes("--status")) {
-        const table = buildStatusTable(registry, tierMap);
-        ctx.ui.notify(table);
-        return;
-      }
+      switch (subcommand) {
+        case "":
+          await handleEnhancedSetup(ctx, providers, tierMap);
+          break;
 
-      await handleInteractiveSetup(ctx, allProviderNames ?? []);
+        case "status":
+          ctx.ui.notify(buildStatusTable(registry, tierMap));
+          break;
+
+        case "reload":
+          onReload?.();
+          ctx.ui.notify(buildStatusTable(registry, tierMap));
+          break;
+
+        case "enable":
+          handleToggle(ctx, rest[0] ?? "", true, providers);
+          onReload?.();
+          break;
+
+        case "disable":
+          handleToggle(ctx, rest[0] ?? "", false, providers);
+          onReload?.();
+          break;
+
+        case "key":
+          handleKey(ctx, rest[0] ?? "", rest[1], providers);
+          onReload?.();
+          break;
+
+        case "test":
+          await handleTest(ctx, rest[0], registry);
+          break;
+
+        case "default":
+          handleDefault(ctx, rest[0] ?? "", providers);
+          onReload?.();
+          break;
+
+        case "monitor": {
+          const action = rest[0];
+          if (action === "on") {
+            monitorUnsubscribe?.();
+            // Subscribe: re-render widget on every activity update
+            monitorUnsubscribe = activityMonitor.onUpdate(() => {
+              const lines = renderWidgetLines(activityMonitor.getEntries(), ctx.ui.theme);
+              ctx.ui.setWidget("pi-tools-activity", lines);
+            });
+            // Initial render
+            const lines = renderWidgetLines(activityMonitor.getEntries(), ctx.ui.theme);
+            ctx.ui.setWidget("pi-tools-activity", lines);
+            ctx.ui.notify("Activity monitor enabled");
+          } else if (action === "off") {
+            monitorUnsubscribe?.();
+            monitorUnsubscribe = null;
+            ctx.ui.setWidget("pi-tools-activity", undefined);
+            ctx.ui.notify("Activity monitor disabled");
+          } else {
+            ctx.ui.notify("Usage: /tools monitor [on|off]");
+          }
+          break;
+        }
+
+        default:
+          ctx.ui.notify(
+            `Unknown subcommand "${subcommand}".\n\n${USAGE}`,
+          );
+      }
+    },
+
+    /** Called during session lifecycle to clean up monitor state. */
+    resetMonitor(): void {
+      monitorUnsubscribe?.();
+      monitorUnsubscribe = null;
+      activityMonitor.clear();
     },
   };
 }

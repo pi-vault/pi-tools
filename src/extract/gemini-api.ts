@@ -1,4 +1,5 @@
 import { loadConfig, resolveApiKey, type GeminiConfig } from "../config.ts";
+import { activityMonitor } from "../monitor/activity-monitor.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -203,6 +204,7 @@ export async function queryGeminiApi(
     ],
   };
 
+  const entryId = activityMonitor.logStart({ type: "api", query: `gemini:${model}` });
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...buildAuthHeaders() },
@@ -211,10 +213,13 @@ export async function queryGeminiApi(
   });
 
   if (!res.ok) {
+    activityMonitor.logError(entryId, `HTTP ${res.status}`);
     const errorText = await res.text();
     throw new Error(
       `Gemini API error ${res.status}: ${errorText.slice(0, 300)}`,
     );
+  } else {
+    activityMonitor.logComplete(entryId, res.status);
   }
 
   const data = (await res.json()) as GenerateContentResponse;

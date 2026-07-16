@@ -6,5 +6,6 @@ export default defineConfig({
     globals: true,
     include: ["tests/**/*.test.ts"],
     setupFiles: ["tests/setup-node-spies.ts"],
+    clearMocks: true,
   },
 });

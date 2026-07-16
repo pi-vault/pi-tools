@@ -180,4 +180,9 @@ export default function createExtension(pi: ExtensionAPI): void {
     description: toolsCommand.description,
     handler: toolsCommand.handler,
   });
+
+  // Session lifecycle: reset activity monitor on session boundaries
+  pi.on("session_shutdown", () => {
+    toolsCommand.resetMonitor();
+  });
 }

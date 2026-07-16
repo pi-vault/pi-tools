@@ -24,6 +24,7 @@ import {
   getYouTubeStreamInfo,
 } from "./frames.ts";
 import { extractWithUrlContext, extractWithGeminiWeb } from "./gemini-url-context.ts";
+import { activityMonitor } from "../monitor/activity-monitor.ts";
 
 /**
  * Error thrown when the HTTP fetch fails in a way that a different fetch
@@ -257,6 +258,7 @@ export async function extractContent(
 
   const chain: string[] = [];
 
+  const fetchEntryId = activityMonitor.logStart({ type: "fetch", url });
   let response: Response;
   try {
     response = await fetch(url, {
@@ -264,7 +266,9 @@ export async function extractContent(
       signal,
       redirect: "follow",
     });
+    activityMonitor.logComplete(fetchEntryId, response.status);
   } catch (err) {
+    activityMonitor.logError(fetchEntryId, err instanceof Error ? err.message : String(err));
     throw new RetryableExtractionError(err instanceof Error ? err.message : String(err));
   }
 
@@ -274,13 +278,16 @@ export async function extractContent(
     response.headers.get("cf-mitigated") === "challenge"
   ) {
     chain.push("cf-challenge");
+    const retryEntryId = activityMonitor.logStart({ type: "fetch", url: `${url} (cf-retry)` });
     try {
       response = await fetch(url, {
         headers: { ...BROWSER_HEADERS, "User-Agent": HONEST_USER_AGENT },
         signal,
         redirect: "follow",
       });
+      activityMonitor.logComplete(retryEntryId, response.status);
     } catch (err) {
+      activityMonitor.logError(retryEntryId, err instanceof Error ? err.message : String(err));
       throw new RetryableExtractionError(err instanceof Error ? err.message : String(err));
     }
   }
