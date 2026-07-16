@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { DEFAULT_GITHUB_CONFIG, resolveApiKey, type GitHubConfig, type GeminiConfig, type PdfConfig } from "../config.ts";
+import { loadMergedConfig, resolveApiKey } from "../config.ts";
 import { validateUrl } from "../utils/ssrf.ts";
 import { extractGitHub, parseGitHubUrl } from "./github.ts";
 import { extractHtml } from "./html.ts";
@@ -152,14 +152,10 @@ export async function probeUrl(
 
 export interface ExtractOptions {
   raw?: boolean;
-  github?: GitHubConfig;
-  allowRanges?: string[];
   prompt?: string;
   timestamp?: string;
   frames?: number;
   model?: string;
-  pdf?: PdfConfig;
-  gemini?: GeminiConfig;
   ctx?: import("@earendil-works/pi-coding-agent").ExtensionContext;
 }
 
@@ -168,6 +164,8 @@ export async function extractContent(
   signal?: AbortSignal,
   options?: ExtractOptions,
 ): Promise<ExtractedContent> {
+  const { github, ssrf, pdf, gemini } = loadMergedConfig(process.cwd());
+
   // --- Frame extraction mode (timestamp/frames params present) ---
   if (options?.timestamp || options?.frames) {
     const ytCheck = isYouTubeURL(url);
@@ -236,16 +234,15 @@ export async function extractContent(
   }
 
   // --- SSRF validation (after video/YouTube routing, before HTTP fetch) ---
-  validateUrl(url, { allowRanges: options?.allowRanges });
+  validateUrl(url, { allowRanges: ssrf.allowRanges });
 
   // GitHub interception: try structured extraction before HTML scraping.
   // Only fires for content URLs (blob, tree, root, raw).
   // Returns null for non-content URLs (issues, PRs, etc.) -> falls through.
   const ghParsed = parseGitHubUrl(url);
   if (ghParsed && ghParsed.type !== "unknown") {
-    const githubConfig = options?.github ?? DEFAULT_GITHUB_CONFIG;
-    if (githubConfig.enabled) {
-      const ghResult = await extractGitHub(ghParsed, signal, githubConfig);
+    if (github.enabled) {
+      const ghResult = await extractGitHub(ghParsed, signal, github);
       if (ghResult) return ghResult;
     }
   }
@@ -356,13 +353,12 @@ export async function extractContent(
     }
 
     // OCR fallback for scanned PDFs
-    const pdfConfig = options?.pdf;
-    if (pdfConfig?.ocrEnabled !== false) {
+    if (pdf?.ocrEnabled !== false) {
       chain.push("pdf:scanned");
       try {
         const rasterResult = await rasterizePdfPages(buffer, {
-          maxPages: pdfConfig?.ocrMaxPages ?? 5,
-          dpi: pdfConfig?.ocrDpi ?? 150,
+          maxPages: pdf?.ocrMaxPages ?? 5,
+          dpi: pdf?.ocrDpi ?? 150,
         });
 
         // Strategy 1: If calling model supports images, return content blocks
@@ -383,12 +379,12 @@ export async function extractContent(
         }
 
         // Strategy 2: Call Gemini vision API directly
-        const geminiKey = getGeminiApiKey() ?? resolveApiKey(options?.gemini?.apiKey);
+        const geminiKey = getGeminiApiKey() ?? resolveApiKey(gemini?.apiKey);
         if (geminiKey) {
           const ocrText = await extractTextWithGeminiVision(
             rasterResult.images,
             geminiKey,
-            { geminiBaseUrl: options?.gemini?.baseUrl },
+            { geminiBaseUrl: gemini?.baseUrl },
             signal,
           );
           if (ocrText && ocrText.length > 100) {

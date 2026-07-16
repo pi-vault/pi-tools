@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as configModule from "../../src/config.ts";
 import { RetryableExtractionError, extractContent } from "../../src/extract/pipeline.ts";
 import { stubFetch } from "../helpers.ts";
 
@@ -284,6 +285,7 @@ describe("GitHub URL interception in extractContent", () => {
 
   afterEach(() => {
     fetchStub.restore();
+    vi.restoreAllMocks();
   });
 
   it("intercepts blob URL and returns raw file content", async () => {
@@ -412,17 +414,25 @@ describe("GitHub URL interception in extractContent", () => {
     expect(result.extractionChain).toContain("raw");
   });
 
-  it("skips GitHub interception when options.github.enabled is false", async () => {
-    fetchStub.addResponse("github.com", {
+  it("skips GitHub interception when config.github.enabled is false", async () => {
+    const config = configModule.loadMergedConfig(process.cwd());
+    vi.spyOn(configModule, "loadMergedConfig").mockReturnValue({
+      ...config,
+      github: { enabled: false, maxRepoSizeMB: 350, cloneTimeoutSeconds: 30 },
+    });
+    fetchStub.addResponse("raw.githubusercontent.com/owner/repo/main/file.ts", {
+      body: "const x = 1;",
+      headers: { "content-type": "text/plain" },
+    });
+    fetchStub.addResponse("github.com/owner/repo/blob/main/file.ts", {
       body: GOOD_HTML,
       headers: { "content-type": "text/html; charset=utf-8" },
     });
+
     const result = await extractContent(
       "https://github.com/owner/repo/blob/main/file.ts",
-      undefined,
-      { github: { enabled: false, maxRepoSizeMB: 350, cloneTimeoutSeconds: 30 } },
     );
-    // Should fall through to HTTP extraction, not GitHub interception
     expect(result.extractionChain).toContain("http:200");
+    expect(result.extractionChain).not.toContain("github:raw");
   });
 });
