@@ -6,9 +6,23 @@
 
 **Architecture:** Activity monitor is a standalone module. The `/tools` command is refactored from flag-based (`--status`, `--reload`) to subcommand-based (`/tools status`, `/tools enable brave`). The enhanced wizard replaces the current sequential provider iteration with a tiered quick-setup flow.
 
-**Tech Stack:** TypeScript, Vitest, Pi ExtensionAPI (`@earendil-works/pi-coding-agent`), Pi TUI (`@earendil-works/pi-tui`)
+**Tech Stack:** TypeScript, Vitest, Pi ExtensionAPI (`@earendil-works/pi-coding-agent`)
 
 **Spec:** `docs/superpowers/specs/2026-07-15-feature-adoption-design.md` (Phase 5)
+
+> **Revision (2026-07-15):** Plan validated against actual Pi Extension API type
+> signatures (`@earendil-works/pi-coding-agent` types.ts) and the reference
+> `pi-web-access` extension. Key fixes:
+>
+> 1. **Widget rendering** uses `ctx.ui.setWidget(key, string[])` overload — no
+>    `Text` import from `@earendil-works/pi-tui` needed.
+> 2. **Theme access** via `ctx.ui.theme` (public property) — removed unsafe casts.
+> 3. **widget.ts** is now a pure formatting module (exports `renderWidgetLines`
+>    returning `string[]`); `updateWidget`/`removeWidget` helpers removed.
+> 4. **`session_shutdown`** handler uses the properly-typed event name (removed
+>    `as any` cast).
+> 5. **Status indicator colors** use `"success"`/`"error"` theme keys (matching
+>    Pi's theme contract) instead of `"green"`/`"red"`.
 
 ---
 
@@ -485,13 +499,16 @@ Expected: FAIL — module `../../src/monitor/widget.ts` does not exist.
 
 Create `src/monitor/widget.ts`:
 
-```typescript
-import { Text } from "@earendil-works/pi-tui";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ActivityEntry } from "./activity-monitor.ts";
-import { activityMonitor } from "./activity-monitor.ts";
+> **API note:** `ctx.ui.setWidget(key, content)` accepts `string[] | undefined`
+> (simple text lines) or a factory function. We use the `string[]` overload
+> which is simpler and avoids importing TUI components. Theme is accessed via
+> `ctx.ui.theme` (a public property on `ExtensionUIContext`).
 
-interface Theme {
+```typescript
+import type { ActivityEntry } from "./activity-monitor.ts";
+
+/** Minimal theme contract for testability — matches ctx.ui.theme at runtime. */
+export interface ThemeLike {
   fg: (color: string, text: string) => string;
 }
 
@@ -515,16 +532,16 @@ function formatTarget(entry: ActivityEntry): string {
 
 function statusIndicator(
   entry: ActivityEntry,
-  theme: Theme,
+  theme: ThemeLike,
 ): string {
   if (entry.status === null) return "\u22EF"; // pending: ⋯
-  if (entry.status >= 200 && entry.status < 400) return theme.fg("green", "\u2713"); // ✓
-  return theme.fg("red", "\u2717"); // ✗
+  if (entry.status >= 200 && entry.status < 400) return theme.fg("success", "\u2713"); // ✓
+  return theme.fg("error", "\u2717"); // ✗
 }
 
 export function formatEntryLine(
   entry: ActivityEntry,
-  theme: Theme,
+  theme: ThemeLike,
 ): string {
   const typeLabel = entry.type === "api" ? "API" : "GET";
   const target = formatTarget(entry);
@@ -543,7 +560,7 @@ export function formatEntryLine(
 
 export function renderWidgetLines(
   entries: ReadonlyArray<ActivityEntry>,
-  theme: Theme,
+  theme: ThemeLike,
 ): string[] {
   const lines: string[] = [];
 
@@ -560,24 +577,12 @@ export function renderWidgetLines(
   lines.push(theme.fg("accent", "-".repeat(60)));
   return lines;
 }
-
-export function updateWidget(ctx: ExtensionContext): void {
-  const theme = (ctx.ui as unknown as { theme: Theme }).theme;
-  const entries = activityMonitor.getEntries();
-  const lines = renderWidgetLines(entries, theme);
-  (ctx.ui as unknown as { setWidget: (key: string, content: unknown) => void }).setWidget(
-    "pi-tools-activity",
-    new Text(lines.join("\n"), 0, 0),
-  );
-}
-
-export function removeWidget(ctx: ExtensionContext): void {
-  (ctx.ui as unknown as { setWidget: (key: string, content: unknown) => void }).setWidget(
-    "pi-tools-activity",
-    undefined,
-  );
-}
 ```
+
+> **Removed from original plan:** `updateWidget(ctx)` and `removeWidget(ctx)`
+> helper functions. These are no longer needed — the monitor toggle in
+> `tools.ts` calls `renderWidgetLines` and `ctx.ui.setWidget` directly,
+> which is simpler and avoids importing `activityMonitor` in widget.ts.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -593,9 +598,9 @@ Expected: all tests PASS.
 git add src/monitor/widget.ts tests/monitor/widget.test.ts
 git commit -m "feat: add activity monitor widget rendering
 
-Renders activity entries as a formatted TUI widget using Pi's Text
-component. Formats API calls and URL fetches with type, target, status,
-duration, and status indicator. Supports empty state display.
+Pure formatting module that renders activity entries as string[] for
+ctx.ui.setWidget(). Formats API calls and URL fetches with type, target,
+status, duration, and status indicator. Supports empty state display.
 
 Generated with [Devin](https://devin.ai)
 
@@ -1906,7 +1911,7 @@ import {
 } from "./tools-subcommands.ts";
 import { handleEnhancedSetup } from "./tools-setup.ts";
 import { activityMonitor } from "../monitor/activity-monitor.ts";
-import { updateWidget, removeWidget } from "../monitor/widget.ts";
+import { renderWidgetLines } from "../monitor/widget.ts";
 
 function formatNumber(n: number): string {
   if (!Number.isFinite(n)) return "unlimited";
@@ -1992,17 +1997,6 @@ export function buildStatusTable(
   return [headerLine, divider, ...dataLines].join("\n");
 }
 
-const SUBCOMMANDS = [
-  "status",
-  "reload",
-  "enable",
-  "disable",
-  "key",
-  "test",
-  "default",
-  "monitor",
-];
-
 const USAGE = `Usage: /tools [subcommand]
 
 Subcommands:
@@ -2086,15 +2080,19 @@ export function createToolsCommand(
           const action = rest[0];
           if (action === "on") {
             monitorUnsubscribe?.();
-            monitorUnsubscribe = activityMonitor.onUpdate(() =>
-              updateWidget(ctx),
-            );
-            updateWidget(ctx);
+            // Subscribe: re-render widget on every activity update
+            monitorUnsubscribe = activityMonitor.onUpdate(() => {
+              const lines = renderWidgetLines(activityMonitor.getEntries(), ctx.ui.theme);
+              ctx.ui.setWidget("pi-tools-activity", lines);
+            });
+            // Initial render
+            const lines = renderWidgetLines(activityMonitor.getEntries(), ctx.ui.theme);
+            ctx.ui.setWidget("pi-tools-activity", lines);
             ctx.ui.notify("Activity monitor enabled");
           } else if (action === "off") {
             monitorUnsubscribe?.();
             monitorUnsubscribe = null;
-            removeWidget(ctx);
+            ctx.ui.setWidget("pi-tools-activity", undefined);
             ctx.ui.notify("Activity monitor disabled");
           } else {
             ctx.ui.notify("Usage: /tools monitor [on|off]");
@@ -2118,6 +2116,13 @@ export function createToolsCommand(
   };
 }
 ```
+
+> **Changes from original plan:**
+> - Import `renderWidgetLines` instead of `updateWidget`/`removeWidget` — widget.ts is now a pure formatting module
+> - Monitor "on" builds `string[]` via `renderWidgetLines` and passes to `ctx.ui.setWidget(key, lines)`
+> - Monitor "off" passes `undefined` to `ctx.ui.setWidget` (removes widget)
+> - Theme accessed via `ctx.ui.theme` directly (public property, no cast needed)
+> - Removed unused `SUBCOMMANDS` array
 
 - [ ] **Step 3: Run all tools tests to verify they pass**
 
@@ -2198,7 +2203,7 @@ with:
   });
 
   // Session lifecycle: reset activity monitor on session boundaries
-  pi.on("session_shutdown" as any, () => {
+  pi.on("session_shutdown", () => {
     toolsCommand.resetMonitor();
   });
 ```
@@ -2265,7 +2270,7 @@ describe("tools monitor subcommand", () => {
     expect(msg.toLowerCase()).toContain("enabled");
     expect((ctx.ui as any).setWidget).toHaveBeenCalledWith(
       "pi-tools-activity",
-      expect.anything(),
+      expect.arrayContaining([expect.any(String)]),
     );
   });
 
