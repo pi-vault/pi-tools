@@ -173,8 +173,8 @@ describe("before_provider_request rewrite handler", () => {
     // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
     createExtension(pi as any);
 
-    // Second handler is the Layer 1 rewrite (first is trust recorder)
-    const handler = pi.events.get("before_provider_request")?.[1];
+    // Handler is the combined handleProviderRequest from session.ts
+    const handler = pi.events.get("before_provider_request")?.[0];
     expect(handler).toBeDefined();
 
     const payload = {
@@ -195,7 +195,7 @@ describe("before_provider_request rewrite handler", () => {
     // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
     createExtension(pi as any);
 
-    const handler = pi.events.get("before_provider_request")?.[1];
+    const handler = pi.events.get("before_provider_request")?.[0];
     const payload = {
       tools: [{ type: "function", function: { name: "web_search", parameters: {} } }],
     };
@@ -222,7 +222,7 @@ describe("before_provider_request rewrite handler", () => {
     // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
     createExtension(pi as any);
 
-    const handler = pi.events.get("before_provider_request")?.[1];
+    const handler = pi.events.get("before_provider_request")?.[0];
     const payload = {
       tools: [{ type: "function", function: { name: "web_search", parameters: {} } }],
     };

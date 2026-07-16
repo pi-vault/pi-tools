@@ -15,6 +15,7 @@
 ### Task 1: Create `src/session.ts` with extracted lifecycle functions
 
 **Files:**
+
 - Create: `src/session.ts`
 
 - [ ] **Step 1: Create `src/session.ts` with all lifecycle functions**
@@ -52,9 +53,15 @@ export function isStoredContent(data: unknown): data is StoredContent {
 }
 
 /** Filter valid stored content from session entries and restore into the store. */
-export function restoreContent(entries: SessionEntry[], store: ContentStore): void {
+export function restoreContent(
+  entries: SessionEntry[],
+  store: ContentStore,
+): void {
   const restored = entries
-    .filter((e) => e.type === "custom" && e.customType === "pi-tools-content" && e.data)
+    .filter(
+      (e) =>
+        e.type === "custom" && e.customType === "pi-tools-content" && e.data,
+    )
     .map((e) => (e as { data: unknown }).data)
     .filter(isStoredContent);
   if (restored.length > 0) {
@@ -92,7 +99,8 @@ export function handleProviderRequest(
   const config = configGetter();
   const openaiNativeConfig = config.providers["openai-web-search"];
   if (openaiNativeConfig?.enabled === false) return undefined;
-  if (!isOpenAiNativeModel(ctx?.model as { provider?: string } | undefined)) return undefined;
+  if (!isOpenAiNativeModel(ctx?.model as { provider?: string } | undefined))
+    return undefined;
   const result = rewriteNativeWebSearch(event.payload as { tools?: unknown[] });
   return result.rewritten.length > 0 ? result.payload : undefined;
 }
@@ -114,6 +122,7 @@ export function handleSessionShutdown(
 ### Task 2: Write tests for `src/session.ts`
 
 **Files:**
+
 - Create: `tests/session.test.ts`
 
 - [ ] **Step 2: Create `tests/session.test.ts` with unit tests for all exported functions**
@@ -355,7 +364,9 @@ describe("handleProviderRequest", () => {
 
   it("rewrites web_search to native format for OpenAI models", () => {
     const payload = {
-      tools: [{ type: "function", function: { name: "web_search", parameters: {} } }],
+      tools: [
+        { type: "function", function: { name: "web_search", parameters: {} } },
+      ],
       messages: [{ role: "user", content: "hello" }],
     };
     const ctx = makeCtx({ model: { provider: "openai" } as any });
@@ -366,13 +377,18 @@ describe("handleProviderRequest", () => {
       () => baseConfig,
     ) as typeof payload;
 
-    expect(result?.tools?.[0]).toEqual({ type: "web_search", external_web_access: true });
+    expect(result?.tools?.[0]).toEqual({
+      type: "web_search",
+      external_web_access: true,
+    });
     expect(result?.messages).toEqual(payload.messages);
   });
 
   it("returns undefined for non-OpenAI models", () => {
     const payload = {
-      tools: [{ type: "function", function: { name: "web_search", parameters: {} } }],
+      tools: [
+        { type: "function", function: { name: "web_search", parameters: {} } },
+      ],
     };
     const ctx = makeCtx({ model: { provider: "anthropic" } as any });
 
@@ -391,7 +407,9 @@ describe("handleProviderRequest", () => {
       providers: { "openai-web-search": { enabled: false } },
     };
     const payload = {
-      tools: [{ type: "function", function: { name: "web_search", parameters: {} } }],
+      tools: [
+        { type: "function", function: { name: "web_search", parameters: {} } },
+      ],
     };
     const ctx = makeCtx({ model: { provider: "openai" } as any });
 
@@ -419,7 +437,9 @@ describe("handleProviderRequest", () => {
 
   it("returns undefined when no web_search tool in payload", () => {
     const payload = {
-      tools: [{ type: "function", function: { name: "other_tool", parameters: {} } }],
+      tools: [
+        { type: "function", function: { name: "other_tool", parameters: {} } },
+      ],
     };
     const ctx = makeCtx({ model: { provider: "openai" } as any });
 
@@ -462,6 +482,7 @@ Expected: all tests PASS.
 ### Task 3: Update `src/index.ts` to use `src/session.ts`
 
 **Files:**
+
 - Modify: `src/index.ts`
 
 - [ ] **Step 4: Replace imports and remove `isStoredContent` from `src/index.ts`**
@@ -475,7 +496,10 @@ import { ContentCache } from "./cache.ts";
 import { createToolsCommand } from "./commands/tools.ts";
 import { ConfigManager } from "./config-manager.ts";
 import { allProviders } from "./providers/all.ts";
-import { createFilePersistence, ProviderRegistry } from "./providers/registry.ts";
+import {
+  createFilePersistence,
+  ProviderRegistry,
+} from "./providers/registry.ts";
 import type { ProviderTier } from "./providers/types.ts";
 import { ContentStore } from "./storage.ts";
 import { createCodeSearchTool } from "./tools/code-search.ts";
@@ -486,7 +510,10 @@ import { createWebReadTool } from "./tools/web-read.ts";
 import { createWebResearchTool } from "./tools/web-research.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { resolveApiKey } from "./config.ts";
-import { buildAugmentedGuidance, detectCapabilities } from "./utils/capabilities.ts";
+import {
+  buildAugmentedGuidance,
+  detectCapabilities,
+} from "./utils/capabilities.ts";
 import { recordProjectTrust } from "./utils/trust.ts";
 import {
   handleProviderRequest,
@@ -500,16 +527,22 @@ import {
 Replace the event handler block (lines 46-76 in the original file, the section from the `// Restore stored content` comment through the OpenAI native rewrite handler) with:
 
 ```typescript
-  // Session lifecycle — delegated to session.ts
-  pi.on("session_start", (event, ctx) =>
-    handleSessionStart(event, ctx, store, () => configManager.refresh(), () => configManager.current),
-  );
-  pi.on("model_select", (_event, ctx) => {
-    recordProjectTrust(ctx);
-  });
-  pi.on("before_provider_request", (event, ctx) =>
-    handleProviderRequest(event, ctx, () => configManager.current),
-  );
+// Session lifecycle — delegated to session.ts
+pi.on("session_start", (event, ctx) =>
+  handleSessionStart(
+    event,
+    ctx,
+    store,
+    () => configManager.refresh(),
+    () => configManager.current,
+  ),
+);
+pi.on("model_select", (_event, ctx) => {
+  recordProjectTrust(ctx);
+});
+pi.on("before_provider_request", (event, ctx) =>
+  handleProviderRequest(event, ctx, () => configManager.current),
+);
 ```
 
 - [ ] **Step 6: Replace the `session_shutdown` handler**
@@ -517,10 +550,10 @@ Replace the event handler block (lines 46-76 in the original file, the section f
 Replace lines 184-187 (the session_shutdown block) with:
 
 ```typescript
-  // Session lifecycle: reset activity monitor on session boundaries
-  pi.on("session_shutdown", (event, ctx) =>
-    handleSessionShutdown(event, ctx, () => toolsCommand.resetMonitor()),
-  );
+// Session lifecycle: reset activity monitor on session boundaries
+pi.on("session_shutdown", (event, ctx) =>
+  handleSessionShutdown(event, ctx, () => toolsCommand.resetMonitor()),
+);
 ```
 
 The final `src/index.ts` should look like this:
@@ -532,7 +565,10 @@ import { ContentCache } from "./cache.ts";
 import { createToolsCommand } from "./commands/tools.ts";
 import { ConfigManager } from "./config-manager.ts";
 import { allProviders } from "./providers/all.ts";
-import { createFilePersistence, ProviderRegistry } from "./providers/registry.ts";
+import {
+  createFilePersistence,
+  ProviderRegistry,
+} from "./providers/registry.ts";
 import type { ProviderTier } from "./providers/types.ts";
 import { ContentStore } from "./storage.ts";
 import { createCodeSearchTool } from "./tools/code-search.ts";
@@ -543,7 +579,10 @@ import { createWebReadTool } from "./tools/web-read.ts";
 import { createWebResearchTool } from "./tools/web-research.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { resolveApiKey } from "./config.ts";
-import { buildAugmentedGuidance, detectCapabilities } from "./utils/capabilities.ts";
+import {
+  buildAugmentedGuidance,
+  detectCapabilities,
+} from "./utils/capabilities.ts";
 import { recordProjectTrust } from "./utils/trust.ts";
 import {
   handleProviderRequest,
@@ -552,16 +591,28 @@ import {
 } from "./session.ts";
 
 export default function createExtension(pi: ExtensionAPI): void {
-  const store = new ContentStore((customType, data) => pi.appendEntry(customType, data));
+  const store = new ContentStore((customType, data) =>
+    pi.appendEntry(customType, data),
+  );
   const registry = new ProviderRegistry(createFilePersistence());
-  const configManager = new ConfigManager(process.cwd(), registry, allProviders);
+  const configManager = new ConfigManager(
+    process.cwd(),
+    registry,
+    allProviders,
+  );
 
   // Detect environment capabilities once at startup
   const caps = detectCapabilities();
 
   // Session lifecycle — delegated to session.ts
   pi.on("session_start", (event, ctx) =>
-    handleSessionStart(event, ctx, store, () => configManager.refresh(), () => configManager.current),
+    handleSessionStart(
+      event,
+      ctx,
+      store,
+      () => configManager.refresh(),
+      () => configManager.current,
+    ),
   );
   pi.on("model_select", (_event, ctx) => {
     recordProjectTrust(ctx);
@@ -576,7 +627,10 @@ export default function createExtension(pi: ExtensionAPI): void {
     const combineActive = combine ?? configManager.current.combine.enabled;
 
     if (combineActive) {
-      return registry.selectSearchForFusion(configManager.current.selectionStrategy, resolved);
+      return registry.selectSearchForFusion(
+        configManager.current.selectionStrategy,
+        resolved,
+      );
     }
 
     if (configManager.current.selectionStrategy === "best-performing") {
@@ -595,7 +649,8 @@ export default function createExtension(pi: ExtensionAPI): void {
         registry.recordOutcome(providerName, { success: true, latencyMs });
       },
       configManager.current.guidance?.web_search,
-      (providerName) => registry.recordOutcome(providerName, { success: false }),
+      (providerName) =>
+        registry.recordOutcome(providerName, { success: false }),
       (providerName, resultCount, requestedCount) => {
         registry.recordResultQuality(providerName, resultCount, requestedCount);
       },
@@ -618,7 +673,9 @@ export default function createExtension(pi: ExtensionAPI): void {
       configManager.current.gemini,
     ),
   );
-  pi.registerTool(createWebReadTool(store, configManager.current.guidance?.web_read));
+  pi.registerTool(
+    createWebReadTool(store, configManager.current.guidance?.web_read),
+  );
   pi.registerTool(
     createCodeSearchTool(
       () => {
@@ -639,10 +696,17 @@ export default function createExtension(pi: ExtensionAPI): void {
       return registry.selectDocs() ?? docsProvider;
     };
     pi.registerTool(
-      createWebDocsSearchTool(selectDocs, configManager.current.guidance?.web_docs_search),
+      createWebDocsSearchTool(
+        selectDocs,
+        configManager.current.guidance?.web_docs_search,
+      ),
     );
     pi.registerTool(
-      createWebDocsFetchTool(selectDocs, store, configManager.current.guidance?.web_docs_fetch),
+      createWebDocsFetchTool(
+        selectDocs,
+        store,
+        configManager.current.guidance?.web_docs_fetch,
+      ),
     );
   }
 
@@ -668,8 +732,11 @@ export default function createExtension(pi: ExtensionAPI): void {
 
   // Register /tools command
   const allProviderNames = allProviders.map((m) => m.name);
-  const toolsCommand = createToolsCommand(registry, tierMap, allProviderNames, () =>
-    configManager.refresh(true),
+  const toolsCommand = createToolsCommand(
+    registry,
+    tierMap,
+    allProviderNames,
+    () => configManager.refresh(true),
   );
   pi.registerCommand(toolsCommand.name, {
     description: toolsCommand.description,
@@ -688,6 +755,7 @@ export default function createExtension(pi: ExtensionAPI): void {
 ### Task 4: Update `tests/index.test.ts` handler indices
 
 **Files:**
+
 - Modify: `tests/index.test.ts`
 
 - [ ] **Step 7: Update event handler indices in `tests/index.test.ts`**
@@ -701,20 +769,20 @@ Replace every occurrence of `pi.events.get("before_provider_request")?.[1]` with
 In the test "rewrites web_search tool to native format for OpenAI models" (around line 177):
 
 ```typescript
-    // Handler is the combined handleProviderRequest from session.ts
-    const handler = pi.events.get("before_provider_request")?.[0];
+// Handler is the combined handleProviderRequest from session.ts
+const handler = pi.events.get("before_provider_request")?.[0];
 ```
 
 In the test "does not rewrite for non-OpenAI models" (around line 198):
 
 ```typescript
-    const handler = pi.events.get("before_provider_request")?.[0];
+const handler = pi.events.get("before_provider_request")?.[0];
 ```
 
 In the test "does not rewrite when openai-web-search is disabled in config" (around line 225):
 
 ```typescript
-    const handler = pi.events.get("before_provider_request")?.[0];
+const handler = pi.events.get("before_provider_request")?.[0];
 ```
 
 ---
