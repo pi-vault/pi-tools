@@ -74,6 +74,12 @@ export interface VideoConfig {
   maxSizeMB?: number;
 }
 
+export interface PdfConfig {
+  ocrEnabled?: boolean;
+  ocrMaxPages?: number;
+  ocrDpi?: number;
+}
+
 export interface PiToolsConfig {
   defaultProvider: string;
   selectionStrategy: SelectionStrategy;
@@ -86,6 +92,7 @@ export interface PiToolsConfig {
   gemini?: GeminiConfig;
   youtube?: YouTubeConfig;
   video?: VideoConfig;
+  pdf?: PdfConfig;
 }
 
 const ENV_VAR_PATTERN = /^[A-Z][A-Z0-9_]+$/;
@@ -269,6 +276,7 @@ function parseConfigFile(raw: string): PiToolsConfig {
     gemini: parsed.gemini,
     youtube: parsed.youtube,
     video: parsed.video,
+    pdf: parsed.pdf,
   };
 }
 
