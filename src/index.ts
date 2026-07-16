@@ -15,10 +15,6 @@ import { createWebReadTool } from "./tools/web-read.ts";
 import { createWebResearchTool } from "./tools/web-research.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { resolveApiKey } from "./config.ts";
-import {
-  isOpenAiNativeModel,
-  rewriteNativeWebSearch,
-} from "./providers/openai-native-rewrite.ts";
 import { buildAugmentedGuidance, detectCapabilities } from "./utils/capabilities.ts";
 import { recordProjectTrust } from "./utils/trust.ts";
 
@@ -64,15 +60,6 @@ export default function createExtension(pi: ExtensionAPI): void {
   });
   pi.on("before_provider_request", (_event, ctx) => {
     recordProjectTrust(ctx);
-  });
-
-  // Layer 1: Rewrite web_search tool to native OpenAI format for OpenAI models
-  pi.on("before_provider_request", (event, ctx) => {
-    const openaiNativeConfig = configManager.current.providers["openai-web-search"];
-    if (openaiNativeConfig?.enabled === false) return undefined;
-    if (!isOpenAiNativeModel(ctx?.model as { provider?: string } | undefined)) return undefined;
-    const result = rewriteNativeWebSearch(event.payload as { tools?: unknown[] });
-    return result.rewritten.length > 0 ? result.payload : undefined;
   });
 
   const resolveCandidates = (name?: string, combine?: boolean) => {

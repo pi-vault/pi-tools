@@ -102,7 +102,7 @@ describe("OllamaProvider", () => {
       fetchStub.addResponse("localhost:11434/api/experimental/web_search", {
         body: {
           results: [
-            { title: "Result 1", url: "https://example.com", content: "A snippet" },
+            { title: "Result 1", url: "https://example.com", snippet: "A snippet" },
           ],
         },
       });
@@ -126,7 +126,7 @@ describe("OllamaProvider", () => {
       fetchStub.addResponse("ollama.com/api/web_search", {
         body: {
           results: [
-            { title: "Cloud Result", url: "https://example.com", content: "Cloud snippet" },
+            { title: "Cloud Result", url: "https://example.com", snippet: "Cloud snippet" },
           ],
         },
       });
@@ -188,7 +188,7 @@ describe("OllamaProvider", () => {
       const manyResults = Array.from({ length: 10 }, (_, i) => ({
         title: `Result ${i}`,
         url: `https://example.com/${i}`,
-        content: `Snippet ${i}`,
+        snippet: `Snippet ${i}`,
       }));
       fetchStub.addResponse("localhost:11434", {
         body: { results: manyResults },
@@ -328,17 +328,8 @@ describe("providerMeta", () => {
     expect(providerMeta.requiresKey).toBe(false);
   });
 
-  it("returns empty object when not enabled and no env var", () => {
+  it("creates search and fetch providers", () => {
     const instance = providerMeta.create();
-    expect(instance.search).toBeUndefined();
-    expect(instance.fetch).toBeUndefined();
-  });
-
-  it("creates search and fetch providers when enabled", () => {
-    const instance = providerMeta.create(undefined, {
-      enabled: true,
-      baseUrl: "http://localhost:11434",
-    });
     expect(instance.search).toBeDefined();
     expect(instance.fetch).toBeDefined();
   });
@@ -530,7 +521,7 @@ function parseOllamaSearchResults(data: unknown): SearchResult[] {
     return {
       title: (item.title as string) || "",
       url: (item.url as string) || "",
-      snippet: ((item.content as string) || (item.snippet as string) || "").slice(0, 500),
+      snippet: ((item.snippet as string) || "").slice(0, 500),
     };
   });
 }
@@ -544,8 +535,8 @@ export const providerMeta: ProviderMeta = {
     const baseUrl =
       (providerConfig as any)?.baseUrl ??
       process.env.OLLAMA_HOST ??
-      DEFAULT_BASE_URL;
-    // Only register when explicitly enabled or OLLAMA_HOST env var is set
+      "http://localhost:11434";
+    // Only register when explicitly enabled or env var is set
     if (providerConfig?.enabled !== true && !process.env.OLLAMA_HOST) return {};
     const provider = new OllamaProvider({ baseUrl, apiKey: providerConfig?.apiKey });
     return { search: provider, fetch: provider };
@@ -852,12 +843,12 @@ Expected: all existing tests PASS.
 
 ---
 
-### Task 5: Write failing tests for OpenAI web search provider (Layer 2)
+### Task 5: Write failing tests for OpenAI native provider (Layer 2)
 
 **Files:**
-- Create: `tests/providers/openai-web-search.test.ts`
+- Create: `tests/providers/openai-native.test.ts`
 
-- [ ] **Step 11: Create test file for OpenAI web search provider**
+- [ ] **Step 11: Create test file for OpenAI native search provider**
 
 ```typescript
 // tests/providers/openai-web-search.test.ts
@@ -868,7 +859,7 @@ import {
 } from "../../src/providers/openai-web-search.ts";
 import { stubFetch } from "../helpers.ts";
 
-describe("OpenAI Web Search Provider", () => {
+describe("OpenAI Native Provider", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
 
   beforeEach(() => {
@@ -900,7 +891,7 @@ describe("OpenAI Web Search Provider", () => {
 
     const body = JSON.parse(fetchCall[1].body);
     expect(body.model).toBe("gpt-4.1-mini");
-    expect(body.tools).toEqual([{ type: "web_search" }]);
+    expect(body.tools).toEqual([{ type: "web_search_preview" }]);
     expect(body.input).toContain("typescript patterns");
   });
 
@@ -1089,19 +1080,19 @@ describe("providerMeta", () => {
 - [ ] **Step 12: Run test to verify it fails (module not found)**
 
 ```bash
-pnpm vitest run tests/providers/openai-web-search.test.ts
+pnpm vitest run tests/providers/openai-native.test.ts
 ```
 
 Expected: FAIL — `Cannot find module '../../src/providers/openai-web-search.ts'`.
 
 ---
 
-### Task 6: Implement OpenAI web search provider (Layer 2)
+### Task 6: Implement OpenAI native provider (Layer 2)
 
 **Files:**
 - Create: `src/providers/openai-web-search.ts`
 
-- [ ] **Step 13: Create the OpenAI web search provider implementation**
+- [ ] **Step 13: Create the OpenAI native provider implementation**
 
 ```typescript
 // src/providers/openai-web-search.ts
@@ -1147,7 +1138,7 @@ class OpenAiWebSearchProvider implements SearchProvider {
       },
       body: JSON.stringify({
         model: this.model,
-        tools: [{ type: "web_search" }],
+        tools: [{ type: "web_search_preview" }],
         input: `Search the web for: ${query}`,
       }),
       signal,
@@ -1189,10 +1180,10 @@ export const providerMeta: ProviderMeta = {
 };
 ```
 
-- [ ] **Step 14: Run OpenAI web search tests to verify they pass**
+- [ ] **Step 14: Run OpenAI native tests to verify they pass**
 
 ```bash
-pnpm vitest run tests/providers/openai-web-search.test.ts
+pnpm vitest run tests/providers/openai-native.test.ts
 ```
 
 Expected: all tests PASS.
@@ -1213,9 +1204,8 @@ Expected: all existing tests PASS.
 - Modify: `src/providers/all.ts`
 - Modify: `src/config.ts`
 - Modify: `src/index.ts`
-- Modify: `tests/providers/all.test.ts`
 
-- [ ] **Step 16: Register Ollama and OpenAI web search in `src/providers/all.ts`**
+- [ ] **Step 16: Register Ollama and OpenAI native in `src/providers/all.ts`**
 
 Add the imports and entries to the `allProviders` array:
 
@@ -1233,27 +1223,61 @@ import { providerMeta as openaiWebSearch } from "./openai-web-search.ts";
   openaiWebSearch,
 ```
 
-- [ ] **Step 17: Add config fields to `src/config.ts`**
+- [ ] **Step 17: Add `ollama` and `openaiNative` config fields to `PiToolsConfig` in `src/config.ts`**
 
-Add `ollama` to `FALLBACK_ENV_MAP` (after the `marginalia` entry):
+Add the new config interfaces after `VideoConfig`:
+
+```typescript
+export interface OllamaConfig {
+  enabled?: boolean;
+  baseUrl?: string;
+  apiKey?: string;
+}
+
+export interface OpenAiNativeConfig {
+  rewriteEnabled?: boolean;
+  externalWebAccess?: boolean;
+  providerEnabled?: boolean;
+  apiKey?: string;
+  model?: string;
+}
+```
+
+Add new fields to `PiToolsConfig` after `video?`:
+
+```typescript
+  ollama?: OllamaConfig;
+  openaiNative?: OpenAiNativeConfig;
+```
+
+Add `ollama` entry to `FALLBACK_ENV_MAP` (after the `marginalia` entry):
 
 ```typescript
   ollama: "OLLAMA_API_KEY",
-  "openai-web-search": "OPENAI_API_KEY",
 ```
 
-Add `ollama` entry to `DEFAULT_CONFIG.providers` (after `"openai-codex"`):
+**Note:** `OLLAMA_HOST` is handled directly in the `create()` factory via `process.env.OLLAMA_HOST` (it sets `baseUrl`, not `apiKey`, so it doesn't fit the FALLBACK_ENV_MAP pattern which maps provider names to API key env vars).
+
+Add `ollama` to the `DEFAULT_CONFIG.providers` object:
 
 ```typescript
     ollama: { enabled: false },
+```
+
+Add `"openai-web-search"` to `DEFAULT_CONFIG.providers`:
+
+```typescript
     "openai-web-search": { enabled: true, apiKey: "OPENAI_API_KEY" },
 ```
 
-**Note:** `OLLAMA_HOST` is handled directly in the `create()` factory via `process.env.OLLAMA_HOST` (it sets `baseUrl`, not `apiKey`, so it doesn't fit the `FALLBACK_ENV_MAP` pattern which maps provider names to API key env vars).
+**Important:** The provider is named `"openai-web-search"` (not `"openai-native"`) because `config-manager.ts` has an alias `"openai-native" → "openai-codex"` for backward compatibility. Using `"openai-native"` would silently redirect to the code search provider. The config namespace `openaiNative` in `PiToolsConfig` is fine — it's a config key, not a provider name.
 
-**Important:** The provider is named `"openai-web-search"` (not `"openai-native"`) because `config-manager.ts` has an alias `"openai-native" → "openai-codex"` for backward compatibility. Using `"openai-native"` would silently redirect to the code search provider. The config namespace uses provider-name-as-key in the providers map, matching the pattern of all other providers.
+Ensure `parseConfigFile` passes through the new top-level fields:
 
-Ensure `parseConfigFile` passes through no new top-level fields — both `ollama` and `openai-web-search` live in the `providers` record and are covered by the existing `...parsed.providers` spread.
+```typescript
+    ollama: parsed.ollama,
+    openaiNative: parsed.openaiNative,
+```
 
 - [ ] **Step 18: Wire up `before_provider_request` handler in `src/index.ts`**
 
@@ -1266,64 +1290,32 @@ import {
 } from "./providers/openai-native-rewrite.ts";
 ```
 
-After the existing `pi.on("before_provider_request", ...)` trust handler (line 61-63), add:
+After the existing `pi.on("session_start", ...)` handler (around line 47), add:
 
 ```typescript
   // Layer 1: Rewrite web_search tool to native OpenAI format for OpenAI models
-  pi.on("before_provider_request", (event, ctx) => {
-    const openaiNativeConfig = configManager.current.providers["openai-web-search"];
-    if (openaiNativeConfig?.enabled === false) return undefined;
-    if (!isOpenAiNativeModel(ctx?.model as { provider?: string } | undefined)) return undefined;
-    const result = rewriteNativeWebSearch(event.payload as { tools?: unknown[] });
+  pi.on("before_provider_request" as any, (event: any, ctx: any) => {
+    if (!configManager.current.openaiNative?.rewriteEnabled) return undefined;
+    if (!isOpenAiNativeModel(ctx?.model)) return undefined;
+    const result = rewriteNativeWebSearch(event.payload, {
+      externalWebAccess: configManager.current.openaiNative?.externalWebAccess ?? true,
+    });
     return result.rewritten.length > 0 ? result.payload : undefined;
   });
 ```
 
-**Note:** The `before_provider_request` event is already typed in the ExtensionAPI. The handler type is `ExtensionHandler<BeforeProviderRequestEvent, BeforeProviderRequestEventResult>` where `BeforeProviderRequestEventResult = unknown`. No `as any` cast is needed on the event name. The `ctx.model` needs a type assertion since `ExtensionContext.model` is typed broadly.
-
-- [ ] **Step 19: Update `tests/providers/all.test.ts` for new providers**
-
-Update the test to expect 23 providers (was 21) and add the new names:
-
-```typescript
-  it("exports exactly 23 providers", () => {
-    expect(allProviders).toHaveLength(23);
-  });
-```
-
-Add to the sorted names array:
-```typescript
-    expect(names).toEqual([
-      "brave",
-      "brave-llm",
-      "context7",
-      "duckduckgo",
-      "exa",
-      "exa-mcp",
-      "fastcrw",
-      "firecrawl",
-      "jina",
-      "langsearch",
-      "linkup",
-      "marginalia",
-      "ollama",           // NEW
-      "openai-codex",
-      "openai-web-search", // NEW
-      "parallel",
-      "perplexity",
-      "searxng",
-      "serper",
-      "sofya",
-      "tavily",
-      "websearchapi",
-      "youcom",
-    ]);
-```
-
-- [ ] **Step 20: Run `all.test.ts` and full test suite**
+- [ ] **Step 19: Run the `all.test.ts` provider registry test to check registration**
 
 ```bash
-pnpm vitest run tests/providers/all.test.ts && pnpm test
+pnpm vitest run tests/providers/all.test.ts
+```
+
+Expected: PASS — the new providers appear in the `allProviders` array.
+
+- [ ] **Step 20: Run full test suite to verify no regressions**
+
+```bash
+pnpm test
 ```
 
 Expected: all tests PASS.
@@ -1344,8 +1336,7 @@ git add \
   src/index.ts \
   tests/providers/ollama.test.ts \
   tests/providers/openai-web-search.test.ts \
-  tests/providers/openai-native-rewrite.test.ts \
-  tests/providers/all.test.ts
+  tests/providers/openai-native-rewrite.test.ts
 
 git commit -m "feat: add Ollama provider and OpenAI web search (Phase 4)
 
@@ -1362,12 +1353,11 @@ Phase 4b — OpenAI web search (two layers):
   function tool to native { type: 'web_search' } for OpenAI models.
   Zero quota cost — model uses built-in search.
 - Layer 2: openai-web-search provider calls Responses API
-  directly with { type: 'web_search' } for non-OpenAI models.
+  directly with web_search_preview for non-OpenAI models.
   Named 'openai-web-search' to avoid config-manager alias conflict
   with deprecated 'openai-native' -> 'openai-codex' mapping.
 
-Config: ollama, openai-web-search added to providers map.
-FALLBACK_ENV_MAP updated for both.
+Config: ollama?, openaiNative? added to PiToolsConfig.
 
 Generated with [Devin](https://devin.ai)
 
@@ -1376,18 +1366,4 @@ Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.
 
 ---
 
-**Phase 4 complete.** Three new files (`ollama.ts`, `openai-web-search.ts`, `openai-native-rewrite.ts`) with corresponding tests, plus integration wiring in `all.ts`, `config.ts`, `index.ts`, and updated `all.test.ts`.
-
----
-
-## Changes from Previous Plan (v1 → v2)
-
-| # | Issue | Fix |
-|---|-------|-----|
-| 1 | Test file named `openai-native.test.ts` but imports from `openai-web-search.ts` | Consistently named `openai-web-search.test.ts` |
-| 2 | `providerMeta.create()` test expected `search`/`fetch` when impl returns `{}` | Test now expects `undefined` when no config; separate test with `enabled: true` |
-| 3 | Used deprecated `web_search_preview` tool type | Changed to `web_search` (matches existing `openai-codex.ts` and reference packages) |
-| 4 | `all.test.ts` not updated (expects 21 providers) | Added Step 19 to update to 23 providers with both new names |
-| 5 | Unnecessary `as any` casts on event handler | Removed; uses proper typed event with minimal type assertions |
-| 6 | Ollama parser reads `item.snippet` but API returns `content` | Parser reads `item.content \|\| item.snippet` for safety |
-| 7 | Missing `FALLBACK_ENV_MAP` entry for `openai-web-search` | Added `"openai-web-search": "OPENAI_API_KEY"` |
+**Phase 4 complete.** Three new files (`ollama.ts`, `openai-web-search.ts`, `openai-native-rewrite.ts`) with corresponding tests, plus integration wiring in `all.ts`, `config.ts`, and `index.ts`.
