@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { deepMerge } from "./utils/deep-merge.ts";
 import { parseAllowRanges } from "./utils/ssrf.ts";
 import type { ResearchMode, ResearchModeDefaults } from "./research/types.ts";
+import { isProjectTrustedCached } from "./utils/trust.ts";
 
 export interface ProviderConfigEntry {
   enabled: boolean;
@@ -362,6 +363,58 @@ export function resolveProviderKey(
   return undefined;
 }
 
+// --- Trust Gating ---
+
+const SENSITIVE_KEY_PATTERNS: RegExp[] = [
+  /\.apiKey$/,
+  /\.apiSecret$/,
+  /\.token$/,
+];
+
+const SENSITIVE_PATH_PATTERNS: RegExp[] = [
+  /^ssrf\.allowRanges$/,
+  /^gemini\.cloudflareApiKey$/,
+  /^gemini\.allowBrowserCookies$/,
+];
+
+/**
+ * Recursively remove sensitive fields from a config object.
+ * Returns a shallow clone at each level with sensitive keys omitted.
+ *
+ * A field is sensitive if:
+ * - Its dot-separated path ends with a key matching SENSITIVE_KEY_PATTERNS
+ * - Its full dot-separated path matches SENSITIVE_PATH_PATTERNS
+ */
+export function stripSensitiveFields(
+  config: Record<string, unknown>,
+  prefix = "",
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(config)) {
+    const fullPath = prefix ? `${prefix}.${key}` : key;
+    if (
+      SENSITIVE_KEY_PATTERNS.some((p) => p.test(fullPath)) ||
+      SENSITIVE_PATH_PATTERNS.some((p) => p.test(fullPath))
+    ) {
+      continue; // strip this field
+    }
+    const value = config[key];
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      !Array.isArray(value)
+    ) {
+      result[key] = stripSensitiveFields(
+        value as Record<string, unknown>,
+        fullPath,
+      );
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 const MAX_WALK_DEPTH = 10;
 const PROJECT_CONFIG_RELATIVE = path.join(".pi", "tools.json");
 const LEGACY_PROJECT_CONFIG_RELATIVE = path.join(".pi", "pi-tools.json");
@@ -420,8 +473,15 @@ export function loadMergedConfig(cwd?: string): PiToolsConfig {
     const projectPath = findProjectConfigPath(cwd);
     if (projectPath) {
       try {
-        const raw = fs.readFileSync(projectPath, "utf-8");
-        merged = deepMerge(merged, JSON.parse(raw) as Record<string, unknown>);
+        const raw = JSON.parse(fs.readFileSync(projectPath, "utf-8")) as Record<string, unknown>;
+        const trusted = isProjectTrustedCached(cwd);
+        const sanitized = trusted ? raw : stripSensitiveFields(raw);
+        if (!trusted && sanitized !== raw) {
+          console.warn(
+            "[pi-tools] Untrusted project: sensitive config fields ignored. Trust the project in Pi to allow full config.",
+          );
+        }
+        merged = deepMerge(merged, sanitized);
       } catch {
         // Malformed project config — skip
       }

@@ -16,6 +16,7 @@ import { createWebResearchTool } from "./tools/web-research.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { resolveApiKey } from "./config.ts";
 import { buildAugmentedGuidance, detectCapabilities } from "./utils/capabilities.ts";
+import { recordProjectTrust } from "./utils/trust.ts";
 
 function isStoredContent(data: unknown): data is StoredContent {
   if (typeof data !== "object" || data === null) return false;
@@ -48,6 +49,17 @@ export default function createExtension(pi: ExtensionAPI): void {
     if (restored.length > 0) {
       store.restore(restored);
     }
+  });
+
+  // Record project trust state for config gating
+  pi.on("session_start", (_event, ctx) => {
+    recordProjectTrust(ctx);
+  });
+  pi.on("model_select", (_event, ctx) => {
+    recordProjectTrust(ctx);
+  });
+  pi.on("before_provider_request", (_event, ctx) => {
+    recordProjectTrust(ctx);
   });
 
   const resolveCandidates = (name?: string, combine?: boolean) => {
