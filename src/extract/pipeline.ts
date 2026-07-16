@@ -278,13 +278,16 @@ export async function extractContent(
     response.headers.get("cf-mitigated") === "challenge"
   ) {
     chain.push("cf-challenge");
+    const retryEntryId = activityMonitor.logStart({ type: "fetch", url: `${url} (cf-retry)` });
     try {
       response = await fetch(url, {
         headers: { ...BROWSER_HEADERS, "User-Agent": HONEST_USER_AGENT },
         signal,
         redirect: "follow",
       });
+      activityMonitor.logComplete(retryEntryId, response.status);
     } catch (err) {
+      activityMonitor.logError(retryEntryId, err instanceof Error ? err.message : String(err));
       throw new RetryableExtractionError(err instanceof Error ? err.message : String(err));
     }
   }
