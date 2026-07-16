@@ -271,4 +271,28 @@ describe("handleTest", () => {
     const msg = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
     expect(msg.toLowerCase()).toContain("not found");
   });
+
+  it("tests all providers when name is undefined", async () => {
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+    const mockBraveSearch = vi.fn().mockResolvedValue([{ title: "t", url: "u", snippet: "s" }]);
+    const mockExaSearch = vi.fn().mockResolvedValue([]);
+    const registry = {
+      getSearchProviderNames: () => ["brave", "exa"],
+      selectSearchCandidates: (name: string) => {
+        if (name === "brave") return [{ name: "brave", label: "Brave", search: mockBraveSearch }];
+        if (name === "exa") return [{ name: "exa", label: "Exa", search: mockExaSearch }];
+        return [];
+      },
+    };
+
+    await handleTest(ctx, undefined, registry as any);
+
+    // Both providers should have been tested
+    expect(mockBraveSearch).toHaveBeenCalled();
+    expect(mockExaSearch).toHaveBeenCalled();
+    // Output should mention both
+    const msg = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
+    expect(msg).toContain("brave");
+    expect(msg).toContain("exa");
+  });
 });
