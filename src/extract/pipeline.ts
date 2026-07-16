@@ -56,6 +56,26 @@ export interface ExtractedContent {
   duration?: number;
 }
 
+export type ImageBlock = { type: "image"; data: string; mimeType: string };
+
+export function collectImageBlocks(extracted: ExtractedContent): ImageBlock[] {
+  const blocks: ImageBlock[] = [];
+  if (extracted.thumbnail) {
+    blocks.push({ type: "image", data: extracted.thumbnail.data, mimeType: extracted.thumbnail.mimeType });
+  }
+  if (extracted.frames) {
+    for (const frame of extracted.frames) {
+      blocks.push({ type: "image", data: frame.data, mimeType: frame.mimeType });
+    }
+  }
+  if (extracted.images) {
+    for (const img of extracted.images) {
+      blocks.push({ type: "image", data: img.data, mimeType: img.mimeType });
+    }
+  }
+  return blocks;
+}
+
 const BINARY_CONTENT_TYPES = [
   "image/",
   "audio/",

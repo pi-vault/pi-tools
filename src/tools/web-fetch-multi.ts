@@ -3,7 +3,9 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ContentStore } from "../storage.ts";
 import {
   extractContent,
+  collectImageBlocks,
   type ExtractedContent,
+  type ImageBlock,
 } from "../extract/pipeline.ts";
 import { truncateContent } from "../utils/truncate.ts";
 import { fetchWithConcurrencyLimit } from "../utils/concurrency.ts";
@@ -22,32 +24,12 @@ export interface UrlResult {
   error?: string;
 }
 
-type ImageBlock = { type: "image"; data: string; mimeType: string };
-
-export function perUrlCap(count: number): number {
+function perUrlCap(count: number): number {
   return count <= 1
     ? INLINE_LIMIT
     : count <= 5
       ? Math.floor(INLINE_LIMIT / count)
       : MANIFEST_PREVIEW_CHARS;
-}
-
-function collectImageBlocks(extracted: ExtractedContent): ImageBlock[] {
-  const blocks: ImageBlock[] = [];
-  if (extracted.thumbnail) {
-    blocks.push({ type: "image", data: extracted.thumbnail.data, mimeType: extracted.thumbnail.mimeType });
-  }
-  if (extracted.frames) {
-    for (const frame of extracted.frames) {
-      blocks.push({ type: "image", data: frame.data, mimeType: frame.mimeType });
-    }
-  }
-  if (extracted.images) {
-    for (const img of extracted.images) {
-      blocks.push({ type: "image", data: img.data, mimeType: img.mimeType });
-    }
-  }
-  return blocks;
 }
 
 export interface MultiUrlOptions {

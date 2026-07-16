@@ -373,25 +373,12 @@ export function resolveProviderKey(
 
 // --- Trust Gating ---
 
-const SENSITIVE_KEY_PATTERNS: RegExp[] = [
-  /\.apiKey$/,
-  /\.apiSecret$/,
-  /\.token$/,
-];
-
-const SENSITIVE_PATH_PATTERNS: RegExp[] = [
-  /^ssrf\.allowRanges$/,
-  /^gemini\.cloudflareApiKey$/,
-  /^gemini\.allowBrowserCookies$/,
-];
+const SENSITIVE_KEYS = new Set(["apiKey", "apiSecret", "token"]);
+const SENSITIVE_PATHS = new Set(["ssrf.allowRanges", "gemini.cloudflareApiKey", "gemini.allowBrowserCookies"]);
 
 /**
  * Recursively remove sensitive fields from a config object.
  * Returns a shallow clone at each level with sensitive keys omitted.
- *
- * A field is sensitive if:
- * - Its dot-separated path ends with a key matching SENSITIVE_KEY_PATTERNS
- * - Its full dot-separated path matches SENSITIVE_PATH_PATTERNS
  */
 export function stripSensitiveFields(
   config: Record<string, unknown>,
@@ -400,22 +387,10 @@ export function stripSensitiveFields(
   const result: Record<string, unknown> = {};
   for (const key of Object.keys(config)) {
     const fullPath = prefix ? `${prefix}.${key}` : key;
-    if (
-      SENSITIVE_KEY_PATTERNS.some((p) => p.test(fullPath)) ||
-      SENSITIVE_PATH_PATTERNS.some((p) => p.test(fullPath))
-    ) {
-      continue; // strip this field
-    }
+    if (SENSITIVE_KEYS.has(key) || SENSITIVE_PATHS.has(fullPath)) continue;
     const value = config[key];
-    if (
-      typeof value === "object" &&
-      value !== null &&
-      !Array.isArray(value)
-    ) {
-      result[key] = stripSensitiveFields(
-        value as Record<string, unknown>,
-        fullPath,
-      );
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      result[key] = stripSensitiveFields(value as Record<string, unknown>, fullPath);
     } else {
       result[key] = value;
     }

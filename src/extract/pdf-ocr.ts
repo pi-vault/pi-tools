@@ -6,10 +6,6 @@ import * as path from "node:path";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { getVersionedApiBase, DEFAULT_MODEL } from "./gemini-api.ts";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export interface RasterizeOptions {
   maxPages?: number; // default: 5, max: 20
   dpi?: number; // default: 150, range: 72-300
@@ -28,10 +24,6 @@ export interface RasterizeResult {
   truncated: boolean; // true if pageCount > maxPages
 }
 
-// ---------------------------------------------------------------------------
-// Scanned PDF Heuristic
-// ---------------------------------------------------------------------------
-
 /**
  * Determine whether a PDF is likely a scanned/image-based document.
  *
@@ -46,10 +38,6 @@ export function looksLikeScannedPdf(text: string, byteLength: number): boolean {
   return false;
 }
 
-// ---------------------------------------------------------------------------
-// Model Vision Detection
-// ---------------------------------------------------------------------------
-
 /**
  * Check whether the calling model supports image input.
  * Uses Pi's Model interface: `ctx.model?.input` is an array of
@@ -58,10 +46,6 @@ export function looksLikeScannedPdf(text: string, byteLength: number): boolean {
 export function modelSupportsImages(ctx: ExtensionContext): boolean {
   return (ctx.model as any)?.input?.includes("image") ?? false;
 }
-
-// ---------------------------------------------------------------------------
-// Page Count Detection (pdfinfo CLI)
-// ---------------------------------------------------------------------------
 
 /**
  * Read the total page count from a PDF file using `pdfinfo` (poppler-utils).
@@ -79,10 +63,6 @@ function readPageCount(pdfPath: string): Promise<number | undefined> {
     });
   });
 }
-
-// ---------------------------------------------------------------------------
-// PDF Rasterization (pdftoppm CLI)
-// ---------------------------------------------------------------------------
 
 /**
  * Rasterize PDF pages to PNG using `pdftoppm` from poppler-utils.
@@ -173,10 +153,6 @@ export async function rasterizePdfPages(
     }
   }
 }
-
-// ---------------------------------------------------------------------------
-// Gemini Vision OCR
-// ---------------------------------------------------------------------------
 
 /**
  * Extract text from PDF page images using Gemini's vision capability.

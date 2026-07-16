@@ -1,46 +1,28 @@
 /**
  * Global trust registry using Symbol.for() so state survives across
- * event handlers within the same process. Trust state is recorded from
- * Pi's ExtensionContext (ctx.isProjectTrusted()) and cached for use by
- * loadMergedConfig() which runs outside an event context.
+ * event handlers within the same process. Cached for loadMergedConfig()
+ * which runs outside an event context.
  */
 
-const TRUST_SYMBOL = Symbol.for("pi-tools.project-trust");
+const SYM = Symbol.for("pi-tools.project-trust");
+const registry = (): Map<string, boolean> =>
+  ((globalThis as any)[SYM] ??= new Map());
 
-interface TrustRegistry {
-  trusted?: Map<string, boolean>;
-}
-
-function trustRegistry(): TrustRegistry {
-  const host = globalThis as unknown as Record<PropertyKey, TrustRegistry | undefined>;
-  return (host[TRUST_SYMBOL] ??= {});
-}
-
-/**
- * Record trust state from an event handler that has access to ExtensionContext.
- * Called from session_start, model_select, and before_provider_request handlers.
- */
+/** Record trust state from an event handler with ExtensionContext access. */
 export function recordProjectTrust(ctx: {
   cwd?: string;
   isProjectTrusted?: () => boolean;
 }): void {
   if (!ctx.cwd) return;
-  const trusted = ctx.isProjectTrusted?.() === true;
-  const registry = trustRegistry();
-  registry.trusted ??= new Map();
-  registry.trusted.set(ctx.cwd, trusted);
+  registry().set(ctx.cwd, ctx.isProjectTrusted?.() === true);
 }
 
-/**
- * Check cached trust state for a project directory.
- * Returns false if the project has not been recorded yet (safe default).
- */
+/** Check cached trust. Returns false (safe default) when unrecorded. */
 export function isProjectTrustedCached(cwd: string): boolean {
-  return trustRegistry().trusted?.get(cwd) === true;
+  return registry().get(cwd) === true;
 }
 
-/** Reset trust registry — exposed for testing only. */
+/** Reset — testing only. */
 export function _resetTrustRegistry(): void {
-  const host = globalThis as unknown as Record<PropertyKey, TrustRegistry | undefined>;
-  host[TRUST_SYMBOL] = {};
+  (globalThis as any)[SYM] = new Map();
 }

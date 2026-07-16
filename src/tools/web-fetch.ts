@@ -6,7 +6,9 @@ import type { FetchProvider } from "../providers/types.ts";
 import {
   extractContent,
   RetryableExtractionError,
+  collectImageBlocks,
   type ExtractedContent,
+  type ImageBlock,
 } from "../extract/pipeline.ts";
 import { truncateContent } from "../utils/truncate.ts";
 import { sanitizeError } from "../utils/errors.ts";
@@ -243,26 +245,6 @@ export function createWebFetchTool(
       return text;
     },
   };
-}
-
-type ImageBlock = { type: "image"; data: string; mimeType: string };
-
-function collectImageBlocks(extracted: ExtractedContent): ImageBlock[] {
-  const blocks: ImageBlock[] = [];
-  if (extracted.thumbnail) {
-    blocks.push({ type: "image", data: extracted.thumbnail.data, mimeType: extracted.thumbnail.mimeType });
-  }
-  if (extracted.frames) {
-    for (const frame of extracted.frames) {
-      blocks.push({ type: "image", data: frame.data, mimeType: frame.mimeType });
-    }
-  }
-  if (extracted.images) {
-    for (const img of extracted.images) {
-      blocks.push({ type: "image", data: img.data, mimeType: img.mimeType });
-    }
-  }
-  return blocks;
 }
 
 type ToolResult = {
