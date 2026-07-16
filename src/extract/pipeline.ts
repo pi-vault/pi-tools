@@ -4,6 +4,15 @@ import { validateUrl } from "../utils/ssrf.ts";
 import { extractGitHub, parseGitHubUrl } from "./github.ts";
 import { extractHtml } from "./html.ts";
 import { extractPdf } from "./pdf.ts";
+import {
+  looksLikeScannedPdf,
+  rasterizePdfPages,
+  modelSupportsImages,
+  extractTextWithGeminiVision,
+  type PdfPageImage,
+} from "./pdf-ocr.ts";
+import { resolveApiKey, type GeminiConfig, type PdfConfig } from "../config.ts";
+import { getApiKey as getGeminiApiKey } from "./gemini-api.ts";
 import { extractRsc } from "./rsc.ts";
 import { extractViaJinaReader } from "./jina-reader.ts";
 import { isYouTubeURL, extractYouTube, isYouTubeEnabled } from "./youtube.ts";
@@ -44,6 +53,7 @@ export interface ExtractedContent {
   contentId?: string;
   thumbnail?: { data: string; mimeType: string };
   frames?: VideoFrame[];
+  images?: PdfPageImage[];
   duration?: number;
 }
 
@@ -128,6 +138,9 @@ export interface ExtractOptions {
   timestamp?: string;
   frames?: number;
   model?: string;
+  pdf?: PdfConfig;
+  gemini?: GeminiConfig;
+  ctx?: import("@earendil-works/pi-coding-agent").ExtensionContext;
 }
 
 export async function extractContent(
@@ -295,22 +308,95 @@ export async function extractContent(
   // the response body stream (cannot call response.text() afterwards)
   if (contentType.includes("application/pdf")) {
     chain.push("pdf");
+    let pdfText = "";
+    const buffer = new Uint8Array(await response.arrayBuffer());
+
     try {
-      const buffer = new Uint8Array(await response.arrayBuffer());
-      const text = await extractPdf(buffer);
-      if (text.length > 0) {
-        return {
-          text,
-          title: undefined,
-          url,
-          extractionChain: chain,
-          chars: text.length,
-          truncated: false,
-        };
-      }
+      pdfText = await extractPdf(buffer);
     } catch {
-      // fall through
+      // unpdf extraction failed — pdfText remains empty
     }
+
+    // If text extraction succeeded with enough content, return it
+    if (pdfText.length > 0 && !looksLikeScannedPdf(pdfText, buffer.byteLength)) {
+      return {
+        text: pdfText,
+        title: undefined,
+        url,
+        extractionChain: chain,
+        chars: pdfText.length,
+        truncated: false,
+      };
+    }
+
+    // OCR fallback for scanned PDFs
+    const pdfConfig = options?.pdf;
+    if (pdfConfig?.ocrEnabled !== false) {
+      chain.push("pdf:scanned");
+      try {
+        const rasterResult = await rasterizePdfPages(buffer, {
+          maxPages: pdfConfig?.ocrMaxPages ?? 5,
+          dpi: pdfConfig?.ocrDpi ?? 150,
+        });
+
+        // Strategy 1: If calling model supports images, return content blocks
+        if (options?.ctx && modelSupportsImages(options.ctx)) {
+          chain.push("pdf-ocr:content-blocks");
+          const imagesNote =
+            `\n\n[${rasterResult.images.length} scanned PDF page image(s) attached for vision OCR` +
+            `${rasterResult.truncated ? ` (showing ${rasterResult.images.length} of ${rasterResult.pageCount} pages)` : ""}]`;
+          return {
+            text: pdfText + imagesNote,
+            title: undefined,
+            url,
+            extractionChain: chain,
+            chars: pdfText.length + imagesNote.length,
+            truncated: rasterResult.truncated,
+            images: rasterResult.images,
+          };
+        }
+
+        // Strategy 2: Call Gemini vision API directly
+        const geminiKey = getGeminiApiKey() ?? resolveApiKey(options?.gemini?.apiKey);
+        if (geminiKey) {
+          const ocrText = await extractTextWithGeminiVision(
+            rasterResult.images,
+            geminiKey,
+            { geminiBaseUrl: options?.gemini?.baseUrl },
+            signal,
+          );
+          if (ocrText && ocrText.length > 100) {
+            chain.push("pdf-ocr:gemini");
+            return {
+              text: ocrText,
+              title: undefined,
+              url,
+              extractionChain: chain,
+              chars: ocrText.length,
+              truncated: false,
+            };
+          }
+          chain.push("pdf-ocr:gemini-fail");
+        }
+      } catch {
+        chain.push("pdf-ocr:error");
+        // pdftoppm not installed or other rasterization failure — fall through
+      }
+    }
+
+    // All PDF strategies failed
+    if (pdfText.length > 0) {
+      // Return the meager text we have rather than throwing
+      return {
+        text: pdfText,
+        title: undefined,
+        url,
+        extractionChain: chain,
+        chars: pdfText.length,
+        truncated: false,
+      };
+    }
+
     chain.push("pdf:fail");
     throw new Error(`Could not extract content from ${url}. Tried: ${chain.join(" -> ")}`);
   }
