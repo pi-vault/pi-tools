@@ -128,8 +128,10 @@ export const FALLBACK_ENV_MAP: Record<string, string> = {
   marginalia: "MARGINALIA_API_KEY",
   context7: "CONTEXT7_API_KEY",
   parallel: "PARALLEL_API_KEY",
+  ollama: "OLLAMA_API_KEY",
   "openai-native": "OPENAI_API_KEY",
   "openai-codex": "OPENAI_API_KEY",
+  "openai-web-search": "OPENAI_API_KEY",
   gemini: "GEMINI_API_KEY",
 };
 
@@ -182,6 +184,8 @@ const DEFAULT_CONFIG: PiToolsConfig = {
     firecrawl: { enabled: true, apiKey: "FIRECRAWL_API_KEY" },
     "exa-mcp": { enabled: true },
     "openai-codex": { enabled: true, apiKey: "OPENAI_API_KEY" },
+    "openai-web-search": { enabled: true, apiKey: "OPENAI_API_KEY" },
+    ollama: { enabled: false, apiKey: "OLLAMA_API_KEY" },
     parallel: { enabled: false, apiKey: "PARALLEL_API_KEY" },
     searxng: { enabled: false, instanceUrl: "http://localhost:8080" },
     websearchapi: { enabled: false, apiKey: "WEBSEARCHAPI_API_KEY" },
