@@ -1,15 +1,13 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 // MUST be before any import that uses pipeline.ts
-vi.mock("../../src/extract/pipeline.ts", () => ({
-  extractContent: vi.fn(),
-  RetryableExtractionError: class RetryableExtractionError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = "RetryableExtractionError";
-    }
-  },
-}));
+vi.mock("../../src/extract/pipeline.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/extract/pipeline.ts")>();
+  return {
+    ...actual,
+    extractContent: vi.fn(),
+  };
+});
 
 import { createWebFetchTool } from "../../src/tools/web-fetch.ts";
 import { extractContent } from "../../src/extract/pipeline.ts";

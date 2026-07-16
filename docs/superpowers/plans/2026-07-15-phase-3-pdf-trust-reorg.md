@@ -6,9 +6,11 @@
 
 **Architecture:** Three independent features that share a phase because they're all medium complexity. Order: trust gating first (needed by later config additions), then PDF OCR (new extract module), then file reorg (pure refactor, no behavior change).
 
-**Tech Stack:** TypeScript, Vitest, native `fetch`, `pdftoppm` CLI (poppler-utils), Pi ExtensionContext API
+**Tech Stack:** TypeScript, Vitest, native `fetch`, `pdftoppm`/`pdfinfo` CLI (poppler-utils), Pi ExtensionContext API
 
 **Spec:** `docs/superpowers/specs/2026-07-15-feature-adoption-design.md` (Phase 3)
+
+**Reference implementation:** `vanillagreencom-vstack/pi-extensions/pi-web-tools` uses the same `Symbol.for()` trust registry and `pdftoppm`/`pdfinfo` OCR approach. This plan follows those proven patterns.
 
 ---
 
@@ -315,7 +317,7 @@ Expected: FAIL — `stripSensitiveFields` is not exported from `src/config.ts` y
 
 - [ ] **Step 3: Add `stripSensitiveFields` to `src/config.ts`**
 
-Add after the `resolveProviderKey` function (around line 363), before the `MAX_WALK_DEPTH` constant:
+Add after the `resolveProviderKey` function, before the `MAX_WALK_DEPTH` constant:
 
 ```typescript
 // --- Trust Gating ---
@@ -373,13 +375,13 @@ export function stripSensitiveFields(
 
 - [ ] **Step 4: Add trust import and modify `loadMergedConfig` in `src/config.ts`**
 
-Add import at the top of `src/config.ts` (after line 7):
+Add import at the top of `src/config.ts` (after the existing imports):
 
 ```typescript
 import { isProjectTrustedCached } from "./utils/trust.ts";
 ```
 
-Replace the project config block in `loadMergedConfig()` (lines 418-428):
+Replace the project config block in `loadMergedConfig()` (the `// Layer 1: project config` section):
 
 ```typescript
   // Layer 1: project config (highest priority)
@@ -405,13 +407,13 @@ Replace the project config block in `loadMergedConfig()` (lines 418-428):
 
 - [ ] **Step 5: Add trust recording event handlers in `src/index.ts`**
 
-Add import at the top of `src/index.ts` (after line 17):
+Add import at the top of `src/index.ts` (after the existing imports):
 
 ```typescript
 import { recordProjectTrust } from "./utils/trust.ts";
 ```
 
-Add event handlers after the existing `session_start` handler block (after line 47), before `const resolveCandidates`:
+Add event handlers after the existing `session_start` handler block (after the `store.restore(restored)` closing brace), before `const resolveCandidates`:
 
 ```typescript
   // Record project trust state for config gating
@@ -471,7 +473,7 @@ Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.
 
 - [ ] **Step 1: Add `PdfConfig` interface to `src/config.ts`**
 
-Add after the `VideoConfig` interface (after line 74):
+Add after the `VideoConfig` interface:
 
 ```typescript
 export interface PdfConfig {
@@ -483,7 +485,7 @@ export interface PdfConfig {
 
 - [ ] **Step 2: Add `pdf` field to `PiToolsConfig` interface**
 
-In the `PiToolsConfig` interface (line 76-88), add after `video?: VideoConfig;`:
+In the `PiToolsConfig` interface, add after `video?: VideoConfig;`:
 
 ```typescript
   pdf?: PdfConfig;
@@ -491,7 +493,7 @@ In the `PiToolsConfig` interface (line 76-88), add after `video?: VideoConfig;`:
 
 - [ ] **Step 3: Add `pdf` to `parseConfigFile` result**
 
-In `parseConfigFile()` (around line 270), add after `video: parsed.video,`:
+In `parseConfigFile()`, add after `video: parsed.video,`:
 
 ```typescript
     pdf: parsed.pdf,
@@ -563,20 +565,7 @@ describe("looksLikeScannedPdf", () => {
   });
 
   it("returns true when text is empty regardless of file size", () => {
-    // Empty text always triggers, even for tiny PDFs
     expect(looksLikeScannedPdf("", 100)).toBe(true);
-  });
-
-  it("skips OCR when ocrEnabled is false", async () => {
-    // Even with a scanned PDF, OCR should not trigger when disabled
-    const scannedPdf = new Uint8Array(10_000); // > 5KB
-    const text = ""; // empty = looks scanned
-
-    // This test verifies the pipeline check, not rasterization
-    // When ocrEnabled is false, looksLikeScannedPdf result is irrelevant
-    expect(looksLikeScannedPdf(text, scannedPdf.byteLength)).toBe(true);
-    // The config gate happens in pipeline.ts: pdfConfig?.ocrEnabled !== false
-    // This is tested via the pipeline integration, not the unit function
   });
 });
 
@@ -603,8 +592,6 @@ describe("modelSupportsImages", () => {
 });
 
 describe("rasterizePdfPages", () => {
-  const originalExecFile = vi.fn();
-
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -614,8 +601,6 @@ describe("rasterizePdfPages", () => {
   });
 
   it("rejects when pdftoppm is not installed", async () => {
-    // Mock child_process.execFile to simulate ENOENT
-    const { execFile } = await import("node:child_process");
     vi.mock("node:child_process", async (importOriginal) => {
       const actual = await importOriginal<typeof import("node:child_process")>();
       return {
@@ -633,8 +618,6 @@ describe("rasterizePdfPages", () => {
   });
 
   it("defaults maxPages to 5 and dpi to 150", async () => {
-    // Verify default options are used — implementation detail test
-    // This validates the interface contract
     const buffer = new Uint8Array(0);
     try {
       await rasterizePdfPages(buffer, { maxPages: 3, dpi: 200 });
@@ -805,6 +788,27 @@ export function modelSupportsImages(ctx: ExtensionContext): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Page Count Detection (pdfinfo CLI)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the total page count from a PDF file using `pdfinfo` (poppler-utils).
+ * Returns undefined if pdfinfo is not installed or fails.
+ */
+function readPageCount(pdfPath: string): Promise<number | undefined> {
+  return new Promise((resolve) => {
+    execFile("pdfinfo", [pdfPath], { timeout: 5_000 }, (err, stdout) => {
+      if (err) {
+        resolve(undefined);
+        return;
+      }
+      const match = String(stdout ?? "").match(/^Pages:\s*(\d+)/m);
+      resolve(match?.[1] ? Number(match[1]) : undefined);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // PDF Rasterization (pdftoppm CLI)
 // ---------------------------------------------------------------------------
 
@@ -813,6 +817,9 @@ export function modelSupportsImages(ctx: ExtensionContext): boolean {
  *
  * Writes the PDF buffer to a temp directory, runs pdftoppm, reads
  * output PNGs as base64, and cleans up the temp directory.
+ *
+ * Uses `pdfinfo` (when available) to get the real page count so the
+ * `truncated` flag and `pageCount` in the result are accurate.
  *
  * @throws Error if pdftoppm is not installed or rasterization fails
  */
@@ -830,6 +837,10 @@ export async function rasterizePdfPages(
   try {
     fs.writeFileSync(pdfPath, pdfBuffer);
 
+    // Get real page count before rasterizing (best-effort)
+    const totalPages = await readPageCount(pdfPath);
+    const lastPage = Math.min(totalPages ?? maxPages, maxPages);
+
     await new Promise<void>((resolve, reject) => {
       execFile(
         "pdftoppm",
@@ -837,7 +848,7 @@ export async function rasterizePdfPages(
           "-png",
           "-r", String(dpi),
           "-f", "1",
-          "-l", String(maxPages),
+          "-l", String(lastPage),
           pdfPath,
           outputPrefix,
         ],
@@ -866,19 +877,19 @@ export async function rasterizePdfPages(
       .filter((f) => f.startsWith("page") && f.endsWith(".png"))
       .sort();
 
-    const images: PdfPageImage[] = files.map((file, index) => {
+    const images: PdfPageImage[] = files.map((file) => {
+      const match = file.match(/^page-(\d+)\.png$/);
       const data = fs.readFileSync(path.join(tmpDir, file));
       return {
         type: "image" as const,
         mimeType: "image/png" as const,
         data: data.toString("base64"),
-        pageNumber: index + 1,
+        pageNumber: match ? Number(match[1]) : files.indexOf(file) + 1,
       };
     });
 
-    // Estimate total page count: if we got maxPages images, the PDF likely has more
-    const truncated = images.length >= maxPages;
-    const pageCount = truncated ? maxPages : images.length; // conservative estimate
+    const pageCount = totalPages ?? images.length;
+    const truncated = pageCount > lastPage;
 
     return { pageCount, images, truncated };
   } finally {
@@ -976,6 +987,7 @@ New module src/extract/pdf-ocr.ts provides:
 - looksLikeScannedPdf(): heuristic for empty/minimal text PDFs
 - modelSupportsImages(): checks ctx.model.input for vision capability
 - rasterizePdfPages(): converts PDF to PNGs via pdftoppm CLI
+  Uses pdfinfo for accurate page counts (matches vanillagreencom pattern)
 - extractTextWithGeminiVision(): OCR fallback via Gemini vision API
 
 Generated with [Devin](https://devin.ai)
@@ -992,7 +1004,7 @@ Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.
 
 - [ ] **Step 1: Add imports to `pipeline.ts`**
 
-Add after the existing import of `extractPdf` (line 6):
+Add after the existing import of `extractPdf` (from `"./pdf.ts"`):
 
 ```typescript
 import {
@@ -1008,15 +1020,15 @@ import { getApiKey as getGeminiApiKey } from "./gemini-api.ts";
 
 - [ ] **Step 2: Add `images` field to `ExtractedContent` interface**
 
-In the `ExtractedContent` interface (lines 37-48), add after `frames?: VideoFrame[];`:
+In the `ExtractedContent` interface, add after `frames?: VideoFrame[];`:
 
 ```typescript
   images?: PdfPageImage[];
 ```
 
-- [ ] **Step 3: Add PDF OCR options to `ExtractOptions` interface**
+- [ ] **Step 3: Add PDF OCR + context options to `ExtractOptions` interface**
 
-In the `ExtractOptions` interface (lines 66-74), add after `model?: string;`:
+In the `ExtractOptions` interface (currently has `raw`, `github`, `allowRanges`, `prompt`, `timestamp`, `frames`, `model`), add after `model?: string;`:
 
 ```typescript
   pdf?: PdfConfig;
@@ -1024,9 +1036,9 @@ In the `ExtractOptions` interface (lines 66-74), add after `model?: string;`:
   ctx?: import("@earendil-works/pi-coding-agent").ExtensionContext;
 ```
 
-- [ ] **Step 4: Add OCR fallback after existing PDF extraction**
+- [ ] **Step 4: Replace PDF extraction section with OCR-capable version**
 
-Replace the PDF extraction section (lines 214-236):
+Replace the existing PDF extraction block (the `if (contentType.includes("application/pdf"))` section that starts with `chain.push("pdf")` and ends with `throw new Error(...)`) with:
 
 ```typescript
   // PDF extraction — must return or throw here since arrayBuffer() consumes
@@ -1069,7 +1081,7 @@ Replace the PDF extraction section (lines 214-236):
           chain.push("pdf-ocr:content-blocks");
           const imagesNote =
             `\n\n[${rasterResult.images.length} scanned PDF page image(s) attached for vision OCR` +
-            `${rasterResult.truncated ? ` (showing ${rasterResult.images.length} of ${rasterResult.pageCount}+ pages)` : ""}]`;
+            `${rasterResult.truncated ? ` (showing ${rasterResult.images.length} of ${rasterResult.pageCount} pages)` : ""}]`;
           return {
             text: pdfText + imagesNote,
             title: undefined,
@@ -1166,6 +1178,245 @@ Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.
 
 ---
 
+## Task 5b: Wire ctx, pdf, and gemini config from tool layer to pipeline
+
+**Why this task exists:** Task 5 added `ctx`, `pdf`, and `gemini` fields to `ExtractOptions`, but without updating callers the OCR strategies are unreachable. This task wires the config from `src/index.ts` → `createWebFetchTool` factory → `executeSingleUrl` → `extractContent`, making both OCR strategies functional.
+
+**Files:**
+- Modify: `src/tools/web-fetch.ts`
+- Modify: `src/index.ts`
+
+- [ ] **Step 1: Update `createWebFetchTool` factory signature**
+
+In `src/tools/web-fetch.ts`, add `pdfConfig` and `geminiConfig` parameters to the factory function. The current signature is:
+
+```typescript
+export function createWebFetchTool(
+  store: ContentStore,
+  resolveFetchCandidates?: () => FetchProvider[],
+  cache?: ContentCache,
+  guidance?: GuidanceOverride,
+  githubConfig?: GitHubConfig,
+  ssrfAllowRanges?: string[],
+): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
+```
+
+Change to:
+
+```typescript
+export function createWebFetchTool(
+  store: ContentStore,
+  resolveFetchCandidates?: () => FetchProvider[],
+  cache?: ContentCache,
+  guidance?: GuidanceOverride,
+  githubConfig?: GitHubConfig,
+  ssrfAllowRanges?: string[],
+  pdfConfig?: PdfConfig,
+  geminiConfig?: GeminiConfig,
+): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
+```
+
+Add the necessary imports at the top of `web-fetch.ts` (after the existing config import):
+
+```typescript
+import type { GitHubConfig, GuidanceOverride, PdfConfig, GeminiConfig } from "../config.ts";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+```
+
+(Replace the existing import that only imports `GitHubConfig, GuidanceOverride`.)
+
+- [ ] **Step 2: Add `ctx` parameter to `executeSingleUrl`**
+
+Change the `executeSingleUrl` function signature from:
+
+```typescript
+  async function executeSingleUrl(
+    url: string,
+    params: {
+      raw?: boolean;
+      fresh?: boolean;
+      prompt?: string;
+      timestamp?: string;
+      frames?: number;
+      model?: string;
+    },
+    signal: AbortSignal | undefined,
+  ) {
+```
+
+To:
+
+```typescript
+  async function executeSingleUrl(
+    url: string,
+    params: {
+      raw?: boolean;
+      fresh?: boolean;
+      prompt?: string;
+      timestamp?: string;
+      frames?: number;
+      model?: string;
+    },
+    signal: AbortSignal | undefined,
+    ctx?: ExtensionContext,
+  ) {
+```
+
+- [ ] **Step 3: Pass new options through to `extractContent`**
+
+Inside `executeSingleUrl`, update the `extractContent` call. Change:
+
+```typescript
+      const extracted = await extractContent(url, signal, {
+        raw: params.raw,
+        github: githubConfig,
+        allowRanges: ssrfAllowRanges,
+        prompt: params.prompt,
+        timestamp: params.timestamp,
+        frames: params.frames,
+        model: params.model,
+      });
+```
+
+To:
+
+```typescript
+      const extracted = await extractContent(url, signal, {
+        raw: params.raw,
+        github: githubConfig,
+        allowRanges: ssrfAllowRanges,
+        prompt: params.prompt,
+        timestamp: params.timestamp,
+        frames: params.frames,
+        model: params.model,
+        pdf: pdfConfig,
+        gemini: geminiConfig,
+        ctx,
+      });
+```
+
+- [ ] **Step 4: Pass `ctx` from `execute` method to `executeSingleUrl`**
+
+In the `execute` method, rename `_ctx` to `ctx` and pass it through. Change:
+
+```typescript
+    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+```
+
+To:
+
+```typescript
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+```
+
+And change the single-URL call from:
+
+```typescript
+        return executeSingleUrl(params.url!, params, signal ?? undefined);
+```
+
+To:
+
+```typescript
+        return executeSingleUrl(params.url!, params, signal ?? undefined, ctx);
+```
+
+Also update the multi-URL path's `extractContent` call (this will be further refactored in Task 7, but for now update it inline). In the multi-URL tasks mapping, change:
+
+```typescript
+        const extracted = await extractContent(u, signal ?? undefined, {
+          raw: params.raw,
+          github: githubConfig,
+          allowRanges: ssrfAllowRanges,
+          prompt: params.prompt,
+          timestamp: params.timestamp,
+          frames: params.frames,
+          model: params.model,
+        });
+```
+
+To:
+
+```typescript
+        const extracted = await extractContent(u, signal ?? undefined, {
+          raw: params.raw,
+          github: githubConfig,
+          allowRanges: ssrfAllowRanges,
+          prompt: params.prompt,
+          timestamp: params.timestamp,
+          frames: params.frames,
+          model: params.model,
+          pdf: pdfConfig,
+          gemini: geminiConfig,
+          ctx,
+        });
+```
+
+- [ ] **Step 5: Pass pdf and gemini config when registering the tool in `src/index.ts`**
+
+In `src/index.ts`, update the `createWebFetchTool` call. Change:
+
+```typescript
+  pi.registerTool(
+    createWebFetchTool(
+      store,
+      () => {
+        configManager.refresh();
+        return registry.selectFetchCandidates();
+      },
+      fetchCache,
+      buildAugmentedGuidance(configManager.current.guidance?.web_fetch, caps),
+      configManager.current.github,
+      configManager.current.ssrf.allowRanges,
+    ),
+```
+
+To:
+
+```typescript
+  pi.registerTool(
+    createWebFetchTool(
+      store,
+      () => {
+        configManager.refresh();
+        return registry.selectFetchCandidates();
+      },
+      fetchCache,
+      buildAugmentedGuidance(configManager.current.guidance?.web_fetch, caps),
+      configManager.current.github,
+      configManager.current.ssrf.allowRanges,
+      configManager.current.pdf,
+      configManager.current.gemini,
+    ),
+```
+
+- [ ] **Step 6: Run all tests**
+
+```bash
+pnpm test
+```
+
+Expected: all tests PASS. The new parameters are optional so existing callers (including test helpers) continue to work.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/tools/web-fetch.ts src/index.ts
+git commit -m "feat: wire pdf/gemini config and ctx from tool layer to pipeline
+
+createWebFetchTool now accepts pdfConfig and geminiConfig, passing
+them through executeSingleUrl and the multi-URL path to
+extractContent. The execute method forwards its ExtensionContext (ctx)
+so the pipeline can check model vision capabilities for Strategy 1
+(content blocks) and use configured Gemini base URL for Strategy 2.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>"
+```
+
+---
+
 ## Task 6: File reorg — extract concurrency utility
 
 **Files:**
@@ -1214,37 +1465,9 @@ export async function fetchWithConcurrencyLimit<T>(
 
 - [ ] **Step 2: Update `src/tools/web-fetch.ts` to import from concurrency utility**
 
-Replace the `fetchWithConcurrencyLimit` function and its usage in `web-fetch.ts`.
+Remove the `fetchWithConcurrencyLimit` function definition from `web-fetch.ts` (the function that starts with `async function fetchWithConcurrencyLimit<T>(` and ends with `return results;}`).
 
-Remove the function definition (lines 74-96):
-
-```typescript
-async function fetchWithConcurrencyLimit<T>(
-  tasks: (() => Promise<T>)[],
-  maxConcurrent: number,
-): Promise<PromiseSettledResult<T>[]> {
-  const results: PromiseSettledResult<T>[] = new Array(tasks.length);
-  let nextIndex = 0;
-
-  async function runNext(): Promise<void> {
-    while (nextIndex < tasks.length) {
-      const index = nextIndex++;
-      try {
-        const value = await tasks[index]();
-        results[index] = { status: "fulfilled", value };
-      } catch (reason) {
-        results[index] = { status: "rejected", reason };
-      }
-    }
-  }
-
-  const workers = Array.from({ length: Math.min(maxConcurrent, tasks.length) }, () => runNext());
-  await Promise.all(workers);
-  return results;
-}
-```
-
-And add the import at the top of `web-fetch.ts` (after line 14):
+Add the import at the top of `web-fetch.ts` (after the existing imports):
 
 ```typescript
 import { fetchWithConcurrencyLimit } from "../utils/concurrency.ts";
@@ -1285,8 +1508,11 @@ Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.
 
 Extract the multi-URL orchestration from the `execute` method of the tool definition. This includes URL deduplication, concurrent fetching, per-URL caps, and result building for the multi-URL path.
 
+**Important:** This module receives `ctx`, `pdfConfig`, and `geminiConfig` from the caller so that `extractContent` can route to OCR when needed.
+
 ```typescript
 // src/tools/web-fetch-multi.ts
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ContentStore } from "../storage.ts";
 import {
   extractContent,
@@ -1295,7 +1521,7 @@ import {
 import { truncateContent } from "../utils/truncate.ts";
 import { fetchWithConcurrencyLimit } from "../utils/concurrency.ts";
 import type { ContentCache } from "../cache.ts";
-import type { GitHubConfig } from "../config.ts";
+import type { GitHubConfig, PdfConfig, GeminiConfig } from "../config.ts";
 
 const INLINE_LIMIT = 15_000;
 const MANIFEST_PREVIEW_CHARS = 512;
@@ -1347,6 +1573,9 @@ export interface MultiUrlOptions {
   cache?: ContentCache;
   githubConfig?: GitHubConfig;
   ssrfAllowRanges?: string[];
+  pdfConfig?: PdfConfig;
+  geminiConfig?: GeminiConfig;
+  ctx?: ExtensionContext;
 }
 
 export async function executeMultiUrl(options: MultiUrlOptions): Promise<{
@@ -1359,7 +1588,7 @@ export async function executeMultiUrl(options: MultiUrlOptions): Promise<{
     urlResults: UrlResult[];
   };
 }> {
-  const { urls, params, signal, store, cache, githubConfig, ssrfAllowRanges } = options;
+  const { urls, params, signal, store, cache, githubConfig, ssrfAllowRanges, pdfConfig, geminiConfig, ctx } = options;
   const cap = perUrlCap(urls.length);
   const isManifest = urls.length >= 6;
 
@@ -1379,6 +1608,9 @@ export async function executeMultiUrl(options: MultiUrlOptions): Promise<{
       timestamp: params.timestamp,
       frames: params.frames,
       model: params.model,
+      pdf: pdfConfig,
+      gemini: geminiConfig,
+      ctx,
     });
 
     cache?.set(u, extracted);
@@ -1455,13 +1687,11 @@ export async function executeMultiUrl(options: MultiUrlOptions): Promise<{
 
 - [ ] **Step 2: Update `src/tools/web-fetch.ts` to use `executeMultiUrl`**
 
-Replace the multi-URL path in the `execute` method. In `web-fetch.ts`, remove:
-- The local `perUrlCap` function (lines 66-72)
-- The `MANIFEST_PREVIEW_CHARS` constant (line 18, keep `INLINE_LIMIT`)
-- The `MAX_CONCURRENT` constant (line 19)
-- The multi-URL block inside `execute` (the entire section from `// Multi-URL path` through the end of its return statement, roughly lines 217-308)
-- The `collectImageBlocks` function (lines 361-374) since it's now in web-fetch-multi.ts
-- The `ImageBlock` type alias (line 361)
+Remove from `web-fetch.ts`:
+- The `perUrlCap` function
+- The `MANIFEST_PREVIEW_CHARS` constant (keep `INLINE_LIMIT`)
+- The `MAX_CONCURRENT` constant
+- The entire multi-URL block inside `execute` (from `// Multi-URL path` through its return statement)
 
 Add import at the top:
 
@@ -1483,12 +1713,13 @@ The multi-URL path in `execute` becomes:
         cache,
         githubConfig,
         ssrfAllowRanges,
+        pdfConfig,
+        geminiConfig,
+        ctx,
       });
 ```
 
-Keep the `collectImageBlocks` function in `web-fetch.ts` as well (it's still used by `buildResult`), OR import it from `web-fetch-multi.ts`. Since `buildResult` also uses it, the cleanest approach is to keep a local copy in `web-fetch.ts` for `buildResult` and have `web-fetch-multi.ts` have its own copy (both are small, 12-line functions). Alternatively, move `collectImageBlocks` to a shared location — but that's more churn. Keep both copies for now.
-
-The constants `INLINE_LIMIT` remains in `web-fetch.ts` (used by `buildResult`). `MAX_CONCURRENT` and `MANIFEST_PREVIEW_CHARS` move to `web-fetch-multi.ts` only.
+Keep the `collectImageBlocks` function in `web-fetch.ts` as well (it's still used by `buildResult`). Both files have their own copy — both are small 12-line functions. Extracting to a shared utility is more churn than it's worth.
 
 After this refactor, `web-fetch.ts` should contain approximately:
 - Imports
@@ -1558,9 +1789,9 @@ New files created in Phase 3:
 
 Modified files:
 - `src/config.ts` (PdfConfig type, stripSensitiveFields, trust-gated loadMergedConfig)
-- `src/index.ts` (trust recording event handlers)
-- `src/extract/pipeline.ts` (PDF OCR integration, images field on ExtractedContent)
-- `src/tools/web-fetch.ts` (extracted concurrency + multi-URL logic)
+- `src/index.ts` (trust recording event handlers, pdf/gemini config pass-through)
+- `src/extract/pipeline.ts` (PDF OCR integration, images field on ExtractedContent, ctx/pdf/gemini in ExtractOptions)
+- `src/tools/web-fetch.ts` (factory accepts pdfConfig/geminiConfig, ctx wiring, extracted concurrency + multi-URL logic)
 
 - [ ] **Step 4: Final commit (if any fixups needed)**
 
@@ -1579,5 +1810,17 @@ Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.
 
 **Phase 3 complete.** Three independent features delivered:
 - **3b (Trust Gating):** Project configs can no longer override sensitive fields unless explicitly trusted. Trust state cached via global symbol registry.
-- **3a (PDF OCR):** Scanned PDFs trigger dual-strategy OCR: content blocks for vision-capable models, Gemini API fallback otherwise. Controlled by `PdfConfig.ocrEnabled/ocrMaxPages/ocrDpi`.
+- **3a (PDF OCR):** Scanned PDFs trigger dual-strategy OCR: content blocks for vision-capable models, Gemini API fallback otherwise. Controlled by `PdfConfig.ocrEnabled/ocrMaxPages/ocrDpi`. Uses `pdfinfo` for accurate page counts.
 - **3c (File Reorg):** `web-fetch.ts` split from 448 to ~280 lines. `fetchWithConcurrencyLimit` in `src/utils/concurrency.ts`, multi-URL orchestration in `src/tools/web-fetch-multi.ts`. No behavioral changes.
+
+---
+
+## Changes from original plan (v1 → v2)
+
+1. **Added Task 5b** — Critical gap: `ctx`, `pdfConfig`, and `geminiConfig` were added to `ExtractOptions` but never wired from the tool layer. Without this, Strategy 1 (vision content blocks) was dead code and the Gemini base URL override was unreachable. Task 5b updates `createWebFetchTool` factory signature, `executeSingleUrl`, and `src/index.ts` to pass all three through.
+
+2. **Task 4 (pdf-ocr.ts)** — Added `readPageCount()` using `pdfinfo` CLI for accurate page counts. Matches `vanillagreencom-vstack/pi-web-tools/src/extract/pdf-pages.ts` which uses the same approach. The original plan estimated `truncated` from output image count alone, producing inaccurate `pageCount` values.
+
+3. **Task 7 (web-fetch-multi.ts)** — `MultiUrlOptions` now includes `pdfConfig`, `geminiConfig`, and `ctx` fields, and passes them through to `extractContent`. The original plan omitted these, so multi-URL PDF fetches would never trigger OCR.
+
+4. **Removed brittle line-number references** — All step descriptions now reference code by pattern/context ("after the existing import of...", "the `if (contentType.includes(...))` section") rather than line numbers that go stale with every edit.

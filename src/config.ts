@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { deepMerge } from "./utils/deep-merge.ts";
 import { parseAllowRanges } from "./utils/ssrf.ts";
 import type { ResearchMode, ResearchModeDefaults } from "./research/types.ts";
+import { isProjectTrustedCached } from "./utils/trust.ts";
 
 export interface ProviderConfigEntry {
   enabled: boolean;
@@ -73,6 +74,12 @@ export interface VideoConfig {
   maxSizeMB?: number;
 }
 
+export interface PdfConfig {
+  ocrEnabled?: boolean;
+  ocrMaxPages?: number;
+  ocrDpi?: number;
+}
+
 export interface PiToolsConfig {
   defaultProvider: string;
   selectionStrategy: SelectionStrategy;
@@ -85,6 +92,7 @@ export interface PiToolsConfig {
   gemini?: GeminiConfig;
   youtube?: YouTubeConfig;
   video?: VideoConfig;
+  pdf?: PdfConfig;
 }
 
 const ENV_VAR_PATTERN = /^[A-Z][A-Z0-9_]+$/;
@@ -268,6 +276,7 @@ function parseConfigFile(raw: string): PiToolsConfig {
     gemini: parsed.gemini,
     youtube: parsed.youtube,
     video: parsed.video,
+    pdf: parsed.pdf,
   };
 }
 
@@ -362,6 +371,33 @@ export function resolveProviderKey(
   return undefined;
 }
 
+// --- Trust Gating ---
+
+const SENSITIVE_KEYS = new Set(["apiKey", "apiSecret", "token"]);
+const SENSITIVE_PATHS = new Set(["ssrf.allowRanges", "gemini.cloudflareApiKey", "gemini.allowBrowserCookies"]);
+
+/**
+ * Recursively remove sensitive fields from a config object.
+ * Returns a shallow clone at each level with sensitive keys omitted.
+ */
+export function stripSensitiveFields(
+  config: Record<string, unknown>,
+  prefix = "",
+): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const key of Object.keys(config)) {
+    const fullPath = prefix ? `${prefix}.${key}` : key;
+    if (SENSITIVE_KEYS.has(key) || SENSITIVE_PATHS.has(fullPath)) continue;
+    const value = config[key];
+    if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+      result[key] = stripSensitiveFields(value as Record<string, unknown>, fullPath);
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 const MAX_WALK_DEPTH = 10;
 const PROJECT_CONFIG_RELATIVE = path.join(".pi", "tools.json");
 const LEGACY_PROJECT_CONFIG_RELATIVE = path.join(".pi", "pi-tools.json");
@@ -420,8 +456,15 @@ export function loadMergedConfig(cwd?: string): PiToolsConfig {
     const projectPath = findProjectConfigPath(cwd);
     if (projectPath) {
       try {
-        const raw = fs.readFileSync(projectPath, "utf-8");
-        merged = deepMerge(merged, JSON.parse(raw) as Record<string, unknown>);
+        const raw = JSON.parse(fs.readFileSync(projectPath, "utf-8")) as Record<string, unknown>;
+        const trusted = isProjectTrustedCached(cwd);
+        const sanitized = trusted ? raw : stripSensitiveFields(raw);
+        if (!trusted && JSON.stringify(sanitized) !== JSON.stringify(raw)) {
+          console.warn(
+            "[pi-tools] Untrusted project: sensitive config fields ignored. Trust the project in Pi to allow full config.",
+          );
+        }
+        merged = deepMerge(merged, sanitized);
       } catch {
         // Malformed project config — skip
       }
