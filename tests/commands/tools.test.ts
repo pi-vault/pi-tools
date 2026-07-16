@@ -247,6 +247,20 @@ describe("tools subcommand dispatch", () => {
     expect(ctx.ui.notify).toHaveBeenCalled();
     expect(ctx.ui.select).toHaveBeenCalled();
   });
+
+  it("calls onReload after config-modifying subcommands", async () => {
+    const registry = mem();
+    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
+    const onReload = vi.fn();
+    const command = createToolsCommand(registry, tierMap, ["brave"], onReload);
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+
+    await command.handler("enable brave", ctx);
+    expect(onReload).toHaveBeenCalledTimes(1);
+
+    await command.handler("disable brave", ctx);
+    expect(onReload).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("tools monitor subcommand", () => {
@@ -328,5 +342,23 @@ describe("tools monitor subcommand", () => {
     activityMonitor.logStart({ type: "api", query: "after-reset" });
     const callCountAfter = (ctx.ui as any).setWidget.mock.calls.length;
     expect(callCountAfter).toBe(callCountBefore);
+  });
+
+  it("monitor on twice does not double-subscribe", async () => {
+    const registry = mem();
+    const tierMap = new Map<string, ProviderTier>();
+    const command = createToolsCommand(registry, tierMap);
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+    (ctx.ui as any).setWidget = vi.fn();
+    (ctx.ui as any).theme = { fg: (_c: string, t: string) => t };
+
+    await command.handler("monitor on", ctx);
+    const callCountAfterFirst = (ctx.ui as any).setWidget.mock.calls.length;
+
+    await command.handler("monitor on", ctx);
+    const callCountAfterSecond = (ctx.ui as any).setWidget.mock.calls.length;
+
+    // Should only have one more initial-render call, not two subscriptions triggering
+    expect(callCountAfterSecond).toBe(callCountAfterFirst + 1);
   });
 });
