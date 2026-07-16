@@ -12,7 +12,8 @@ import { truncateContent } from "../utils/truncate.ts";
 import { sanitizeError } from "../utils/errors.ts";
 import { executeWithFallback } from "../providers/execute.ts";
 import type { ContentCache } from "../cache.ts";
-import type { GitHubConfig, GuidanceOverride } from "../config.ts";
+import type { GitHubConfig, GuidanceOverride, PdfConfig, GeminiConfig } from "../config.ts";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 const INLINE_LIMIT = 15_000;
 const MANIFEST_PREVIEW_CHARS = 512;
@@ -102,6 +103,8 @@ export function createWebFetchTool(
   guidance?: GuidanceOverride,
   githubConfig?: GitHubConfig,
   ssrfAllowRanges?: string[],
+  pdfConfig?: PdfConfig,
+  geminiConfig?: GeminiConfig,
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
   async function executeSingleUrl(
     url: string,
@@ -114,6 +117,7 @@ export function createWebFetchTool(
       model?: string;
     },
     signal: AbortSignal | undefined,
+    ctx?: ExtensionContext,
   ) {
     try {
       // Check cache first (unless fresh)
@@ -132,6 +136,9 @@ export function createWebFetchTool(
         timestamp: params.timestamp,
         frames: params.frames,
         model: params.model,
+        pdf: pdfConfig,
+        gemini: geminiConfig,
+        ctx,
       });
 
       // Write to cache
@@ -193,7 +200,7 @@ export function createWebFetchTool(
       "For large pages, use web_read with the returned contentId to retrieve the full text.",
     ],
     parameters: WebFetchParams,
-    async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const hasUrl = params.url !== undefined && params.url.trim() !== "";
       const hasUrls = params.urls !== undefined && params.urls.length > 0;
 
@@ -211,7 +218,7 @@ export function createWebFetchTool(
 
       // Single-URL path
       if (hasUrl) {
-        return executeSingleUrl(params.url!, params, signal ?? undefined);
+        return executeSingleUrl(params.url!, params, signal ?? undefined, ctx);
       }
 
       // Multi-URL path
@@ -235,6 +242,9 @@ export function createWebFetchTool(
           timestamp: params.timestamp,
           frames: params.frames,
           model: params.model,
+          pdf: pdfConfig,
+          gemini: geminiConfig,
+          ctx,
         });
 
         cache?.set(u, extracted);

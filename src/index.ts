@@ -106,6 +106,8 @@ export default function createExtension(pi: ExtensionAPI): void {
       buildAugmentedGuidance(configManager.current.guidance?.web_fetch, caps),
       configManager.current.github,
       configManager.current.ssrf.allowRanges,
+      configManager.current.pdf,
+      configManager.current.gemini,
     ),
   );
   pi.registerTool(createWebReadTool(store, configManager.current.guidance?.web_read));
