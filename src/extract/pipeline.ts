@@ -65,6 +65,61 @@ const BROWSER_HEADERS: Record<string, string> = {
 
 const HONEST_USER_AGENT = "pi-tools/0.3.0 (content extraction)";
 
+const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10MB for non-PDF
+const MAX_PDF_SIZE_BYTES = 50 * 1024 * 1024; // 50MB for PDF
+const HEAD_TIMEOUT_MS = 5_000;
+
+export interface ProbeResult {
+  skip: boolean;
+  reason?: string;
+}
+
+export async function probeUrl(
+  url: string,
+  signal?: AbortSignal,
+): Promise<ProbeResult> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "HEAD",
+      headers: BROWSER_HEADERS,
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(HEAD_TIMEOUT_MS)])
+        : AbortSignal.timeout(HEAD_TIMEOUT_MS),
+      redirect: "follow",
+    });
+  } catch {
+    return { skip: false };
+  }
+
+  // HEAD not supported or error — fall through to GET
+  if (!response.ok) return { skip: false };
+
+  const contentType = response.headers.get("content-type") ?? "";
+  const contentLengthStr = response.headers.get("content-length");
+  const contentLength = contentLengthStr ? Number.parseInt(contentLengthStr, 10) : undefined;
+
+  // Block binary content (except PDF)
+  if (!contentType.includes("application/pdf")) {
+    for (const prefix of BINARY_CONTENT_TYPES) {
+      if (contentType.startsWith(prefix)) {
+        return { skip: true, reason: "binary content type" };
+      }
+    }
+  }
+
+  // Size limits
+  if (contentLength !== undefined && !Number.isNaN(contentLength)) {
+    const isPdf = contentType.includes("application/pdf");
+    const limit = isPdf ? MAX_PDF_SIZE_BYTES : MAX_SIZE_BYTES;
+    if (contentLength > limit) {
+      return { skip: true, reason: isPdf ? "PDF too large" : "response too large" };
+    }
+  }
+
+  return { skip: false };
+}
+
 export interface ExtractOptions {
   raw?: boolean;
   github?: GitHubConfig;
@@ -160,6 +215,12 @@ export async function extractContent(
       const ghResult = await extractGitHub(ghParsed, signal, githubConfig);
       if (ghResult) return ghResult;
     }
+  }
+
+  // HEAD probe: skip binary / oversized responses before full GET
+  const probe = await probeUrl(url, signal);
+  if (probe.skip) {
+    throw new Error(`Skipped: ${probe.reason} (${url})`);
   }
 
   const chain: string[] = [];

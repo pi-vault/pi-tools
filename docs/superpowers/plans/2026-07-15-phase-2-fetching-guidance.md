@@ -6,9 +6,11 @@
 
 **Architecture:** HEAD probe is a pure function in pipeline.ts called before the existing GET. Capabilities detection is a new utility that runs once at extension startup; results are merged into guidance arrays before tool registration.
 
-**Tech Stack:** TypeScript, Vitest, native `fetch`, `child_process.execFileSync`
+**Tech Stack:** TypeScript, Vitest, native `fetch`, `child_process.spawnSync`
 
 **Spec:** `docs/superpowers/specs/2026-07-15-feature-adoption-design.md` (Phase 2)
+
+**Competitive reference:** supi-web's 4-stage negotiation pipeline and `spawnSync`-based capability detection (best practice among 9 reviewed packages).
 
 ---
 
@@ -20,7 +22,7 @@
 - [ ] **Step 1: Create test file**
 
 ```typescript
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { probeUrl } from "../../src/extract/pipeline.ts";
 
 describe("probeUrl", () => {
@@ -131,7 +133,7 @@ Expected: FAIL — `probeUrl` is not exported from pipeline.ts yet.
 
 - [ ] **Step 3: Add probeUrl function**
 
-Add this after the `BROWSER_HEADERS` constant (after line 64) in `src/extract/pipeline.ts`:
+Add this after `HONEST_USER_AGENT` (line 66) in `src/extract/pipeline.ts`:
 
 ```typescript
 const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10MB for non-PDF
@@ -192,7 +194,7 @@ export async function probeUrl(
 
 - [ ] **Step 4: Integrate probeUrl into extractContent**
 
-In `src/extract/pipeline.ts`, add the HEAD probe call before the existing `fetch()`. Insert this immediately before the `let response: Response;` line (around line 165, after the GitHub check at line 161):
+In `src/extract/pipeline.ts`, add the HEAD probe call before the existing `fetch()`. Insert immediately before `const chain: string[] = [];` (line 165, after the GitHub check block ends at line 163):
 
 ```typescript
   // HEAD probe: skip binary / oversized responses before full GET
@@ -202,7 +204,7 @@ In `src/extract/pipeline.ts`, add the HEAD probe call before the existing `fetch
   }
 ```
 
-- [ ] **Step 5: Run tests**
+- [ ] **Step 5: Run HEAD probe tests**
 
 ```bash
 pnpm vitest run tests/extract/head-probe.test.ts
@@ -210,23 +212,143 @@ pnpm vitest run tests/extract/head-probe.test.ts
 
 Expected: all 7 tests PASS.
 
-- [ ] **Step 6: Run all tests to check for regressions**
+---
+
+### Task 2b: Fix existing tests broken by HEAD probe
+
+The HEAD probe inserts an additional `fetch()` call before every GET. This breaks existing tests that:
+1. Use `stubFetch` (URL-matched, method-agnostic) — HEAD gets a response too, which is fine for most tests since `probeUrl` returns `skip: false` for non-binary text/html.
+2. Override `globalThis.fetch` with call-count-based mocks — the extra HEAD call shifts call indexes.
+
+**Files:**
+- Modify: `tests/extract/pipeline.test.ts`
+- Modify: `tests/extract/cloudflare-retry.test.ts`
+
+- [ ] **Step 6: Fix pipeline.test.ts binary/raw tests**
+
+The "raw mode still blocks binary content types" test (line 240) expects error message `/unsupported binary/i`, but the HEAD probe now throws `"Skipped: binary content type"` before the GET even fires. Update the regex:
+
+```typescript
+// In "raw mode still blocks binary content types" test:
+// OLD: await expect(...).rejects.toThrow(/unsupported binary/i);
+// NEW:
+await expect(
+  extractContent("https://example.com/image", undefined, { raw: true }),
+).rejects.toThrow(/binary/i);
+```
+
+Similarly, verify the regular binary rejection tests (lines 51, 104) — these already use `/binary/i` which matches both error messages, so they should pass without changes.
+
+- [ ] **Step 7: Fix cloudflare-retry.test.ts**
+
+The Cloudflare retry tests use call-count-based mocks that break when HEAD is added. Fix all three tests to account for the HEAD probe call:
+
+**Test 1: "retries with honest User-Agent on 403 + cf-mitigated: challenge"** (line 18)
+
+The HEAD probe fires first, sees the 403, returns `skip: false` (non-ok). Then GET fires and sees a different response. The mock needs to track method to distinguish HEAD vs GET:
+
+```typescript
+it("retries with honest User-Agent on 403 + cf-mitigated: challenge", async () => {
+  const getCalls: { url: string; headers?: Record<string, string> }[] = [];
+  globalThis.fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const method = (init as Record<string, unknown>)?.method ?? "GET";
+
+    // HEAD probe — return 200 text/html (non-blocking)
+    if (method === "HEAD") {
+      return new Response(null, {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    }
+
+    getCalls.push({ url: input as string, headers: init?.headers as Record<string, string> });
+
+    if (getCalls.length === 1) {
+      return new Response("challenge", {
+        status: 403,
+        headers: { "cf-mitigated": "challenge" },
+      });
+    }
+    return new Response(SUCCESS_HTML, {
+      status: 200,
+      headers: { "content-type": "text/html" },
+    });
+  }) as unknown as typeof fetch;
+
+  const result = await extractContent("https://example.com");
+
+  expect(getCalls).toHaveLength(2);
+  expect(getCalls[0].headers?.["User-Agent"]).toContain("Mozilla/5.0");
+  expect(getCalls[1].headers?.["User-Agent"]).toContain("pi-tools");
+  expect(result.text).toContain("Hello From Retry");
+  expect(result.extractionChain).toContain("cf-challenge");
+});
+```
+
+**Test 2: "does NOT retry on 403 without cf-mitigated header"** (line 46)
+
+```typescript
+it("does NOT retry on 403 without cf-mitigated header", async () => {
+  let getCallCount = 0;
+  globalThis.fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    const method = (init as Record<string, unknown>)?.method ?? "GET";
+    if (method === "HEAD") {
+      return new Response(null, { status: 200, headers: { "content-type": "text/html" } });
+    }
+    getCallCount++;
+    return new Response("Forbidden", { status: 403, headers: {} });
+  }) as unknown as typeof fetch;
+
+  await expect(extractContent("https://example.com")).rejects.toThrow("HTTP 403");
+  expect(getCallCount).toBe(1);
+});
+```
+
+**Test 3: "propagates error if retry also fails"** (line 58)
+
+```typescript
+it("propagates error if retry also fails", async () => {
+  let getCallCount = 0;
+  globalThis.fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+    const method = (init as Record<string, unknown>)?.method ?? "GET";
+    if (method === "HEAD") {
+      return new Response(null, { status: 200, headers: { "content-type": "text/html" } });
+    }
+    getCallCount++;
+    if (getCallCount === 1) {
+      return new Response("challenge", {
+        status: 403,
+        headers: { "cf-mitigated": "challenge" },
+      });
+    }
+    return new Response("Still blocked", { status: 403, headers: {} });
+  }) as unknown as typeof fetch;
+
+  await expect(extractContent("https://example.com")).rejects.toThrow("HTTP 403");
+  expect(getCallCount).toBe(2);
+});
+```
+
+- [ ] **Step 8: Run full test suite**
 
 ```bash
 pnpm test
 ```
 
-Expected: all existing tests PASS. Some pipeline tests may send HEAD requests to the mock — if any fail, update the mock to handle HEAD requests the same as GET (return the same headers/status).
+Expected: all tests PASS. If any other tests fail due to the HEAD probe (e.g., `web-fetch.test.ts` via `stubFetch`), the fix is straightforward — `stubFetch` is URL-matched and method-agnostic, so HEAD responses use the same route as GET. The probe sees the same `content-type` header, and since most test responses are `text/html`, it returns `skip: false` and the test proceeds normally.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/extract/pipeline.ts tests/extract/head-probe.test.ts
+git add -A
 git commit -m "feat: HEAD probe to skip binary/large downloads before GET
 
 Sends a HEAD request before the full GET to check content-type and
 content-length. Skips binary content (except PDF), non-PDF over 10MB,
 and PDF over 50MB. Falls through to GET on HEAD failure or 405.
+
+Updates existing pipeline and Cloudflare retry tests to account for
+the additional HEAD call in the fetch sequence.
 
 Generated with [Devin](https://devin.ai)
 
@@ -239,42 +361,47 @@ Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.
 
 **Files:**
 - Create: `tests/utils/capabilities.test.ts`
-- Create: `src/utils/capabilities.ts`
 
-- [ ] **Step 8: Create test file**
+- [ ] **Step 10: Create test file**
+
+Uses `spawnSync` for capability detection (matching supi-web's pattern — more portable than `which`, works on all platforms). Tests must call `resetCapabilitiesCache()` in `beforeEach` to prevent stale cached results between test cases.
 
 ```typescript
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { detectCapabilities, type EnvironmentCapabilities } from "../../src/utils/capabilities.ts";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  detectCapabilities,
+  resetCapabilitiesCache,
+  type EnvironmentCapabilities,
+} from "../../src/utils/capabilities.ts";
 import * as childProcess from "node:child_process";
 
 vi.mock("node:child_process", () => ({
-  execFileSync: vi.fn(),
+  spawnSync: vi.fn(),
 }));
 
 describe("detectCapabilities", () => {
-  const mockExecFileSync = childProcess.execFileSync as ReturnType<typeof vi.fn>;
+  const mockSpawnSync = childProcess.spawnSync as unknown as ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    mockExecFileSync.mockReset();
+    mockSpawnSync.mockReset();
+    resetCapabilitiesCache();
   });
 
   it("detects all tools when available", () => {
-    mockExecFileSync.mockReturnValue(Buffer.from("/usr/bin/tool"));
+    mockSpawnSync.mockReturnValue({ status: 0 });
 
     const caps = detectCapabilities();
 
     expect(caps.hasGhCli).toBe(true);
     expect(caps.hasYtDlp).toBe(true);
     expect(caps.hasFfmpeg).toBe(true);
-    expect(mockExecFileSync).toHaveBeenCalledTimes(3);
+    expect(mockSpawnSync).toHaveBeenCalledTimes(3);
   });
 
-  it("returns false for tools that throw", () => {
-    mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
-      const tool = args?.[0] ?? cmd;
-      if (tool === "gh") return Buffer.from("/usr/bin/gh");
-      throw new Error("not found");
+  it("returns false for tools that throw or have non-zero status", () => {
+    mockSpawnSync.mockImplementation((cmd: string) => {
+      if (cmd === "gh") return { status: 0 };
+      return { status: 1 };
     });
 
     const caps = detectCapabilities();
@@ -285,8 +412,18 @@ describe("detectCapabilities", () => {
   });
 
   it("returns all false when no tools available", () => {
-    mockExecFileSync.mockImplementation(() => {
-      throw new Error("not found");
+    mockSpawnSync.mockReturnValue({ status: 1 });
+
+    const caps = detectCapabilities();
+
+    expect(caps.hasGhCli).toBe(false);
+    expect(caps.hasYtDlp).toBe(false);
+    expect(caps.hasFfmpeg).toBe(false);
+  });
+
+  it("returns all false when spawnSync throws", () => {
+    mockSpawnSync.mockImplementation(() => {
+      throw new Error("ENOENT");
     });
 
     const caps = detectCapabilities();
@@ -295,10 +432,20 @@ describe("detectCapabilities", () => {
     expect(caps.hasYtDlp).toBe(false);
     expect(caps.hasFfmpeg).toBe(false);
   });
+
+  it("caches results after first call", () => {
+    mockSpawnSync.mockReturnValue({ status: 0 });
+
+    detectCapabilities();
+    detectCapabilities();
+
+    // Only 3 calls (one per tool), not 6
+    expect(mockSpawnSync).toHaveBeenCalledTimes(3);
+  });
 });
 ```
 
-- [ ] **Step 9: Run test to verify it fails**
+- [ ] **Step 11: Run test to verify it fails**
 
 ```bash
 pnpm vitest run tests/utils/capabilities.test.ts
@@ -313,10 +460,12 @@ Expected: FAIL — `detectCapabilities` is not exported yet.
 **Files:**
 - Create: `src/utils/capabilities.ts`
 
-- [ ] **Step 10: Create capabilities module**
+- [ ] **Step 12: Create capabilities module**
+
+Uses `spawnSync(name, ["--version"])` instead of `execFileSync("which", [name])` — this is more portable (works on Windows where `which` isn't available) and follows the pattern used by supi-web (the best practice among reviewed packages).
 
 ```typescript
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 export interface EnvironmentCapabilities {
   hasGhCli: boolean;
@@ -326,8 +475,11 @@ export interface EnvironmentCapabilities {
 
 function isToolAvailable(name: string): boolean {
   try {
-    execFileSync("which", [name], { timeout: 2_000, stdio: "pipe" });
-    return true;
+    const result = spawnSync(name, ["--version"], {
+      timeout: 2_000,
+      stdio: "ignore",
+    });
+    return result.status === 0;
   } catch {
     return false;
   }
@@ -351,22 +503,23 @@ export function resetCapabilitiesCache(): void {
 }
 ```
 
-- [ ] **Step 11: Run tests**
+- [ ] **Step 13: Run tests**
 
 ```bash
 pnpm vitest run tests/utils/capabilities.test.ts
 ```
 
-Expected: all 3 tests PASS.
+Expected: all 5 tests PASS.
 
-- [ ] **Step 12: Commit**
+- [ ] **Step 14: Commit**
 
 ```bash
 git add src/utils/capabilities.ts tests/utils/capabilities.test.ts
 git commit -m "feat: detect environment CLI capabilities at startup
 
-Detect gh, yt-dlp, and ffmpeg availability via 'which'. Result is
-cached after first call. Used by dynamic guidance injection.
+Detect gh, yt-dlp, and ffmpeg availability via spawnSync. Result is
+cached after first call. Uses spawnSync(name, ['--version']) for
+cross-platform portability (following supi-web pattern).
 
 Generated with [Devin](https://devin.ai)
 
@@ -380,10 +533,10 @@ Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.
 **Files:**
 - Create: `tests/index-guidance.test.ts`
 
-- [ ] **Step 13: Create test for guidance merging**
+- [ ] **Step 15: Create test for guidance merging**
 
 ```typescript
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { buildAugmentedGuidance } from "../src/utils/capabilities.ts";
 import type { GuidanceOverride } from "../src/config.ts";
 
@@ -433,7 +586,7 @@ describe("buildAugmentedGuidance", () => {
 });
 ```
 
-- [ ] **Step 14: Run test to verify it fails**
+- [ ] **Step 16: Run test to verify it fails**
 
 ```bash
 pnpm vitest run tests/index-guidance.test.ts
@@ -449,9 +602,9 @@ Expected: FAIL — `buildAugmentedGuidance` is not exported yet.
 - Modify: `src/utils/capabilities.ts`
 - Modify: `src/index.ts`
 
-- [ ] **Step 15: Add buildAugmentedGuidance to capabilities.ts**
+- [ ] **Step 17: Add buildAugmentedGuidance to capabilities.ts**
 
-Append to `src/utils/capabilities.ts`:
+Add the import at the top and append the function after `resetCapabilitiesCache`:
 
 ```typescript
 import type { GuidanceOverride } from "../config.ts";
@@ -496,7 +649,7 @@ export function buildAugmentedGuidance(
 }
 ```
 
-- [ ] **Step 16: Integrate in index.ts**
+- [ ] **Step 18: Integrate in index.ts**
 
 In `src/index.ts`, add the import at the top (after existing imports):
 
@@ -504,14 +657,14 @@ In `src/index.ts`, add the import at the top (after existing imports):
 import { detectCapabilities, buildAugmentedGuidance } from "./utils/capabilities.ts";
 ```
 
-Then, inside `createExtension()`, add capabilities detection before tool registration (after `configManager` initialization, before the `resolveCandidates` function):
+Then, inside `createExtension()`, add capabilities detection before tool registration (after `configManager` initialization at line 35, before `resolveCandidates` at line 49):
 
 ```typescript
   // Detect environment capabilities once at startup
   const caps = detectCapabilities();
 ```
 
-Then update the `web_fetch` registration to use augmented guidance. Replace the existing guidance parameter:
+Then update the `web_fetch` registration to use augmented guidance. Replace the existing guidance parameter at line 90:
 
 ```typescript
       configManager.current.guidance?.web_fetch,
@@ -525,7 +678,7 @@ with:
 
 That's the only tool that gets capability-based guidelines (gh, yt-dlp, ffmpeg are all fetch-related).
 
-- [ ] **Step 17: Run all tests**
+- [ ] **Step 19: Run all tests**
 
 ```bash
 pnpm vitest run tests/index-guidance.test.ts && pnpm test
@@ -533,7 +686,7 @@ pnpm vitest run tests/index-guidance.test.ts && pnpm test
 
 Expected: all tests PASS.
 
-- [ ] **Step 18: Commit**
+- [ ] **Step 20: Commit**
 
 ```bash
 git add src/utils/capabilities.ts src/index.ts tests/index-guidance.test.ts
