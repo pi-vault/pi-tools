@@ -14,7 +14,7 @@ Five refactoring candidates that turn shallow modules into deep ones, improving 
 
 | Phase | Candidate                                          | Complexity | Depends on | Key metric                        |
 | ----- | -------------------------------------------------- | ---------- | ---------- | --------------------------------- |
-| 1     | Consolidate shallow HTTP search providers          | Easy       | None       | Delete 8 shallow provider files   |
+| 1     | Consolidate shallow HTTP search providers          | Easy       | None       | Delete 9 shallow provider files   |
 | 2     | Extract session lifecycle from index.ts            | Easy       | None       | Lifecycle testable independently  |
 | 3     | Extraction pipeline config self-resolution         | Medium     | None       | ExtractOptions drops 4 fields     |
 | 4     | Collapse web-fetch-multi into web-fetch            | Medium     | Phase 3    | Fix multi-URL fallback asymmetry  |
@@ -39,7 +39,7 @@ These terms are used precisely throughout (see LANGUAGE.md):
 
 ### Problem
 
-8 provider modules are shallow -- their interface (file, export, import in all.ts, test file) is nearly as complex as their implementation (a few config properties passed to http-adapter or a manual fetch call). Each fails the deletion test: deleting any one would not cause complexity to reappear across callers because the implementation is trivial.
+9 provider modules are shallow -- their interface (file, export, import in all.ts, test file) is nearly as complex as their implementation (a few config properties passed to http-adapter). Each fails the deletion test: deleting any one would not cause complexity to reappear across callers because the implementation is trivial. All 9 already use `createHttpSearchProvider` from http-adapter.ts.
 
 | Provider     | Lines | Unique logic |
 | ------------ | ----- | ------------ |
@@ -51,10 +51,11 @@ These terms are used precisely throughout (see LANGUAGE.md):
 | websearchapi | 21    | 0%           |
 | perplexity   | 24    | 0%           |
 | brave        | 38    | ~16%         |
+| brave-llm    | 29    | 0%           |
 
 ### Solution
 
-Replace 8 individual provider files with a single `src/providers/http-providers.ts` that exports an array of `ProviderMeta` definitions. Each definition uses `createHttpSearchProvider` from http-adapter.ts and references its parser from parsers.ts.
+Replace 9 individual provider files with a single `src/providers/http-providers.ts` that exports an array of `ProviderMeta` definitions. Each definition uses `createHttpSearchProvider` from http-adapter.ts and references its parser from parsers.ts.
 
 ### Files deleted
 
@@ -66,20 +67,21 @@ Replace 8 individual provider files with a single `src/providers/http-providers.
 - `src/providers/websearchapi.ts`
 - `src/providers/perplexity.ts`
 - `src/providers/brave.ts`
+- `src/providers/brave-llm.ts`
 
 ### Files created
 
-- `src/providers/http-providers.ts` -- array of `ProviderMeta` definitions for all 8 providers
+- `src/providers/http-providers.ts` -- array of `ProviderMeta` definitions for all 9 providers
 
 ### Files modified
 
-- `src/providers/all.ts` -- imports from `http-providers.ts` instead of 8 individual files
-- `src/providers/http-adapter.ts` -- add support for `SearchFilters` in `createHttpSearchProvider` if not already present, so providers like brave can pass date filters through to `buildBody` or `endpoint` callbacks
+- `src/providers/all.ts` -- imports from `http-providers.ts` instead of 9 individual files
 
 ### What stays unchanged
 
-- `src/providers/parsers.ts` -- stays centralized, all 18 parser functions remain
-- Deep provider files: duckduckgo, exa, openai-codex, ollama, context7, openai-web-search, tavily, firecrawl, jina, sofya, searxng, serper, parallel
+- `src/providers/http-adapter.ts` -- already supports `SearchFilters` in endpoint/buildBody callbacks; no changes needed
+- `src/providers/parsers.ts` -- stays centralized, all parser functions remain
+- Deep provider files: duckduckgo, exa, exa-mcp, openai-codex, ollama, context7, openai-web-search, tavily, firecrawl, jina, sofya, searxng, serper, parallel
 - All deep provider tests
 
 ### Provider definition shape
@@ -113,14 +115,14 @@ Each entry in the array is a `ProviderMeta`:
 
 ### Test changes
 
-- 8 individual provider test files get consolidated. Tests verify that each definition in `http-providers.ts` produces a working SearchProvider with correct metadata (name, tier, quota).
+- 9 individual provider test files get consolidated. Tests verify that each definition in `http-providers.ts` produces a working SearchProvider with correct metadata (name, tier, quota).
 - Parser functions remain tested in `tests/providers/parsers.test.ts`.
 - Per-provider HTTP behavior (correct URL construction, header injection, response parsing) can be tested via the factory output's `search()` method with stubbed fetch.
 
 ### Verification
 
 - `pnpm run typecheck` passes
-- `pnpm run test` passes -- all existing provider tests pass (deep providers unchanged) and consolidated tests cover the 8 migrated providers
+- `pnpm run test` passes -- all existing provider tests pass (deep providers unchanged) and consolidated tests cover the 9 migrated providers
 - `pnpm run lint` passes
 
 ---
@@ -137,12 +139,12 @@ Extract session lifecycle logic into `src/session.ts`. index.ts becomes thin wir
 
 ### Files created
 
-- `src/session.ts` -- exports functions for each lifecycle concern:
+- `src/session.ts` -- exports functions for each lifecycle concern. Each function accepts the Pi event + context plus its dependencies, so index.ts wires them as `pi.on("event", (event, ctx) => handleX(event, ctx, ...deps))`.
   - `restoreContent(entries, store)` -- filters stored content entries, calls `store.restore()`
-  - `handleSessionStart(ctx, store, refresh, registry)` -- orchestrates session_start: restore content, record trust, detect capabilities, apply guidance, refresh config. Takes a `refresh: () => void` callback rather than ConfigManager directly, so Phase 5 can swap the implementation without changing session.ts
-  - `handleModelSelect(model, registry)` -- resolves selection strategy from model
-  - `handleProviderRequest(request, rewrite)` -- OpenAI native web search rewriting
-  - `handleSessionShutdown(registry)` -- cleanup
+  - `handleSessionStart(event: SessionStartEvent, ctx: ExtensionContext, store, refresh: () => void, registry)` -- orchestrates session_start: restore content, record trust, detect capabilities, apply guidance, refresh config. Takes a `refresh: () => void` callback rather than ConfigManager directly, so Phase 5 can swap the implementation without changing session.ts
+  - `handleModelSelect(event: ModelSelectEvent, ctx: ExtensionContext, registry)` -- resolves selection strategy from model
+  - `handleProviderRequest(event: BeforeProviderRequestEvent, ctx: ExtensionContext, rewrite): BeforeProviderRequestEventResult | void` -- OpenAI native web search rewriting. Returns the event result type expected by the Pi framework.
+  - `handleSessionShutdown(event: SessionShutdownEvent, ctx: ExtensionContext, registry)` -- cleanup
 
 ### Files modified
 
@@ -192,23 +194,25 @@ The extraction pipeline resolves its own config internally via `loadMergedConfig
 // Before
 interface ExtractOptions {
   raw?: boolean;
-  prompt?: string;
-  model?: string;
-  timestamp?: string;
-  frames?: boolean;
   github?: GitHubConfig;      // removed
   allowRanges?: string[];     // removed
+  prompt?: string;
+  timestamp?: string;
+  frames?: number;
+  model?: string;
   pdf?: PdfConfig;            // removed
   gemini?: GeminiConfig;      // removed
+  ctx?: ExtensionContext;
 }
 
 // After
 interface ExtractOptions {
   raw?: boolean;
   prompt?: string;
-  model?: string;
   timestamp?: string;
-  frames?: boolean;
+  frames?: number;
+  model?: string;
+  ctx?: ExtensionContext;     // stays -- runtime context, not config
 }
 ```
 
@@ -340,7 +344,7 @@ Gains:
 - `refresh(force?: boolean)` method with TTL-cached config reloading (absorbs ConfigManager's 30-second TTL logic)
 - Internal change detection via `diffConfig()` -- on refresh, the registry diffs previous and current config, then registers/unregisters/re-registers providers as needed
 - `ProviderMeta[]` array and config state become internal to the registry
-- Provider alias resolution (`openai-native` -> `openai-web-search`) moves in
+- Provider alias resolution (`openai-native` -> `openai-codex`) moves in
 
 Constructor changes:
 
@@ -365,18 +369,17 @@ The registry reads config via `loadMergedConfig(cwd)` (direct import, matching P
 
 ### Where does diffConfig live?
 
-`diffConfig` is a pure function comparing two `PiToolsConfig` objects. It stays in `src/config.ts` since it operates on types defined there. The registry imports and calls it.
+`diffConfig` is currently in `config-manager.ts`. When config-manager.ts is deleted, `diffConfig` moves to `src/config.ts` alongside `loadMergedConfig` and `resolveApiKey` -- it's a pure function over `PiToolsConfig` and belongs with the config module. The `ConfigChangeSet` type it returns also moves to config.ts.
 
 ### What stays unchanged
 
-- `src/config.ts` -- `loadMergedConfig()`, `resolveApiKey()`, `diffConfig()` stay as exports
 - `src/providers/types.ts` -- `ProviderMeta` interface unchanged
 - All provider files, tool files, extraction files
 
 ### Test changes
 
 - Tests from `tests/config-manager.test.ts` move to `tests/providers/registry.test.ts`. Registry tests gain: TTL refresh behavior, config change detection triggering re-registration, provider alias resolution.
-- `diffConfig` tests stay in `tests/config.test.ts` (or a dedicated `tests/config-diff.test.ts`).
+- `diffConfig` tests move to `tests/config.test.ts` alongside the function.
 - The `expireTtlForTest()` leak disappears. Tests use `registry.refresh(force: true)` which bypasses TTL, or `vi.useFakeTimers()` to advance past the TTL window.
 
 ### Size impact
