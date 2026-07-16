@@ -248,3 +248,85 @@ describe("tools subcommand dispatch", () => {
     expect(ctx.ui.select).toHaveBeenCalled();
   });
 });
+
+describe("tools monitor subcommand", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("monitor on subscribes and shows notification", async () => {
+    const registry = mem();
+    const tierMap = new Map<string, ProviderTier>();
+    const command = createToolsCommand(registry, tierMap);
+    // makeCtx() doesn't include setWidget — add it manually
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+    (ctx.ui as any).setWidget = vi.fn();
+    (ctx.ui as any).theme = { fg: (_c: string, t: string) => t };
+
+    await command.handler("monitor on", ctx);
+
+    const msg = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
+    expect(msg.toLowerCase()).toContain("enabled");
+    expect((ctx.ui as any).setWidget).toHaveBeenCalledWith(
+      "pi-tools-activity",
+      expect.arrayContaining([expect.any(String)]),
+    );
+  });
+
+  it("monitor off removes widget and shows notification", async () => {
+    const registry = mem();
+    const tierMap = new Map<string, ProviderTier>();
+    const command = createToolsCommand(registry, tierMap);
+    // makeCtx() doesn't include setWidget — add it manually
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+    (ctx.ui as any).setWidget = vi.fn();
+    (ctx.ui as any).theme = { fg: (_c: string, t: string) => t };
+
+    // First turn on
+    await command.handler("monitor on", ctx);
+    // Then turn off
+    await command.handler("monitor off", ctx);
+
+    const lastCall = (ctx.ui as any).setWidget.mock.calls.at(-1);
+    expect(lastCall[0]).toBe("pi-tools-activity");
+    expect(lastCall[1]).toBeUndefined();
+
+    const notifyCalls = vi.mocked(ctx.ui.notify).mock.calls;
+    const lastNotify = notifyCalls.at(-1)?.[0] as string;
+    expect(lastNotify.toLowerCase()).toContain("disabled");
+  });
+
+  it("monitor without on/off shows usage", async () => {
+    const registry = mem();
+    const tierMap = new Map<string, ProviderTier>();
+    const command = createToolsCommand(registry, tierMap);
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+
+    await command.handler("monitor", ctx);
+
+    const msg = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
+    expect(msg.toLowerCase()).toContain("usage");
+  });
+
+  it("resetMonitor clears entries and unsubscribes", async () => {
+    const registry = mem();
+    const tierMap = new Map<string, ProviderTier>();
+    const command = createToolsCommand(registry, tierMap);
+    // makeCtx() doesn't include setWidget — add it manually
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+    (ctx.ui as any).setWidget = vi.fn();
+    (ctx.ui as any).theme = { fg: (_c: string, t: string) => t };
+
+    // Turn on monitor
+    await command.handler("monitor on", ctx);
+    // Reset
+    command.resetMonitor();
+
+    // Monitor should be disconnected — new events should not trigger setWidget
+    const callCountBefore = (ctx.ui as any).setWidget.mock.calls.length;
+    const { activityMonitor } = await import("../../src/monitor/activity-monitor.ts");
+    activityMonitor.logStart({ type: "api", query: "after-reset" });
+    const callCountAfter = (ctx.ui as any).setWidget.mock.calls.length;
+    expect(callCountAfter).toBe(callCountBefore);
+  });
+});
