@@ -14,7 +14,7 @@ export function buildDiagnosticPreamble(
   // Environment keys
   const envKeys = Object.entries(FALLBACK_ENV_MAP);
   const detected: string[] = [];
-  const missing: string[] = [];
+  let missingCount = 0;
   const seen = new Set<string>();
 
   for (const [, envVar] of envKeys) {
@@ -23,14 +23,14 @@ export function buildDiagnosticPreamble(
     if (process.env[envVar]) {
       detected.push(`  ${envVar}: detected`);
     } else {
-      missing.push(`  ${envVar}: not set`);
+      missingCount++;
     }
   }
 
   if (detected.length > 0) {
     lines.push("Environment keys:");
     lines.push(...detected);
-    if (missing.length > 0) lines.push(`  ... and ${missing.length} not set`);
+    if (missingCount > 0) lines.push(`  ... and ${missingCount} not set`);
     lines.push("");
   }
 
@@ -40,16 +40,36 @@ export function buildDiagnosticPreamble(
   lines.push(`Config file: ${configExists ? configPath : "not created yet"}`);
 
   // Provider summary
-  const tier1 = allProviderNames.filter((n) => tierMap.get(n) === 1);
-  const tier2 = allProviderNames.filter((n) => tierMap.get(n) === 2);
-  const tier3 = allProviderNames.filter(
-    (n) => tierMap.get(n) === 3 || !tierMap.has(n),
-  );
+  const tierCounts = [0, 0, 0];
+  for (const n of allProviderNames) {
+    const t = tierMap.get(n) ?? 3;
+    tierCounts[t - 1]++;
+  }
   lines.push(
-    `Providers: ${tier1.length} tier-1, ${tier2.length} tier-2, ${tier3.length} tier-3 (${allProviderNames.length} total)`,
+    `Providers: ${tierCounts[0]} tier-1, ${tierCounts[1]} tier-2, ${tierCounts[2]} tier-3 (${allProviderNames.length} total)`,
   );
 
   return lines.join("\n");
+}
+
+function writeProviderConfig(
+  providers: Record<string, { enabled: boolean; apiKey?: string }>,
+  defaultProvider: string,
+): void {
+  updateConfig((config) => {
+    const existing = (config.providers ?? {}) as Record<string, Record<string, unknown>>;
+    for (const [name, entry] of Object.entries(providers)) {
+      existing[name] = { ...existing[name], ...entry };
+    }
+    return { ...config, defaultProvider, providers: existing };
+  });
+}
+
+async function pickDefault(
+  ctx: ExtensionCommandContext,
+  enabledNames: string[],
+): Promise<string> {
+  return (await ctx.ui.select("Default provider:", ["auto", ...enabledNames])) ?? "auto";
 }
 
 async function runQuickSetup(
@@ -88,22 +108,7 @@ async function runQuickSetup(
     }
   }
 
-  // Default provider selection
-  const defaultOptions = ["auto", ...enabledNames];
-  const defaultProvider =
-    (await ctx.ui.select("Default provider:", defaultOptions)) ?? "auto";
-
-  updateConfig((config) => {
-    const existingProviders = (config.providers ?? {}) as Record<
-      string,
-      Record<string, unknown>
-    >;
-    for (const [name, entry] of Object.entries(providers)) {
-      existingProviders[name] = { ...existingProviders[name], ...entry };
-    }
-    return { ...config, defaultProvider, providers: existingProviders };
-  });
-
+  writeProviderConfig(providers, await pickDefault(ctx, enabledNames));
   ctx.ui.notify(
     `Quick setup complete! ${enabledNames.length} provider${enabledNames.length !== 1 ? "s" : ""} configured.`,
   );
@@ -132,21 +137,7 @@ async function runFullSetup(
     }
   }
 
-  const defaultOptions = ["auto", ...enabledNames];
-  const defaultProvider =
-    (await ctx.ui.select("Default provider:", defaultOptions)) ?? "auto";
-
-  updateConfig((config) => {
-    const existingProviders = (config.providers ?? {}) as Record<
-      string,
-      Record<string, unknown>
-    >;
-    for (const [name, entry] of Object.entries(providers)) {
-      existingProviders[name] = { ...existingProviders[name], ...entry };
-    }
-    return { ...config, defaultProvider, providers: existingProviders };
-  });
-
+  writeProviderConfig(providers, await pickDefault(ctx, enabledNames));
   ctx.ui.notify(
     `Setup complete! ${enabledNames.length} provider${enabledNames.length !== 1 ? "s" : ""} enabled.`,
   );

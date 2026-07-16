@@ -35,16 +35,13 @@ export function updateConfig(
   return configPath;
 }
 
-function isKnownProvider(name: string, allProviderNames: string[]): boolean {
-  return allProviderNames.includes(name);
-}
-
-export function handleEnable(
+export function handleToggle(
   ctx: ExtensionCommandContext,
   name: string,
+  enabled: boolean,
   allProviderNames: string[],
 ): void {
-  if (!isKnownProvider(name, allProviderNames)) {
+  if (!allProviderNames.includes(name)) {
     ctx.ui.notify(`Unknown provider "${name}". Available: ${allProviderNames.join(", ")}`);
     return;
   }
@@ -53,30 +50,10 @@ export function handleEnable(
       string,
       Record<string, unknown>
     >;
-    providers[name] = { ...providers[name], enabled: true };
+    providers[name] = { ...providers[name], enabled };
     return { ...config, providers };
   });
-  ctx.ui.notify(`Enabled ${name}. Config saved to ${configPath}`);
-}
-
-export function handleDisable(
-  ctx: ExtensionCommandContext,
-  name: string,
-  allProviderNames: string[],
-): void {
-  if (!isKnownProvider(name, allProviderNames)) {
-    ctx.ui.notify(`Unknown provider "${name}". Available: ${allProviderNames.join(", ")}`);
-    return;
-  }
-  const configPath = updateConfig((config) => {
-    const providers = (config.providers ?? {}) as Record<
-      string,
-      Record<string, unknown>
-    >;
-    providers[name] = { ...providers[name], enabled: false };
-    return { ...config, providers };
-  });
-  ctx.ui.notify(`Disabled ${name}. Config saved to ${configPath}`);
+  ctx.ui.notify(`${enabled ? "Enabled" : "Disabled"} ${name}. Config saved to ${configPath}`);
 }
 
 export function handleKey(
@@ -89,7 +66,7 @@ export function handleKey(
     ctx.ui.notify("Usage: /tools key <provider> <api-key>");
     return;
   }
-  if (!isKnownProvider(name, allProviderNames)) {
+  if (!allProviderNames.includes(name)) {
     ctx.ui.notify(`Unknown provider "${name}". Available: ${allProviderNames.join(", ")}`);
     return;
   }
@@ -109,7 +86,7 @@ export function handleDefault(
   name: string,
   allProviderNames: string[],
 ): void {
-  if (name !== "auto" && !isKnownProvider(name, allProviderNames)) {
+  if (name !== "auto" && !allProviderNames.includes(name)) {
     ctx.ui.notify(`Unknown provider "${name}". Use "auto" or one of: ${allProviderNames.join(", ")}`);
     return;
   }

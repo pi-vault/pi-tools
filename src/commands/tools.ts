@@ -3,8 +3,7 @@ import type { ProviderRegistry } from "../providers/registry.ts";
 import type { ProviderTier } from "../providers/types.ts";
 import {
   parseArgs,
-  handleEnable,
-  handleDisable,
+  handleToggle,
   handleKey,
   handleDefault,
   handleTest,
@@ -153,12 +152,12 @@ export function createToolsCommand(
           break;
 
         case "enable":
-          handleEnable(ctx, rest[0] ?? "", providers);
+          handleToggle(ctx, rest[0] ?? "", true, providers);
           onReload?.();
           break;
 
         case "disable":
-          handleDisable(ctx, rest[0] ?? "", providers);
+          handleToggle(ctx, rest[0] ?? "", false, providers);
           onReload?.();
           break;
 

@@ -2,8 +2,7 @@ import * as fs from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import {
-  handleEnable,
-  handleDisable,
+  handleToggle,
   handleKey,
   handleDefault,
   handleTest,
@@ -102,7 +101,7 @@ describe("updateConfig", () => {
   });
 });
 
-describe("handleEnable", () => {
+describe("handleToggle", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.mocked(fs.readFileSync).mockReturnValue(
@@ -116,7 +115,7 @@ describe("handleEnable", () => {
     const ctx = makeCtx() as unknown as ExtensionCommandContext;
     const allProviderNames = ["brave", "exa", "duckduckgo"];
 
-    handleEnable(ctx, "brave", allProviderNames);
+    handleToggle(ctx, "brave", true, allProviderNames);
 
     const [, writeContent] = vi.mocked(fs.writeFileSync).mock.calls[0];
     const written = JSON.parse(writeContent as string);
@@ -124,37 +123,26 @@ describe("handleEnable", () => {
     expect(ctx.ui.notify).toHaveBeenCalled();
   });
 
-  it("notifies on unknown provider name", () => {
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-    const allProviderNames = ["brave", "exa"];
-
-    handleEnable(ctx, "nonexistent", allProviderNames);
-
-    expect(fs.writeFileSync).not.toHaveBeenCalled();
-    const msg = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
-    expect(msg.toLowerCase()).toContain("unknown");
-  });
-});
-
-describe("handleDisable", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ providers: { brave: { enabled: true } } }),
-    );
-    vi.mocked(fs.writeFileSync).mockImplementation(() => {});
-    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
-  });
-
   it("disables a provider in config", () => {
     const ctx = makeCtx() as unknown as ExtensionCommandContext;
     const allProviderNames = ["brave", "exa"];
 
-    handleDisable(ctx, "brave", allProviderNames);
+    handleToggle(ctx, "brave", false, allProviderNames);
 
     const [, writeContent] = vi.mocked(fs.writeFileSync).mock.calls[0];
     const written = JSON.parse(writeContent as string);
     expect(written.providers.brave.enabled).toBe(false);
+  });
+
+  it("notifies on unknown provider name", () => {
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+    const allProviderNames = ["brave", "exa"];
+
+    handleToggle(ctx, "nonexistent", true, allProviderNames);
+
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+    const msg = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
+    expect(msg.toLowerCase()).toContain("unknown");
   });
 });
 
