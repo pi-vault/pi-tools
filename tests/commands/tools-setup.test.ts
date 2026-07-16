@@ -42,14 +42,31 @@ describe("buildDiagnosticPreamble", () => {
 });
 
 describe("handleEnhancedSetup", () => {
+  // Isolate tests from real credentials that may exist in the shell environment
+  const savedApiKeys: Record<string, string | undefined> = {};
+
   beforeEach(() => {
     vi.restoreAllMocks();
+    for (const key of ["BRAVE_API_KEY", "EXA_API_KEY", "TAVILY_API_KEY"]) {
+      savedApiKeys[key] = process.env[key];
+      delete process.env[key];
+    }
     vi.mocked(fs.readFileSync).mockImplementation(() => {
       throw new Error("ENOENT");
     });
     vi.mocked(fs.writeFileSync).mockImplementation(() => {});
     vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
     vi.mocked(fs.existsSync).mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    for (const [key, val] of Object.entries(savedApiKeys)) {
+      if (val !== undefined) {
+        process.env[key] = val;
+      } else {
+        delete process.env[key];
+      }
+    }
   });
 
   it("shows status when user chooses 'Just show status'", async () => {
@@ -89,6 +106,7 @@ describe("handleEnhancedSetup", () => {
     const written = JSON.parse(writeContent as string);
     expect(written.providers.brave.apiKey).toBe("BSA_testkey12345678");
     expect(written.providers.brave.enabled).toBe(true);
+    expect(written.providers.exa.enabled).toBe(false);
   });
 
   it("runs full setup iterating all providers", async () => {
@@ -137,5 +155,51 @@ describe("handleEnhancedSetup", () => {
 
     // Should not crash; no config written
     expect(fs.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("treats undefined input as skip in quick setup", async () => {
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+    vi.mocked(ctx.ui.select).mockResolvedValueOnce("quick");
+    // Both providers return undefined (cancelled input)
+    vi.mocked(ctx.ui.input)
+      .mockResolvedValueOnce(undefined as any)
+      .mockResolvedValueOnce(undefined as any);
+    // Default provider
+    vi.mocked(ctx.ui.select).mockResolvedValueOnce("auto");
+
+    const allProviderNames = ["brave", "exa"];
+    const tierMap = new Map<string, ProviderTier>([["brave", 1], ["exa", 1]]);
+
+    await handleEnhancedSetup(ctx, allProviderNames, tierMap);
+
+    // Config should be written but no providers enabled
+    expect(fs.writeFileSync).toHaveBeenCalled();
+    const [, writeContent] = vi.mocked(fs.writeFileSync).mock.calls[0];
+    const written = JSON.parse(writeContent as string);
+    expect(written.providers.brave.enabled).toBe(false);
+    expect(written.providers.exa.enabled).toBe(false);
+  });
+
+  it("handles quick setup where user skips all providers", async () => {
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+    vi.mocked(ctx.ui.select).mockResolvedValueOnce("quick");
+    // Skip all (empty string for each)
+    vi.mocked(ctx.ui.input)
+      .mockResolvedValueOnce("")
+      .mockResolvedValueOnce("");
+    // Default options should only be ["auto"] since none enabled
+    vi.mocked(ctx.ui.select).mockResolvedValueOnce("auto");
+
+    const allProviderNames = ["brave", "exa"];
+    const tierMap = new Map<string, ProviderTier>([["brave", 1], ["exa", 1]]);
+
+    await handleEnhancedSetup(ctx, allProviderNames, tierMap);
+
+    expect(fs.writeFileSync).toHaveBeenCalled();
+    const [, writeContent] = vi.mocked(fs.writeFileSync).mock.calls[0];
+    const written = JSON.parse(writeContent as string);
+    expect(written.providers.brave.enabled).toBe(false);
+    expect(written.providers.exa.enabled).toBe(false);
+    expect(written.defaultProvider).toBe("auto");
   });
 });
