@@ -46,7 +46,7 @@ export class OllamaProvider implements SearchProvider, FetchProvider {
     this.baseUrl = (
       options?.baseUrl ?? process.env.OLLAMA_HOST ?? DEFAULT_BASE_URL
     ).replace(/\/+$/, "");
-    this.apiKey = options?.apiKey ?? process.env.OLLAMA_API_KEY;
+    this.apiKey = options?.apiKey;
     this.isLocal = isLocalHost(this.baseUrl);
   }
 

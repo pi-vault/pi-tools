@@ -185,7 +185,7 @@ const DEFAULT_CONFIG: PiToolsConfig = {
     "exa-mcp": { enabled: true },
     "openai-codex": { enabled: true, apiKey: "OPENAI_API_KEY" },
     "openai-web-search": { enabled: true, apiKey: "OPENAI_API_KEY" },
-    ollama: { enabled: false },
+    ollama: { enabled: false, apiKey: "OLLAMA_API_KEY" },
     parallel: { enabled: false, apiKey: "PARALLEL_API_KEY" },
     searxng: { enabled: false, instanceUrl: "http://localhost:8080" },
     websearchapi: { enabled: false, apiKey: "WEBSEARCHAPI_API_KEY" },
