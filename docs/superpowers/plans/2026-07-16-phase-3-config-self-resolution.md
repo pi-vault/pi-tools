@@ -4,7 +4,7 @@
 
 **Goal:** Make the extraction pipeline resolve its own config internally via `loadMergedConfig()` instead of receiving config through parameters. `ExtractOptions` drops 4 config fields (`github`, `allowRanges`, `pdf`, `gemini`), and the tool layer (`web-fetch.ts`, `web-fetch-multi.ts`, `index.ts`) stops threading config into the extraction layer.
 
-**Architecture:** The extraction submodules (`youtube.ts`, `gemini-api.ts`, `video.ts`) already resolve config internally via direct import. `pipeline.ts` is the only holdout — it receives config from the tool layer, creating a 3-file change requirement for every new config option. After this phase, all extraction code is self-contained for config resolution. No new dependencies. No behavioral change.
+**Architecture:** The extraction submodules (`youtube.ts`, `gemini-api.ts`, `video.ts`) already resolve config internally via direct import (using `loadConfig()`). `pipeline.ts` is the only holdout — it receives config from the tool layer, creating a 3-file change requirement for every new config option. After this phase, `pipeline.ts` calls `loadMergedConfig(process.cwd())` directly, which preserves the current three-layer resolution (defaults → global → project config). All extraction code becomes self-contained for config resolution. No new dependencies. No behavioral change.
 
 **Tech Stack:** TypeScript (ES2022, Node16 modules), Vitest, native `fetch`, Pi ExtensionAPI (`@earendil-works/pi-coding-agent`)
 
@@ -15,6 +15,7 @@
 ## Task 1: Update `ExtractOptions` and `extractContent()` in pipeline.ts
 
 **Files:**
+
 - Modify: `src/extract/pipeline.ts`
 
 - [ ] **Step 1: Add `loadMergedConfig` to the existing config import**
@@ -22,13 +23,26 @@
 In `src/extract/pipeline.ts`, line 2 currently reads:
 
 ```typescript
-import { DEFAULT_GITHUB_CONFIG, resolveApiKey, type GitHubConfig, type GeminiConfig, type PdfConfig } from "../config.ts";
+import {
+  DEFAULT_GITHUB_CONFIG,
+  resolveApiKey,
+  type GitHubConfig,
+  type GeminiConfig,
+  type PdfConfig,
+} from "../config.ts";
 ```
 
 Replace with:
 
 ```typescript
-import { DEFAULT_GITHUB_CONFIG, loadMergedConfig, resolveApiKey, type GitHubConfig, type GeminiConfig, type PdfConfig } from "../config.ts";
+import {
+  DEFAULT_GITHUB_CONFIG,
+  loadMergedConfig,
+  resolveApiKey,
+  type GitHubConfig,
+  type GeminiConfig,
+  type PdfConfig,
+} from "../config.ts";
 ```
 
 - [ ] **Step 2: Remove the 4 config fields from `ExtractOptions`**
@@ -73,7 +87,7 @@ export async function extractContent(
   signal?: AbortSignal,
   options?: ExtractOptions,
 ): Promise<ExtractedContent> {
-  const config = loadMergedConfig();
+  const config = loadMergedConfig(process.cwd());
   const githubConfig = config.github ?? DEFAULT_GITHUB_CONFIG;
   const allowRanges = config.ssrf?.allowRanges ?? [];
   const pdfConfig = config.pdf;
@@ -87,13 +101,13 @@ export async function extractContent(
 In `src/extract/pipeline.ts`, replace line 239:
 
 ```typescript
-  validateUrl(url, { allowRanges: options?.allowRanges });
+validateUrl(url, { allowRanges: options?.allowRanges });
 ```
 
 With:
 
 ```typescript
-  validateUrl(url, { allowRanges });
+validateUrl(url, { allowRanges });
 ```
 
 - [ ] **Step 5: Replace `options?.github` with `githubConfig` in GitHub interception**
@@ -118,7 +132,7 @@ With (remove the local `githubConfig` assignment since it now exists at function
 In `src/extract/pipeline.ts`, replace line 359:
 
 ```typescript
-    const pdfConfig = options?.pdf;
+const pdfConfig = options?.pdf;
 ```
 
 With (remove this line entirely — `pdfConfig` already exists at function scope). The `if (pdfConfig?.ocrEnabled !== false)` on the next line and the `pdfConfig?.ocrMaxPages ?? 5` and `pdfConfig?.ocrDpi ?? 150` references on subsequent lines remain unchanged since the variable name is identical.
@@ -128,13 +142,13 @@ With (remove this line entirely — `pdfConfig` already exists at function scope
 In `src/extract/pipeline.ts`, replace line 386:
 
 ```typescript
-        const geminiKey = getGeminiApiKey() ?? resolveApiKey(options?.gemini?.apiKey);
+const geminiKey = getGeminiApiKey() ?? resolveApiKey(options?.gemini?.apiKey);
 ```
 
 With:
 
 ```typescript
-        const geminiKey = getGeminiApiKey() ?? resolveApiKey(geminiConfig?.apiKey);
+const geminiKey = getGeminiApiKey() ?? resolveApiKey(geminiConfig?.apiKey);
 ```
 
 - [ ] **Step 8: Replace `options?.gemini?.baseUrl` with `geminiConfig?.baseUrl` in Gemini vision call**
@@ -157,13 +171,14 @@ With:
 pnpm run typecheck
 ```
 
-Expected: no type errors. The `GitHubConfig`, `GeminiConfig`, and `PdfConfig` type imports are still needed by `loadMergedConfig`'s return type usage, so they stay in the import.
+Expected: no type errors. The `GitHubConfig`, `GeminiConfig`, and `PdfConfig` type imports are still needed by `loadMergedConfig`'s return type usage, so they stay in the import. `process.cwd()` is a Node.js global — no additional import needed.
 
 ---
 
 ## Task 2: Update `createWebFetchTool` in web-fetch.ts
 
 **Files:**
+
 - Modify: `src/tools/web-fetch.ts`
 
 - [ ] **Step 1: Remove the config type imports that are no longer needed**
@@ -171,7 +186,12 @@ Expected: no type errors. The `GitHubConfig`, `GeminiConfig`, and `PdfConfig` ty
 In `src/tools/web-fetch.ts`, replace line 17:
 
 ```typescript
-import type { GitHubConfig, GuidanceOverride, PdfConfig, GeminiConfig } from "../config.ts";
+import type {
+  GitHubConfig,
+  GuidanceOverride,
+  PdfConfig,
+  GeminiConfig,
+} from "../config.ts";
 ```
 
 With:
@@ -213,31 +233,31 @@ export function createWebFetchTool(
 In `src/tools/web-fetch.ts`, replace the `extractContent` call inside `executeSingleUrl` (lines 92-103):
 
 ```typescript
-      const extracted = await extractContent(url, signal, {
-        raw: params.raw,
-        github: githubConfig,
-        allowRanges: ssrfAllowRanges,
-        prompt: params.prompt,
-        timestamp: params.timestamp,
-        frames: params.frames,
-        model: params.model,
-        pdf: pdfConfig,
-        gemini: geminiConfig,
-        ctx,
-      });
+const extracted = await extractContent(url, signal, {
+  raw: params.raw,
+  github: githubConfig,
+  allowRanges: ssrfAllowRanges,
+  prompt: params.prompt,
+  timestamp: params.timestamp,
+  frames: params.frames,
+  model: params.model,
+  pdf: pdfConfig,
+  gemini: geminiConfig,
+  ctx,
+});
 ```
 
 With:
 
 ```typescript
-      const extracted = await extractContent(url, signal, {
-        raw: params.raw,
-        prompt: params.prompt,
-        timestamp: params.timestamp,
-        frames: params.frames,
-        model: params.model,
-        ctx,
-      });
+const extracted = await extractContent(url, signal, {
+  raw: params.raw,
+  prompt: params.prompt,
+  timestamp: params.timestamp,
+  frames: params.frames,
+  model: params.model,
+  ctx,
+});
 ```
 
 - [ ] **Step 4: Remove config fields from the `executeMultiUrl` call**
@@ -245,31 +265,31 @@ With:
 In `src/tools/web-fetch.ts`, replace the `executeMultiUrl` call (lines 186-197):
 
 ```typescript
-      return executeMultiUrl({
-        urls: params.urls!,
-        params,
-        signal: signal ?? undefined,
-        store,
-        cache,
-        githubConfig,
-        ssrfAllowRanges,
-        pdfConfig,
-        geminiConfig,
-        ctx,
-      });
+return executeMultiUrl({
+  urls: params.urls!,
+  params,
+  signal: signal ?? undefined,
+  store,
+  cache,
+  githubConfig,
+  ssrfAllowRanges,
+  pdfConfig,
+  geminiConfig,
+  ctx,
+});
 ```
 
 With:
 
 ```typescript
-      return executeMultiUrl({
-        urls: params.urls!,
-        params,
-        signal: signal ?? undefined,
-        store,
-        cache,
-        ctx,
-      });
+return executeMultiUrl({
+  urls: params.urls!,
+  params,
+  signal: signal ?? undefined,
+  store,
+  cache,
+  ctx,
+});
 ```
 
 - [ ] **Step 5: Verify typecheck passes**
@@ -285,6 +305,7 @@ Expected: type error in `web-fetch-multi.ts` because `MultiUrlOptions` still has
 ## Task 3: Update `MultiUrlOptions` and `executeMultiUrl` in web-fetch-multi.ts
 
 **Files:**
+
 - Modify: `src/tools/web-fetch-multi.ts`
 
 - [ ] **Step 1: Remove the config type imports**
@@ -348,31 +369,24 @@ export interface MultiUrlOptions {
 In `src/tools/web-fetch-multi.ts`, replace the destructuring block (lines 65-76):
 
 ```typescript
-  const {
-    urls,
-    params,
-    signal,
-    store,
-    cache,
-    githubConfig,
-    ssrfAllowRanges,
-    pdfConfig,
-    geminiConfig,
-    ctx,
-  } = options;
+const {
+  urls,
+  params,
+  signal,
+  store,
+  cache,
+  githubConfig,
+  ssrfAllowRanges,
+  pdfConfig,
+  geminiConfig,
+  ctx,
+} = options;
 ```
 
 With:
 
 ```typescript
-  const {
-    urls,
-    params,
-    signal,
-    store,
-    cache,
-    ctx,
-  } = options;
+const { urls, params, signal, store, cache, ctx } = options;
 ```
 
 - [ ] **Step 4: Simplify the `extractContent` call inside `executeMultiUrl`**
@@ -380,31 +394,31 @@ With:
 In `src/tools/web-fetch-multi.ts`, replace the `extractContent` call (lines 88-99):
 
 ```typescript
-    const extracted = await extractContent(u, signal ?? undefined, {
-      raw: params.raw,
-      github: githubConfig,
-      allowRanges: ssrfAllowRanges,
-      prompt: params.prompt,
-      timestamp: params.timestamp,
-      frames: params.frames,
-      model: params.model,
-      pdf: pdfConfig,
-      gemini: geminiConfig,
-      ctx,
-    });
+const extracted = await extractContent(u, signal ?? undefined, {
+  raw: params.raw,
+  github: githubConfig,
+  allowRanges: ssrfAllowRanges,
+  prompt: params.prompt,
+  timestamp: params.timestamp,
+  frames: params.frames,
+  model: params.model,
+  pdf: pdfConfig,
+  gemini: geminiConfig,
+  ctx,
+});
 ```
 
 With:
 
 ```typescript
-    const extracted = await extractContent(u, signal ?? undefined, {
-      raw: params.raw,
-      prompt: params.prompt,
-      timestamp: params.timestamp,
-      frames: params.frames,
-      model: params.model,
-      ctx,
-    });
+const extracted = await extractContent(u, signal ?? undefined, {
+  raw: params.raw,
+  prompt: params.prompt,
+  timestamp: params.timestamp,
+  frames: params.frames,
+  model: params.model,
+  ctx,
+});
 ```
 
 - [ ] **Step 5: Verify typecheck passes**
@@ -420,6 +434,7 @@ Expected: no type errors. The chain `web-fetch.ts -> web-fetch-multi.ts -> pipel
 ## Task 4: Simplify `createWebFetchTool` call in index.ts
 
 **Files:**
+
 - Modify: `src/index.ts`
 
 - [ ] **Step 1: Remove the 4 config arguments from `createWebFetchTool` call**
@@ -427,37 +442,37 @@ Expected: no type errors. The chain `web-fetch.ts -> web-fetch-multi.ts -> pipel
 In `src/index.ts`, replace the `createWebFetchTool` registration block (lines 111-125):
 
 ```typescript
-  pi.registerTool(
-    createWebFetchTool(
-      store,
-      () => {
-        configManager.refresh();
-        return registry.selectFetchCandidates();
-      },
-      fetchCache,
-      buildAugmentedGuidance(configManager.current.guidance?.web_fetch, caps),
-      configManager.current.github,
-      configManager.current.ssrf.allowRanges,
-      configManager.current.pdf,
-      configManager.current.gemini,
-    ),
-  );
+pi.registerTool(
+  createWebFetchTool(
+    store,
+    () => {
+      configManager.refresh();
+      return registry.selectFetchCandidates();
+    },
+    fetchCache,
+    buildAugmentedGuidance(configManager.current.guidance?.web_fetch, caps),
+    configManager.current.github,
+    configManager.current.ssrf.allowRanges,
+    configManager.current.pdf,
+    configManager.current.gemini,
+  ),
+);
 ```
 
 With:
 
 ```typescript
-  pi.registerTool(
-    createWebFetchTool(
-      store,
-      () => {
-        configManager.refresh();
-        return registry.selectFetchCandidates();
-      },
-      fetchCache,
-      buildAugmentedGuidance(configManager.current.guidance?.web_fetch, caps),
-    ),
-  );
+pi.registerTool(
+  createWebFetchTool(
+    store,
+    () => {
+      configManager.refresh();
+      return registry.selectFetchCandidates();
+    },
+    fetchCache,
+    buildAugmentedGuidance(configManager.current.guidance?.web_fetch, caps),
+  ),
+);
 ```
 
 - [ ] **Step 2: Verify typecheck passes**
@@ -473,6 +488,7 @@ Expected: no type errors. All 4 files compile cleanly.
 ## Task 5: Update tests
 
 **Files:**
+
 - Modify: `tests/extract/pipeline.test.ts`
 - Modify: `tests/tools/web-fetch.test.ts`
 
@@ -483,49 +499,48 @@ In `tests/extract/pipeline.test.ts`, the last test (lines 415-427) passes `githu
 Replace the entire test (lines 415-427):
 
 ```typescript
-  it("skips GitHub interception when options.github.enabled is false", async () => {
+it("skips GitHub interception when options.github.enabled is false", async () => {
+  fetchStub.addResponse("github.com", {
+    body: GOOD_HTML,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+  const result = await extractContent(
+    "https://github.com/owner/repo/blob/main/file.ts",
+    undefined,
+    { github: { enabled: false, maxRepoSizeMB: 350, cloneTimeoutSeconds: 30 } },
+  );
+  // Should fall through to HTTP extraction, not GitHub interception
+  expect(result.extractionChain).toContain("http:200");
+});
+```
+
+With:
+
+```typescript
+it("skips GitHub interception when config.github.enabled is false", async () => {
+  const configModule = await import("../../src/config.ts");
+  const originalConfig = configModule.loadMergedConfig(process.cwd());
+
+  const configMock = vi.spyOn(configModule, "loadMergedConfig");
+  configMock.mockReturnValue({
+    ...originalConfig,
+    github: { enabled: false, maxRepoSizeMB: 350, cloneTimeoutSeconds: 30 },
+  });
+
+  try {
     fetchStub.addResponse("github.com", {
       body: GOOD_HTML,
       headers: { "content-type": "text/html; charset=utf-8" },
     });
     const result = await extractContent(
       "https://github.com/owner/repo/blob/main/file.ts",
-      undefined,
-      { github: { enabled: false, maxRepoSizeMB: 350, cloneTimeoutSeconds: 30 } },
     );
     // Should fall through to HTTP extraction, not GitHub interception
     expect(result.extractionChain).toContain("http:200");
-  });
-```
-
-With:
-
-```typescript
-  it("skips GitHub interception when config.github.enabled is false", async () => {
-    const { loadMergedConfig } = await import("../../src/config.ts");
-    const originalConfig = loadMergedConfig();
-    const { vi } = await import("vitest");
-
-    const configMock = vi.spyOn(await import("../../src/config.ts"), "loadMergedConfig");
-    configMock.mockReturnValue({
-      ...originalConfig,
-      github: { enabled: false, maxRepoSizeMB: 350, cloneTimeoutSeconds: 30 },
-    });
-
-    try {
-      fetchStub.addResponse("github.com", {
-        body: GOOD_HTML,
-        headers: { "content-type": "text/html; charset=utf-8" },
-      });
-      const result = await extractContent(
-        "https://github.com/owner/repo/blob/main/file.ts",
-      );
-      // Should fall through to HTTP extraction, not GitHub interception
-      expect(result.extractionChain).toContain("http:200");
-    } finally {
-      configMock.mockRestore();
-    }
-  });
+  } finally {
+    configMock.mockRestore();
+  }
+});
 ```
 
 - [ ] **Step 2: Add `vi` import to pipeline test file if not already present**
@@ -596,13 +611,13 @@ git diff --stat
 
 Expected changes:
 
-| File | Change |
-|------|--------|
-| `src/extract/pipeline.ts` | `ExtractOptions` drops 4 fields; `extractContent()` adds `loadMergedConfig()` call at top; 4 `options?.xxx` references replaced with local variables |
-| `src/tools/web-fetch.ts` | `createWebFetchTool()` drops 4 parameters; `extractContent` and `executeMultiUrl` calls simplified |
-| `src/tools/web-fetch-multi.ts` | `MultiUrlOptions` drops 4 fields; destructuring and `extractContent` call simplified; config type import removed |
-| `src/index.ts` | `createWebFetchTool()` call drops 4 arguments |
-| `tests/extract/pipeline.test.ts` | GitHub-disabled test mocks `loadMergedConfig` instead of passing config through `ExtractOptions`; `vi` added to import |
+| File                             | Change                                                                                                                                               |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/extract/pipeline.ts`        | `ExtractOptions` drops 4 fields; `extractContent()` adds `loadMergedConfig()` call at top; 4 `options?.xxx` references replaced with local variables |
+| `src/tools/web-fetch.ts`         | `createWebFetchTool()` drops 4 parameters; `extractContent` and `executeMultiUrl` calls simplified                                                   |
+| `src/tools/web-fetch-multi.ts`   | `MultiUrlOptions` drops 4 fields; destructuring and `extractContent` call simplified; config type import removed                                     |
+| `src/index.ts`                   | `createWebFetchTool()` call drops 4 arguments                                                                                                        |
+| `tests/extract/pipeline.test.ts` | GitHub-disabled test mocks `loadMergedConfig` instead of passing config through `ExtractOptions`; `vi` added to import                               |
 
 - [ ] **Step 5: Commit**
 
