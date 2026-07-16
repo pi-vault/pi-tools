@@ -15,6 +15,7 @@
 ### Task 1: Create http-providers.ts with all 9 provider definitions
 
 **Files:**
+
 - Create: `src/providers/http-providers.ts`
 
 - [ ] **Step 1: Create the consolidated provider definitions file**
@@ -265,6 +266,7 @@ export const httpProviders: ProviderMeta[] = [
 ### Task 2: Update all.ts to use http-providers.ts
 
 **Files:**
+
 - Modify: `src/providers/all.ts`
 
 - [ ] **Step 2: Replace 9 individual imports with httpProviders spread**
@@ -321,6 +323,7 @@ Expected: no type errors.
 ### Task 3: Write consolidated tests
 
 **Files:**
+
 - Create: `tests/providers/http-providers.test.ts`
 
 - [ ] **Step 4: Create the consolidated test file**
@@ -403,7 +406,11 @@ describe("brave provider", () => {
       body: {
         web: {
           results: [
-            { title: "Brave Result", url: "https://brave.com", description: "A brave snippet" },
+            {
+              title: "Brave Result",
+              url: "https://brave.com",
+              description: "A brave snippet",
+            },
           ],
         },
       },
@@ -472,8 +479,13 @@ describe("brave provider", () => {
   });
 
   it("throws on non-2xx response", async () => {
-    fetchStub.addResponse("api.search.brave.com", { status: 429, body: "Rate limited" });
-    await expect(brave.create("key").search!.search("test", 5)).rejects.toThrow();
+    fetchStub.addResponse("api.search.brave.com", {
+      status: 429,
+      body: "Rate limited",
+    });
+    await expect(
+      brave.create("key").search!.search("test", 5),
+    ).rejects.toThrow();
   });
 });
 
@@ -512,7 +524,9 @@ describe("brave-llm provider", () => {
     });
     await braveLlm.create("key").search!.search("my query", 5);
     const fetchCall = (globalThis.fetch as any).mock.calls[0];
-    expect(fetchCall[0]).toBe("https://api.search.brave.com/res/v1/llm/context");
+    expect(fetchCall[0]).toBe(
+      "https://api.search.brave.com/res/v1/llm/context",
+    );
     expect(fetchCall[1].method).toBe("POST");
     const body = JSON.parse(fetchCall[1].body);
     expect(body.q).toBe("my query");
@@ -522,7 +536,9 @@ describe("brave-llm provider", () => {
     fetchStub.addResponse("api.search.brave.com", {
       body: { grounding: { generic: [] } },
     });
-    await braveLlm.create("key", { enabled: true, tokenBudget: 4096 }).search!.search("test", 5);
+    await braveLlm
+      .create("key", { enabled: true, tokenBudget: 4096 })
+      .search!.search("test", 5);
     const body = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     expect(body.maximum_number_of_tokens).toBe(4096);
   });
@@ -531,7 +547,9 @@ describe("brave-llm provider", () => {
     fetchStub.addResponse("api.search.brave.com", {
       body: { grounding: { generic: [] } },
     });
-    await braveLlm.create("key", { enabled: true, tokenBudget: 0 }).search!.search("test", 5);
+    await braveLlm
+      .create("key", { enabled: true, tokenBudget: 0 })
+      .search!.search("test", 5);
     const body = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     expect(body.maximum_number_of_tokens).toBe(0);
   });
@@ -550,12 +568,18 @@ describe("brave-llm provider", () => {
       body: {
         grounding: {
           generic: [
-            { url: "https://brave.com", title: "Brave Search", snippets: ["Privacy-first search engine"] },
+            {
+              url: "https://brave.com",
+              title: "Brave Search",
+              snippets: ["Privacy-first search engine"],
+            },
           ],
         },
       },
     });
-    const results = await braveLlm.create("key").search!.search("brave search", 5);
+    const results = await braveLlm
+      .create("key")
+      .search!.search("brave search", 5);
     expect(results).toHaveLength(1);
     expect(results[0]).toEqual({
       title: "Brave Search",
@@ -565,10 +589,13 @@ describe("brave-llm provider", () => {
   });
 
   it("throws on non-2xx response", async () => {
-    fetchStub.addResponse("api.search.brave.com", { status: 403, body: "Forbidden" });
-    await expect(braveLlm.create("bad-key").search!.search("test", 5)).rejects.toThrow(
-      "Brave LLM Context API error",
-    );
+    fetchStub.addResponse("api.search.brave.com", {
+      status: 403,
+      body: "Forbidden",
+    });
+    await expect(
+      braveLlm.create("bad-key").search!.search("test", 5),
+    ).rejects.toThrow("Brave LLM Context API error");
   });
 });
 
@@ -630,11 +657,17 @@ describe("fastcrw provider", () => {
       body: {
         success: true,
         data: [
-          { title: "Fast Result", url: "https://example.com", description: "A fast snippet" },
+          {
+            title: "Fast Result",
+            url: "https://example.com",
+            description: "A fast snippet",
+          },
         ],
       },
     });
-    const results = await fastcrw.create("key").search!.search("test query", 10);
+    const results = await fastcrw
+      .create("key")
+      .search!.search("test query", 10);
     expect(results).toHaveLength(1);
     expect(results[0]).toEqual({
       title: "Fast Result",
@@ -644,8 +677,13 @@ describe("fastcrw provider", () => {
   });
 
   it("throws on non-2xx response", async () => {
-    fetchStub.addResponse("api.fastcrw.com", { status: 500, body: "Server Error" });
-    await expect(fastcrw.create("key").search!.search("test", 5)).rejects.toThrow("fastCRW");
+    fetchStub.addResponse("api.fastcrw.com", {
+      status: 500,
+      body: "Server Error",
+    });
+    await expect(
+      fastcrw.create("key").search!.search("test", 5),
+    ).rejects.toThrow("fastCRW");
   });
 });
 
@@ -705,13 +743,19 @@ describe("langsearch provider", () => {
         data: {
           webPages: {
             value: [
-              { name: "Result 1", url: "https://example.com/1", snippet: "First result" },
+              {
+                name: "Result 1",
+                url: "https://example.com/1",
+                snippet: "First result",
+              },
             ],
           },
         },
       },
     });
-    const results = await langsearch.create("key").search!.search("test query", 5);
+    const results = await langsearch
+      .create("key")
+      .search!.search("test query", 5);
     expect(results).toHaveLength(1);
     expect(results[0]).toEqual({
       title: "Result 1",
@@ -721,10 +765,13 @@ describe("langsearch provider", () => {
   });
 
   it("throws on non-2xx response", async () => {
-    fetchStub.addResponse("api.langsearch.com", { status: 429, body: "Rate limited" });
-    await expect(langsearch.create("key").search!.search("test", 5)).rejects.toThrow(
-      "LangSearch API error",
-    );
+    fetchStub.addResponse("api.langsearch.com", {
+      status: 429,
+      body: "Rate limited",
+    });
+    await expect(
+      langsearch.create("key").search!.search("test", 5),
+    ).rejects.toThrow("LangSearch API error");
   });
 });
 
@@ -772,7 +819,11 @@ describe("linkup provider", () => {
     fetchStub.addResponse("api.linkup.so", {
       body: {
         searchResults: [
-          { title: "Linkup Result", url: "https://example.com", content: "A linkup snippet" },
+          {
+            title: "Linkup Result",
+            url: "https://example.com",
+            content: "A linkup snippet",
+          },
         ],
       },
     });
@@ -786,8 +837,13 @@ describe("linkup provider", () => {
   });
 
   it("throws on non-2xx response", async () => {
-    fetchStub.addResponse("api.linkup.so", { status: 401, body: "Unauthorized" });
-    await expect(linkup.create("key").search!.search("test", 5)).rejects.toThrow("Linkup");
+    fetchStub.addResponse("api.linkup.so", {
+      status: 401,
+      body: "Unauthorized",
+    });
+    await expect(
+      linkup.create("key").search!.search("test", 5),
+    ).rejects.toThrow("Linkup");
   });
 });
 
@@ -852,7 +908,11 @@ describe("marginalia provider", () => {
     fetchStub.addResponse("api2.marginalia-search.com", {
       body: {
         results: [
-          { title: "Indie Web", url: "https://indieweb.org", description: "Independent web" },
+          {
+            title: "Indie Web",
+            url: "https://indieweb.org",
+            description: "Independent web",
+          },
         ],
       },
     });
@@ -866,7 +926,10 @@ describe("marginalia provider", () => {
   });
 
   it("throws on non-2xx response", async () => {
-    fetchStub.addResponse("api2.marginalia-search.com", { status: 503, body: "Service Unavailable" });
+    fetchStub.addResponse("api2.marginalia-search.com", {
+      status: 503,
+      body: "Service Unavailable",
+    });
     await expect(marginalia.create().search!.search("test", 5)).rejects.toThrow(
       /Marginalia Search API error: 503/,
     );
@@ -933,7 +996,9 @@ describe("perplexity provider", () => {
   it("returns search results from chat completion format", async () => {
     fetchStub.addResponse("api.perplexity.ai", {
       body: {
-        choices: [{ message: { content: "Perplexity answer about the topic" } }],
+        choices: [
+          { message: { content: "Perplexity answer about the topic" } },
+        ],
         citations: ["https://source1.com", "https://source2.com"],
       },
     });
@@ -942,8 +1007,13 @@ describe("perplexity provider", () => {
   });
 
   it("throws on non-2xx response", async () => {
-    fetchStub.addResponse("api.perplexity.ai", { status: 403, body: "Forbidden" });
-    await expect(perplexity.create("key").search!.search("test", 5)).rejects.toThrow();
+    fetchStub.addResponse("api.perplexity.ai", {
+      status: 403,
+      body: "Forbidden",
+    });
+    await expect(
+      perplexity.create("key").search!.search("test", 5),
+    ).rejects.toThrow();
   });
 });
 
@@ -985,12 +1055,18 @@ describe("websearchapi provider", () => {
     fetchStub.addResponse("api.websearchapi.ai", {
       body: {
         organic: [
-          { title: "WS Result", url: "https://example.com/page", description: "A WebSearchAPI snippet" },
+          {
+            title: "WS Result",
+            url: "https://example.com/page",
+            description: "A WebSearchAPI snippet",
+          },
         ],
         responseTime: 1.2,
       },
     });
-    const results = await websearchapi.create("key").search!.search("test query", 5);
+    const results = await websearchapi
+      .create("key")
+      .search!.search("test query", 5);
     expect(results).toHaveLength(1);
     expect(results[0]).toEqual({
       title: "WS Result",
@@ -1013,8 +1089,13 @@ describe("websearchapi provider", () => {
   });
 
   it("throws on non-2xx response", async () => {
-    fetchStub.addResponse("api.websearchapi.ai", { status: 401, body: "Unauthorized" });
-    await expect(websearchapi.create("bad-key").search!.search("test", 5)).rejects.toThrow();
+    fetchStub.addResponse("api.websearchapi.ai", {
+      status: 401,
+      body: "Unauthorized",
+    });
+    await expect(
+      websearchapi.create("bad-key").search!.search("test", 5),
+    ).rejects.toThrow();
   });
 });
 
@@ -1059,7 +1140,12 @@ describe("youcom provider", () => {
     fetchStub.addResponse("api.you.com", {
       body: {
         hits: [
-          { title: "You Result", url: "https://example.com", description: "A you.com snippet", snippets: [] },
+          {
+            title: "You Result",
+            url: "https://example.com",
+            description: "A you.com snippet",
+            snippets: [],
+          },
         ],
       },
     });
@@ -1074,7 +1160,9 @@ describe("youcom provider", () => {
 
   it("throws on non-2xx response", async () => {
     fetchStub.addResponse("api.you.com", { status: 403, body: "Forbidden" });
-    await expect(youcom.create("key").search!.search("test", 5)).rejects.toThrow("You.com");
+    await expect(
+      youcom.create("key").search!.search("test", 5),
+    ).rejects.toThrow("You.com");
   });
 });
 ```
@@ -1092,6 +1180,7 @@ Expected: all tests PASS.
 ### Task 4: Delete the 9 individual provider files and their test files
 
 **Files:**
+
 - Delete: `src/providers/marginalia.ts`
 - Delete: `src/providers/langsearch.ts`
 - Delete: `src/providers/linkup.ts`
