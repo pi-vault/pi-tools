@@ -484,7 +484,7 @@ export function loadMergedConfig(cwd?: string): PiToolsConfig {
         const raw = JSON.parse(fs.readFileSync(projectPath, "utf-8")) as Record<string, unknown>;
         const trusted = isProjectTrustedCached(cwd);
         const sanitized = trusted ? raw : stripSensitiveFields(raw);
-        if (!trusted && sanitized !== raw) {
+        if (!trusted && JSON.stringify(sanitized) !== JSON.stringify(raw)) {
           console.warn(
             "[pi-tools] Untrusted project: sensitive config fields ignored. Trust the project in Pi to allow full config.",
           );

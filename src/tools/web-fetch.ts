@@ -257,6 +257,11 @@ function collectImageBlocks(extracted: ExtractedContent): ImageBlock[] {
       blocks.push({ type: "image", data: frame.data, mimeType: frame.mimeType });
     }
   }
+  if (extracted.images) {
+    for (const img of extracted.images) {
+      blocks.push({ type: "image", data: img.data, mimeType: img.mimeType });
+    }
+  }
   return blocks;
 }
 

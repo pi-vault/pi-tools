@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { DEFAULT_GITHUB_CONFIG, type GitHubConfig } from "../config.ts";
+import { DEFAULT_GITHUB_CONFIG, resolveApiKey, type GitHubConfig, type GeminiConfig, type PdfConfig } from "../config.ts";
 import { validateUrl } from "../utils/ssrf.ts";
 import { extractGitHub, parseGitHubUrl } from "./github.ts";
 import { extractHtml } from "./html.ts";
@@ -11,7 +11,6 @@ import {
   extractTextWithGeminiVision,
   type PdfPageImage,
 } from "./pdf-ocr.ts";
-import { resolveApiKey, type GeminiConfig, type PdfConfig } from "../config.ts";
 import { getApiKey as getGeminiApiKey } from "./gemini-api.ts";
 import { extractRsc } from "./rsc.ts";
 import { extractViaJinaReader } from "./jina-reader.ts";
