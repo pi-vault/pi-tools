@@ -1,5 +1,6 @@
 import type { SearchResult } from "./types.ts";
 import { AggregateProviderError } from "../utils/errors.ts";
+import { activityMonitor } from "../monitor/activity-monitor.ts";
 
 export interface ProviderResults {
   providerName: string;
@@ -125,14 +126,17 @@ async function executeTargeted(
 
     const batchSettled = await Promise.all(
       batch.map(async (candidate) => {
+        const entryId = activityMonitor.logStart({ type: "api", query: `fusion:${candidate.name}` });
         const startMs = Date.now();
         try {
           const results = await candidate.execute(perProvider);
           const latencyMs = Date.now() - startMs;
           onSuccess?.(candidate.name, latencyMs);
+          activityMonitor.logComplete(entryId, 200);
           return { name: candidate.name, results, success: true as const };
         } catch (err) {
           onFailure?.(candidate.name);
+          activityMonitor.logError(entryId, err instanceof Error ? err.message : String(err));
           return {
             name: candidate.name,
             error: err instanceof Error ? err.message : String(err),
