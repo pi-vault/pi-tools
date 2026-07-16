@@ -91,7 +91,7 @@ Each entry in the array is a `ProviderMeta`:
 ```typescript
 {
   name: "marginalia",
-  tier: 2 as ProviderTier,
+  tier: 3 as ProviderTier,
   monthlyQuota: null,
   requiresKey: false,
   create: () => ({
