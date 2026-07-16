@@ -11,10 +11,6 @@ import type { ProviderConfigEntry } from "../config.ts";
 const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses";
 const DEFAULT_MODEL = "gpt-4.1-mini";
 
-export interface OpenAiNativeConfig {
-  model?: string;
-}
-
 class OpenAiWebSearchProvider implements SearchProvider {
   readonly name = "openai-web-search";
   readonly label = "OpenAI Web Search";
@@ -22,7 +18,7 @@ class OpenAiWebSearchProvider implements SearchProvider {
   private readonly apiKey: string;
   private readonly model: string;
 
-  constructor(apiKey: string, config?: OpenAiNativeConfig) {
+  constructor(apiKey: string, config?: { model?: string }) {
     this.apiKey = apiKey;
     this.model = config?.model ?? DEFAULT_MODEL;
   }
@@ -60,7 +56,7 @@ class OpenAiWebSearchProvider implements SearchProvider {
 
 export function createOpenAiWebSearchProvider(
   apiKey: string,
-  config?: OpenAiNativeConfig,
+  config?: { model?: string },
 ): { search: SearchProvider } {
   return {
     search: new OpenAiWebSearchProvider(apiKey, config),

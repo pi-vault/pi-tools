@@ -13,17 +13,7 @@ export function isOpenAiNativeModel(
 ): boolean {
   if (!model) return false;
   const provider = (model.provider ?? "").toLowerCase();
-  return (
-    provider === "openai-codex" ||
-    provider === "openai" ||
-    provider.startsWith("openai-")
-  );
-}
-
-interface ToolEntry {
-  type: string;
-  function?: { name?: string; [key: string]: unknown };
-  [key: string]: unknown;
+  return provider === "openai" || provider.startsWith("openai-");
 }
 
 export function rewriteNativeWebSearch<T extends { tools?: unknown[] }>(
@@ -39,7 +29,7 @@ export function rewriteNativeWebSearch<T extends { tools?: unknown[] }>(
 
   const newTools = payload.tools.map((tool: unknown) => {
     if (!tool || typeof tool !== "object") return tool;
-    const t = tool as ToolEntry;
+    const t = tool as { type: string; function?: { name?: string } };
     if (t.type === "function" && t.function?.name === "web_search") {
       rewritten.push("web_search");
       return { type: "web_search", external_web_access: externalWebAccess };

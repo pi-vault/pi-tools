@@ -11,11 +11,6 @@ import type {
 
 const DEFAULT_BASE_URL = "http://localhost:11434";
 
-interface OllamaProviderOptions {
-  baseUrl?: string;
-  apiKey?: string;
-}
-
 export function isLocalHost(baseUrl: string): boolean {
   const hostname = new URL(baseUrl).hostname;
   return (
@@ -42,7 +37,7 @@ export class OllamaProvider implements SearchProvider, FetchProvider {
   private readonly apiKey?: string;
   private readonly isLocal: boolean;
 
-  constructor(options?: OllamaProviderOptions) {
+  constructor(options?: { baseUrl?: string; apiKey?: string }) {
     this.baseUrl = (
       options?.baseUrl ?? process.env.OLLAMA_HOST ?? DEFAULT_BASE_URL
     ).replace(/\/+$/, "");
@@ -68,12 +63,28 @@ export class OllamaProvider implements SearchProvider, FetchProvider {
     return headers;
   }
 
-  private hostLabel(): string {
+  private async post(path: string, body: unknown, signal?: AbortSignal): Promise<unknown> {
+    let response: Response;
     try {
-      return new URL(this.baseUrl).host;
-    } catch {
-      return this.baseUrl;
+      response = await fetch(`${this.baseUrl}${path}`, {
+        method: "POST",
+        headers: this.buildHeaders(),
+        body: JSON.stringify(body),
+        signal,
+      });
+    } catch (err) {
+      if (isConnectionRefused(err)) {
+        const host = (() => { try { return new URL(this.baseUrl).host; } catch { return this.baseUrl; } })();
+        throw new Error(
+          `Could not connect to Ollama at ${host}. Make sure Ollama is running (ollama serve).`,
+        );
+      }
+      throw err;
     }
+    if (!response.ok) {
+      throw new Error(`Ollama API error: ${response.status} ${response.statusText}`);
+    }
+    return response.json();
   }
 
   async search(
@@ -82,62 +93,12 @@ export class OllamaProvider implements SearchProvider, FetchProvider {
     signal?: AbortSignal,
     _filters?: SearchFilters,
   ): Promise<SearchResult[]> {
-    const url = `${this.baseUrl}${this.searchPath}`;
-
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method: "POST",
-        headers: this.buildHeaders(),
-        body: JSON.stringify({ query, max_results: maxResults }),
-        signal,
-      });
-    } catch (err) {
-      if (isConnectionRefused(err)) {
-        throw new Error(
-          `Could not connect to Ollama at ${this.hostLabel()}. Make sure Ollama is running (ollama serve).`,
-        );
-      }
-      throw err;
-    }
-
-    if (!response.ok) {
-      throw new Error(
-        `Ollama API error: ${response.status} ${response.statusText}`,
-      );
-    }
-
-    const data: unknown = await response.json();
+    const data = await this.post(this.searchPath, { query, max_results: maxResults }, signal);
     return parseOllamaSearchResults(data).slice(0, maxResults);
   }
 
   async fetch(url: string, signal?: AbortSignal): Promise<FetchResult> {
-    const endpoint = `${this.baseUrl}${this.fetchPath}`;
-
-    let response: Response;
-    try {
-      response = await fetch(endpoint, {
-        method: "POST",
-        headers: this.buildHeaders(),
-        body: JSON.stringify({ url }),
-        signal,
-      });
-    } catch (err) {
-      if (isConnectionRefused(err)) {
-        throw new Error(
-          `Could not connect to Ollama at ${this.hostLabel()}. Make sure Ollama is running (ollama serve).`,
-        );
-      }
-      throw err;
-    }
-
-    if (!response.ok) {
-      throw new Error(
-        `Ollama API error: ${response.status} ${response.statusText}`,
-      );
-    }
-
-    const data = (await response.json()) as Record<string, unknown>;
+    const data = (await this.post(this.fetchPath, { url }, signal)) as Record<string, unknown>;
     return {
       text: (data.content as string) || "",
       title: (data.title as string) || undefined,
@@ -170,7 +131,6 @@ export const providerMeta: ProviderMeta = {
       (providerConfig as any)?.baseUrl ??
       process.env.OLLAMA_HOST ??
       DEFAULT_BASE_URL;
-    // Only register when explicitly enabled or OLLAMA_HOST env var is set
     if (providerConfig?.enabled !== true && !process.env.OLLAMA_HOST) return {};
     const provider = new OllamaProvider({ baseUrl, apiKey: key });
     return { search: provider, fetch: provider };
