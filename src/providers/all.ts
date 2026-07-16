@@ -11,7 +11,9 @@ import { providerMeta as jina } from "./jina.ts";
 import { providerMeta as langsearch } from "./langsearch.ts";
 import { providerMeta as linkup } from "./linkup.ts";
 import { providerMeta as marginalia } from "./marginalia.ts";
+import { providerMeta as ollama } from "./ollama.ts";
 import { providerMeta as openaiCodex } from "./openai-codex.ts";
+import { providerMeta as openaiWebSearch } from "./openai-web-search.ts";
 import { providerMeta as parallel } from "./parallel.ts";
 import { providerMeta as perplexity } from "./perplexity.ts";
 import { providerMeta as searxng } from "./searxng.ts";
@@ -34,7 +36,9 @@ export const allProviders: ProviderMeta[] = [
   langsearch,
   linkup,
   marginalia,
+  ollama,
   openaiCodex,
+  openaiWebSearch,
   parallel,
   perplexity,
   searxng,
