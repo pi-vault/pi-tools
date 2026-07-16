@@ -1,8 +1,9 @@
+import type { ThemeColor } from "@earendil-works/pi-coding-agent";
 import type { ActivityEntry } from "./activity-monitor.ts";
 
 /** Minimal theme contract for testability — matches ctx.ui.theme at runtime. */
 export interface ThemeLike {
-  fg: (color: string, text: string) => string;
+  fg: (color: ThemeColor, text: string) => string;
 }
 
 const TARGET_WIDTH = 34;

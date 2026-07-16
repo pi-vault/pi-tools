@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleEnhancedSetup, buildDiagnosticPreamble } from "../../src/commands/tools-setup.ts";
 import { makeCtx } from "../helpers.ts";
 import type { ProviderTier } from "../../src/providers/types.ts";
