@@ -181,7 +181,8 @@ describe("before_provider_request rewrite handler", () => {
       tools: [{ type: "function", function: { name: "web_search", parameters: {} } }],
       messages: [{ role: "user", content: "hello" }],
     };
-    const ctx = makeCtx({ model: { provider: "openai" } });
+    // biome-ignore lint/suspicious/noExplicitAny: partial model mock for test
+    const ctx = makeCtx({ model: { provider: "openai" } as any });
 
     const result = handler?.({ type: "before_provider_request", payload }, ctx) as typeof payload;
 
@@ -198,7 +199,8 @@ describe("before_provider_request rewrite handler", () => {
     const payload = {
       tools: [{ type: "function", function: { name: "web_search", parameters: {} } }],
     };
-    const ctx = makeCtx({ model: { provider: "anthropic" } });
+    // biome-ignore lint/suspicious/noExplicitAny: partial model mock for test
+    const ctx = makeCtx({ model: { provider: "anthropic" } as any });
 
     const result = handler?.({ type: "before_provider_request", payload }, ctx);
 
@@ -224,7 +226,8 @@ describe("before_provider_request rewrite handler", () => {
     const payload = {
       tools: [{ type: "function", function: { name: "web_search", parameters: {} } }],
     };
-    const ctx = makeCtx({ model: { provider: "openai" } });
+    // biome-ignore lint/suspicious/noExplicitAny: partial model mock for test
+    const ctx = makeCtx({ model: { provider: "openai" } as any });
 
     const result = handler?.({ type: "before_provider_request", payload }, ctx);
 
