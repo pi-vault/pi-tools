@@ -6,7 +6,7 @@ import { ConfigManager } from "./config-manager.ts";
 import { allProviders } from "./providers/all.ts";
 import { createFilePersistence, ProviderRegistry } from "./providers/registry.ts";
 import type { ProviderTier } from "./providers/types.ts";
-import { ContentStore, type StoredContent } from "./storage.ts";
+import { ContentStore } from "./storage.ts";
 import { createCodeSearchTool } from "./tools/code-search.ts";
 import { createWebDocsFetchTool } from "./tools/web-docs-fetch.ts";
 import { createWebDocsSearchTool } from "./tools/web-docs-search.ts";
@@ -15,25 +15,12 @@ import { createWebReadTool } from "./tools/web-read.ts";
 import { createWebResearchTool } from "./tools/web-research.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
 import { resolveApiKey } from "./config.ts";
-import {
-  isOpenAiNativeModel,
-  rewriteNativeWebSearch,
-} from "./providers/openai-native-rewrite.ts";
 import { buildAugmentedGuidance, detectCapabilities } from "./utils/capabilities.ts";
 import { recordProjectTrust } from "./utils/trust.ts";
-
-function isStoredContent(data: unknown): data is StoredContent {
-  if (typeof data !== "object" || data === null) return false;
-  const d = data as Record<string, unknown>;
-  return (
-    typeof d.id === "string" &&
-    typeof d.url === "string" &&
-    typeof d.text === "string" &&
-    typeof d.chars === "number" &&
-    typeof d.storedAt === "string" &&
-    (d.source === "web_fetch" || d.source === "web_docs_fetch")
-  );
-}
+import {
+  handleProviderRequest,
+  handleSessionStart,
+} from "./session.ts";
 
 export default function createExtension(pi: ExtensionAPI): void {
   const store = new ContentStore((customType, data) => pi.appendEntry(customType, data));
@@ -43,37 +30,16 @@ export default function createExtension(pi: ExtensionAPI): void {
   // Detect environment capabilities once at startup
   const caps = detectCapabilities();
 
-  // Restore stored content from previous session
-  pi.on("session_start", (_event, ctx) => {
-    const entries = ctx.sessionManager.getEntries();
-    const restored = entries
-      .filter((e) => e.type === "custom" && e.customType === "pi-tools-content" && e.data)
-      .map((e) => (e as { data: unknown }).data)
-      .filter(isStoredContent);
-    if (restored.length > 0) {
-      store.restore(restored);
-    }
-  });
-
-  // Record project trust state for config gating
-  pi.on("session_start", (_event, ctx) => {
-    recordProjectTrust(ctx);
-  });
+  // Session lifecycle — delegated to session.ts
+  pi.on("session_start", (event, ctx) =>
+    handleSessionStart(event, ctx, store, () => configManager.refresh()),
+  );
   pi.on("model_select", (_event, ctx) => {
     recordProjectTrust(ctx);
   });
-  pi.on("before_provider_request", (_event, ctx) => {
-    recordProjectTrust(ctx);
-  });
-
-  // Layer 1: Rewrite web_search tool to native OpenAI format for OpenAI models
-  pi.on("before_provider_request", (event, ctx) => {
-    const openaiNativeConfig = configManager.current.providers["openai-web-search"];
-    if (openaiNativeConfig?.enabled === false) return undefined;
-    if (!isOpenAiNativeModel(ctx?.model as { provider?: string } | undefined)) return undefined;
-    const result = rewriteNativeWebSearch(event.payload as { tools?: unknown[] });
-    return result.rewritten.length > 0 ? result.payload : undefined;
-  });
+  pi.on("before_provider_request", (event, ctx) =>
+    handleProviderRequest(event, ctx, () => configManager.current),
+  );
 
   const resolveCandidates = (name?: string, combine?: boolean) => {
     configManager.refresh();
