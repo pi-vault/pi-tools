@@ -1,50 +1,34 @@
 import type { ProviderMeta } from "./types.ts";
-import { providerMeta as brave } from "./brave.ts";
-import { providerMeta as braveLlm } from "./brave-llm.ts";
 import { providerMeta as context7 } from "./context7.ts";
 import { providerMeta as duckduckgo } from "./duckduckgo.ts";
 import { providerMeta as exa } from "./exa.ts";
 import { providerMeta as exaMcp } from "./exa-mcp.ts";
-import { providerMeta as fastcrw } from "./fastcrw.ts";
 import { providerMeta as firecrawl } from "./firecrawl.ts";
+import { httpProviders } from "./http-providers.ts";
 import { providerMeta as jina } from "./jina.ts";
-import { providerMeta as langsearch } from "./langsearch.ts";
-import { providerMeta as linkup } from "./linkup.ts";
-import { providerMeta as marginalia } from "./marginalia.ts";
 import { providerMeta as ollama } from "./ollama.ts";
 import { providerMeta as openaiCodex } from "./openai-codex.ts";
 import { providerMeta as openaiWebSearch } from "./openai-web-search.ts";
 import { providerMeta as parallel } from "./parallel.ts";
-import { providerMeta as perplexity } from "./perplexity.ts";
 import { providerMeta as searxng } from "./searxng.ts";
 import { providerMeta as serper } from "./serper.ts";
 import { providerMeta as sofya } from "./sofya.ts";
 import { providerMeta as tavily } from "./tavily.ts";
-import { providerMeta as websearchapi } from "./websearchapi.ts";
-import { providerMeta as youcom } from "./youcom.ts";
 
 export const allProviders: ProviderMeta[] = [
-  brave,
-  braveLlm,
+  ...httpProviders,
   context7,
   duckduckgo,
   exa,
   exaMcp,
-  fastcrw,
   firecrawl,
   jina,
-  langsearch,
-  linkup,
-  marginalia,
   ollama,
   openaiCodex,
   openaiWebSearch,
   parallel,
-  perplexity,
   searxng,
   serper,
   sofya,
   tavily,
-  websearchapi,
-  youcom,
 ];
