@@ -101,6 +101,73 @@ describe("formatEntryLine", () => {
     expect(line).not.toContain("https://");
     expect(line).toContain("example.com/page");
   });
+
+  it("handles missing query with fallback", () => {
+    const entry: ActivityEntry = {
+      id: "7",
+      type: "api",
+      startTime: 1000,
+      endTime: 1200,
+      status: 200,
+    };
+    const line = formatEntryLine(entry, plainTheme);
+    expect(line).toContain('"?"');
+  });
+
+  it("handles missing url with fallback", () => {
+    const entry: ActivityEntry = {
+      id: "8",
+      type: "fetch",
+      startTime: 1000,
+      endTime: 1200,
+      status: 200,
+    };
+    const line = formatEntryLine(entry, plainTheme);
+    expect(line).toContain("?");
+  });
+
+  it("truncates long queries", () => {
+    const entry: ActivityEntry = {
+      id: "9",
+      type: "api",
+      startTime: 1000,
+      endTime: 1200,
+      query: "a".repeat(100),
+      status: 200,
+    };
+    const line = formatEntryLine(entry, plainTheme);
+    expect(line).toContain("\u2026"); // ellipsis character
+    expect(line).not.toContain('"' + "a".repeat(100) + '"'); // full query not present
+  });
+
+  it("strips http:// prefix from URLs", () => {
+    const entry: ActivityEntry = {
+      id: "10",
+      type: "fetch",
+      startTime: 1000,
+      endTime: 1100,
+      url: "http://example.com/page",
+      status: 200,
+    };
+    const line = formatEntryLine(entry, plainTheme);
+    expect(line).not.toContain("http://");
+    expect(line).toContain("example.com/page");
+  });
+
+  it("treats status -1 as an error (non-success indicator)", () => {
+    const entry: ActivityEntry = {
+      id: "11",
+      type: "api",
+      startTime: 1000,
+      endTime: 1500,
+      query: "test",
+      status: -1,
+      error: "Connection refused",
+    };
+    const line = formatEntryLine(entry, plainTheme);
+    expect(line).toContain("-1");
+    expect(line).toContain("\u2717"); // ✗ error indicator
+  });
 });
 
 describe("renderWidgetLines", () => {
