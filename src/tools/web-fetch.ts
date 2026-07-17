@@ -127,6 +127,7 @@ export function createWebFetchTool(
             execute: () => provider.fetch(url, signal),
           })),
           operation: "fetch",
+          signal,
         });
         extracted = {
           text: result.text,

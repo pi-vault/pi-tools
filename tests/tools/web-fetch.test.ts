@@ -542,7 +542,8 @@ describe("web_fetch multi-URL", () => {
       }),
     };
 
-    const tool = createWebFetchTool(new ContentStore(() => {}), () => [provider]);
+    const cache = new ContentCache(10, 60_000);
+    const tool = createWebFetchTool(new ContentStore(() => {}), () => [provider], cache);
     const result = await tool.execute(
       "call-m-fallback",
       {
@@ -570,6 +571,17 @@ describe("web_fetch multi-URL", () => {
     expect(recovered?.error).toBeUndefined();
     expect(failed?.error).toContain("HTTP 503");
     expect(failed?.error).toContain("Provider unavailable");
+
+    const cachedResult = await tool.execute(
+      "call-m-fallback-cached",
+      { urls: ["https://example.com/recovered"] },
+      undefined,
+      undefined,
+      makeCtx(),
+    );
+    const cachedText = (cachedResult.content[0] as { type: "text"; text: string }).text;
+    expect(cachedText).toContain("Recovered by provider");
+    expect(provider.fetch).toHaveBeenCalledTimes(2);
   });
 
   it("does not use provider fallback for a non-retryable URL", async () => {
@@ -594,6 +606,42 @@ describe("web_fetch multi-URL", () => {
 
     expect(provider.fetch).not.toHaveBeenCalled();
     expect(result.details.urlResults?.[0]?.error).toBeDefined();
+  });
+
+  it("stops provider fallback when a multi-URL fetch is cancelled", async () => {
+    fetchStub.addResponse("example.com/cancelled", {
+      status: 500,
+      body: "Server Error",
+      headers: { "content-type": "text/html" },
+    });
+
+    const controller = new AbortController();
+    const abortingProvider: FetchProvider = {
+      name: "first",
+      fetch: vi.fn(async () => {
+        controller.abort();
+        throw controller.signal.reason;
+      }),
+    };
+    const laterProvider = mockFetchProvider("second", {
+      text: "Must not be used",
+      title: "Unexpected",
+    });
+    const tool = createWebFetchTool(new ContentStore(() => {}), () => [
+      abortingProvider,
+      laterProvider,
+    ]);
+    const result = await tool.execute(
+      "call-m-cancelled",
+      { urls: ["https://example.com/cancelled"] },
+      controller.signal,
+      undefined,
+      makeCtx(),
+    );
+
+    expect(abortingProvider.fetch).toHaveBeenCalledOnce();
+    expect(laterProvider.fetch).not.toHaveBeenCalled();
+    expect(result.details.urlResults?.[0]?.error).toContain("aborted");
   });
 });
 

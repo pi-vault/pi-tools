@@ -206,6 +206,7 @@ export function createWebSearchTool(
             execute: () => provider.search(params.query, maxResults, signal ?? undefined, filters),
           })),
           operation: "search",
+          signal,
           onSuccess,
           onFailure,
         });
