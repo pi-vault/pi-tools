@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-16
 **Status:** Approved design
-**Supersedes:** `docs/superpowers/plans/2026-07-16-phase-5-absorb-config-manager.md`
+**Replaces:** The rejected ConfigManager absorption proposal recorded in the architecture deepening spec
 
 ## Decision
 
@@ -64,8 +64,8 @@ supported without an additional compatibility layer.
 ## Pi Compatibility Review
 
 This design requires `@earendil-works/pi-coding-agent` 0.80.6 or newer. The
-reviewed and installed version is 0.80.6; no fallback for older Pi versions is
-required.
+reviewed source version is 0.80.6 and the installed version is 0.80.10; no
+fallback for older Pi versions is required.
 
 The contract was checked against the Pi source checkout at commit `8479bd84`,
 whose coding-agent package is version 0.80.6:
