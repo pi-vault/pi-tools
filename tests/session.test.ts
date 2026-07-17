@@ -1,15 +1,34 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  handleProviderRequest,
-  handleSessionStart,
-} from "../src/session.ts";
+import { handleProviderRequest, handleSessionStart } from "../src/session.ts";
 import type { PiToolsConfig } from "../src/config.ts";
+import { _resetTrustRegistry, isProjectTrustedCached } from "../src/utils/trust.ts";
 import { makeCtx } from "./helpers.ts";
 
 describe("handleSessionStart", () => {
-  it("restores content and calls refresh", () => {
+  it("records trust before initializing with the session context", () => {
+    _resetTrustRegistry();
     const store = { restore: vi.fn() };
-    const refresh = vi.fn();
+    const ctx = makeCtx({
+      cwd: "/projects/trusted",
+      isProjectTrusted: () => true,
+    });
+    const initialize = vi.fn(() => {
+      expect(isProjectTrustedCached(ctx.cwd)).toBe(true);
+    });
+
+    handleSessionStart(
+      { type: "session_start", reason: "startup" },
+      ctx,
+      store as never,
+      initialize,
+    );
+
+    expect(initialize).toHaveBeenCalledWith(ctx);
+  });
+
+  it("restores content and initializes the session", () => {
+    const store = { restore: vi.fn() };
+    const initialize = vi.fn();
 
     const ctx = makeCtx({
       sessionManager: {
@@ -33,26 +52,26 @@ describe("handleSessionStart", () => {
       } as any,
     });
 
-    handleSessionStart({ type: "session_start", reason: "resume" }, ctx, store as any, refresh);
+    handleSessionStart({ type: "session_start", reason: "resume" }, ctx, store as any, initialize);
 
     expect(store.restore).toHaveBeenCalledTimes(1);
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(initialize).toHaveBeenCalledWith(ctx);
   });
 
-  it("calls refresh even when no entries to restore", () => {
+  it("initializes even when no entries are restored", () => {
     const store = { restore: vi.fn() };
-    const refresh = vi.fn();
+    const initialize = vi.fn();
     const ctx = makeCtx();
 
-    handleSessionStart({ type: "session_start", reason: "startup" }, ctx, store as any, refresh);
+    handleSessionStart({ type: "session_start", reason: "startup" }, ctx, store as any, initialize);
 
     expect(store.restore).not.toHaveBeenCalled();
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(initialize).toHaveBeenCalledWith(ctx);
   });
 
   it("skips corrupt entries during restore", () => {
     const store = { restore: vi.fn() };
-    const refresh = vi.fn();
+    const initialize = vi.fn();
     const ctx = makeCtx({
       sessionManager: {
         getEntries: () => [
@@ -68,10 +87,10 @@ describe("handleSessionStart", () => {
       } as any,
     });
 
-    handleSessionStart({ type: "session_start", reason: "resume" }, ctx, store as any, refresh);
+    handleSessionStart({ type: "session_start", reason: "resume" }, ctx, store as any, initialize);
 
     expect(store.restore).not.toHaveBeenCalled();
-    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(initialize).toHaveBeenCalledWith(ctx);
   });
 });
 
@@ -152,5 +171,3 @@ describe("handleProviderRequest", () => {
     expect(result).toBeUndefined();
   });
 });
-
-

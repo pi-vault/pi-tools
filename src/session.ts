@@ -7,10 +7,7 @@ import type {
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { PiToolsConfig } from "./config.ts";
-import {
-  isOpenAiNativeModel,
-  rewriteNativeWebSearch,
-} from "./providers/openai-native-rewrite.ts";
+import { isOpenAiNativeModel, rewriteNativeWebSearch } from "./providers/openai-native-rewrite.ts";
 import type { ContentStore, StoredContent } from "./storage.ts";
 import { recordProjectTrust } from "./utils/trust.ts";
 
@@ -29,17 +26,17 @@ function isStoredContent(data: unknown): data is StoredContent {
 }
 
 /**
- * Handle session_start: restore persisted content, record trust, refresh config.
+ * Handle session_start: restore persisted content, record trust, initialize session state.
  */
 export function handleSessionStart(
   _event: SessionStartEvent,
   ctx: ExtensionContext,
   store: ContentStore,
-  refresh: () => void,
+  initialize: (ctx: ExtensionContext) => void,
 ): void {
   restoreContent(ctx.sessionManager.getEntries(), store);
   recordProjectTrust(ctx);
-  refresh();
+  initialize(ctx);
 }
 
 /**
