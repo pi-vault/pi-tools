@@ -9,6 +9,7 @@ interface FallbackCandidate<T> {
 export interface ExecuteOptions<T> {
   candidates: FallbackCandidate<T>[];
   operation: string;
+  signal?: AbortSignal;
   onSuccess?: (providerName: string, latencyMs: number) => void;
   onFailure?: (providerName: string) => void;
 }
@@ -16,7 +17,9 @@ export interface ExecuteOptions<T> {
 export async function executeWithFallback<T>(
   options: ExecuteOptions<T>,
 ): Promise<{ result: T; providerName: string }> {
-  const { candidates, operation, onSuccess, onFailure } = options;
+  const { candidates, operation, signal, onSuccess, onFailure } = options;
+
+  signal?.throwIfAborted();
 
   if (candidates.length === 0) {
     throw new AggregateProviderError(operation, [
@@ -27,16 +30,19 @@ export async function executeWithFallback<T>(
   const errors: Array<{ provider: string; error: string }> = [];
 
   for (const candidate of candidates) {
+    signal?.throwIfAborted();
     const entryId = activityMonitor.logStart({ type: "api", query: operation });
     const startMs = Date.now();
     try {
       const result = await candidate.execute();
+      signal?.throwIfAborted();
       onSuccess?.(candidate.name, Date.now() - startMs);
       activityMonitor.logComplete(entryId, 200);
       return { result, providerName: candidate.name };
     } catch (error) {
-      onFailure?.(candidate.name);
       activityMonitor.logError(entryId, error instanceof Error ? error.message : String(error));
+      signal?.throwIfAborted();
+      onFailure?.(candidate.name);
       errors.push({
         provider: candidate.name,
         error: error instanceof Error ? error.message : String(error),

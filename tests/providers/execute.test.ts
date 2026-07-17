@@ -31,6 +31,26 @@ describe("executeWithFallback", () => {
     expect(result.providerName).toBe("working");
   });
 
+  it("does not return a provider result after cancellation", async () => {
+    const controller = new AbortController();
+
+    await expect(
+      executeWithFallback({
+        candidates: [
+          {
+            name: "ignores-signal",
+            execute: async () => {
+              controller.abort();
+              return "stale-result";
+            },
+          },
+        ],
+        operation: "fetch",
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("aborted");
+  });
+
   it("throws AggregateProviderError when all candidates fail", async () => {
     await expect(
       executeWithFallback({
