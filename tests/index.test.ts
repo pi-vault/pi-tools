@@ -1,20 +1,84 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import createExtension from "../src/index.ts";
 import { ProviderRegistry } from "../src/providers/registry.ts";
-import { createMockPi, makeCtx } from "./helpers.ts";
+import { _resetTrustRegistry } from "../src/utils/trust.ts";
+import { createMockPi, makeCtx, type MockPi } from "./helpers.ts";
 
 vi.mock("node:fs");
+
+function startSession(pi: MockPi, ctx = makeCtx()): void {
+  const handler = pi.events.get("session_start")?.[0];
+  expect(handler).toBeDefined();
+  handler?.({ type: "session_start", reason: "startup" }, ctx);
+}
 
 describe("tools extension", () => {
   it("exports a function", () => {
     expect(typeof createExtension).toBe("function");
   });
 
+  it("defers config-dependent tools until session_start", () => {
+    const pi = createMockPi();
+    createExtension(pi as never);
+
+    expect(pi.tools).toEqual([]);
+
+    startSession(pi);
+
+    expect(pi.tools.map((tool) => tool.name)).toEqual(
+      expect.arrayContaining(["web_search", "web_fetch", "web_read", "code_search"]),
+    );
+  });
+
+  it("uses trusted ctx.cwd config for conditional tools", () => {
+    _resetTrustRegistry();
+    vi.stubEnv("EXA_API_KEY", "");
+    vi.stubEnv("CONTEXT7_API_KEY", "");
+
+    try {
+      const cwd = "/projects/trusted";
+      const configPath = path.join(cwd, ".pi", "tools.json");
+      vi.mocked(fs.existsSync).mockImplementation((candidate) => candidate === configPath);
+      vi.mocked(fs.readFileSync).mockImplementation((candidate) => {
+        const filePath = typeof candidate === "string" ? candidate : candidate.toString();
+        if (filePath === configPath) {
+          return JSON.stringify({
+            providers: {
+              exa: { enabled: true, apiKey: "literal-exa-key" },
+              context7: { enabled: true, apiKey: "literal-context7-key" },
+            },
+            deepResearch: { enabled: true },
+          });
+        }
+        throw new Error("ENOENT");
+      });
+
+      const untrustedPi = createMockPi();
+      createExtension(untrustedPi as never);
+      startSession(untrustedPi, makeCtx({ cwd, isProjectTrusted: () => false }));
+      expect(untrustedPi.tools.map((tool) => tool.name)).not.toContain("web_research");
+      expect(untrustedPi.tools.map((tool) => tool.name)).not.toContain("web_docs_search");
+
+      const trustedPi = createMockPi();
+      createExtension(trustedPi as never);
+      startSession(trustedPi, makeCtx({ cwd, isProjectTrusted: () => true }));
+      expect(trustedPi.tools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining(["web_research", "web_docs_search", "web_docs_fetch"]),
+      );
+    } finally {
+      vi.unstubAllEnvs();
+      vi.restoreAllMocks();
+      _resetTrustRegistry();
+    }
+  });
+
   it("registers web_search tool", () => {
     const pi = createMockPi();
     // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
     createExtension(pi as any);
+    startSession(pi);
     expect(pi.tools.some((t) => t.name === "web_search")).toBe(true);
   });
 
@@ -22,6 +86,7 @@ describe("tools extension", () => {
     const pi = createMockPi();
     // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
     createExtension(pi as any);
+    startSession(pi);
     expect(pi.tools.some((t) => t.name === "web_read")).toBe(true);
   });
 
@@ -29,6 +94,7 @@ describe("tools extension", () => {
     const pi = createMockPi();
     // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
     createExtension(pi as any);
+    startSession(pi);
     expect(pi.tools.some((t) => t.name === "web_fetch")).toBe(true);
   });
 
@@ -85,6 +151,7 @@ describe("tools extension", () => {
     const pi = createMockPi();
     // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
     createExtension(pi as any);
+    startSession(pi);
     expect(pi.tools.some((t) => t.name === "code_search")).toBe(true);
   });
 
@@ -183,6 +250,7 @@ describe("before_provider_request rewrite handler", () => {
     };
     // biome-ignore lint/suspicious/noExplicitAny: partial model mock for test
     const ctx = makeCtx({ model: { provider: "openai" } as any });
+    startSession(pi, ctx);
 
     const result = handler?.({ type: "before_provider_request", payload }, ctx) as typeof payload;
 
@@ -201,6 +269,7 @@ describe("before_provider_request rewrite handler", () => {
     };
     // biome-ignore lint/suspicious/noExplicitAny: partial model mock for test
     const ctx = makeCtx({ model: { provider: "anthropic" } as any });
+    startSession(pi, ctx);
 
     const result = handler?.({ type: "before_provider_request", payload }, ctx);
 
@@ -228,6 +297,7 @@ describe("before_provider_request rewrite handler", () => {
     };
     // biome-ignore lint/suspicious/noExplicitAny: partial model mock for test
     const ctx = makeCtx({ model: { provider: "openai" } as any });
+    startSession(pi, ctx);
 
     const result = handler?.({ type: "before_provider_request", payload }, ctx);
 
@@ -253,8 +323,9 @@ describe("defaultProvider wiring", () => {
     const pi = createMockPi();
     createExtension(pi as any); // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
 
-    const webSearch = pi.tools.find((t) => t.name === "web_search")!;
     const ctx = makeCtx();
+    startSession(pi, ctx);
+    const webSearch = pi.tools.find((t) => t.name === "web_search")!;
     await webSearch.execute(
       "call-default-provider",
       { query: "test query" },
@@ -283,8 +354,9 @@ describe("defaultProvider wiring", () => {
     const pi = createMockPi();
     createExtension(pi as any); // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
 
-    const webSearch = pi.tools.find((t) => t.name === "web_search")!;
     const ctx = makeCtx();
+    startSession(pi, ctx);
+    const webSearch = pi.tools.find((t) => t.name === "web_search")!;
     await webSearch.execute(
       "call-explicit-provider",
       { query: "test query", provider: "duckduckgo" },
