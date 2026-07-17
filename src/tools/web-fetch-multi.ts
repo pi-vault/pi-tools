@@ -10,7 +10,6 @@ import {
 import { truncateContent } from "../utils/truncate.ts";
 import { fetchWithConcurrencyLimit } from "../utils/concurrency.ts";
 import type { ContentCache } from "../cache.ts";
-import type { GitHubConfig, PdfConfig, GeminiConfig } from "../config.ts";
 
 const INLINE_LIMIT = 15_000;
 const MANIFEST_PREVIEW_CHARS = 512;
@@ -45,10 +44,6 @@ export interface MultiUrlOptions {
   signal: AbortSignal | undefined;
   store: ContentStore;
   cache?: ContentCache;
-  githubConfig?: GitHubConfig;
-  ssrfAllowRanges?: string[];
-  pdfConfig?: PdfConfig;
-  geminiConfig?: GeminiConfig;
   ctx?: ExtensionContext;
 }
 
@@ -68,10 +63,6 @@ export async function executeMultiUrl(options: MultiUrlOptions): Promise<{
     signal,
     store,
     cache,
-    githubConfig,
-    ssrfAllowRanges,
-    pdfConfig,
-    geminiConfig,
     ctx,
   } = options;
   const cap = perUrlCap(urls.length);
@@ -87,14 +78,10 @@ export async function executeMultiUrl(options: MultiUrlOptions): Promise<{
 
     const extracted = await extractContent(u, signal ?? undefined, {
       raw: params.raw,
-      github: githubConfig,
-      allowRanges: ssrfAllowRanges,
       prompt: params.prompt,
       timestamp: params.timestamp,
       frames: params.frames,
       model: params.model,
-      pdf: pdfConfig,
-      gemini: geminiConfig,
       ctx,
     });
 

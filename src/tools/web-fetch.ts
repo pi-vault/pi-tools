@@ -14,7 +14,7 @@ import { truncateContent } from "../utils/truncate.ts";
 import { sanitizeError } from "../utils/errors.ts";
 import { executeWithFallback } from "../providers/execute.ts";
 import type { ContentCache } from "../cache.ts";
-import type { GitHubConfig, GuidanceOverride, PdfConfig, GeminiConfig } from "../config.ts";
+import type { GuidanceOverride } from "../config.ts";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { executeMultiUrl, type UrlResult } from "./web-fetch-multi.ts";
 
@@ -62,10 +62,6 @@ export function createWebFetchTool(
   resolveFetchCandidates?: () => FetchProvider[],
   cache?: ContentCache,
   guidance?: GuidanceOverride,
-  githubConfig?: GitHubConfig,
-  ssrfAllowRanges?: string[],
-  pdfConfig?: PdfConfig,
-  geminiConfig?: GeminiConfig,
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
   async function executeSingleUrl(
     url: string,
@@ -91,14 +87,10 @@ export function createWebFetchTool(
 
       const extracted = await extractContent(url, signal, {
         raw: params.raw,
-        github: githubConfig,
-        allowRanges: ssrfAllowRanges,
         prompt: params.prompt,
         timestamp: params.timestamp,
         frames: params.frames,
         model: params.model,
-        pdf: pdfConfig,
-        gemini: geminiConfig,
         ctx,
       });
 
@@ -189,10 +181,6 @@ export function createWebFetchTool(
         signal: signal ?? undefined,
         store,
         cache,
-        githubConfig,
-        ssrfAllowRanges,
-        pdfConfig,
-        geminiConfig,
         ctx,
       });
     },
