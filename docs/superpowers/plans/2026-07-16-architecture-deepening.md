@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn 12 shallow modules into deep ones across 5 atomic refactoring phases, improving locality, leverage, and testability while preserving external interfaces.
+**Goal:** Deepen 12 shallow modules across four refactoring phases, then correct config initialization against Pi's session lifecycle while preserving external interfaces.
 
 **Architecture:** Each phase is independently mergeable via its own PR and produces a usable result. Phase 4 depends on Phase 3 (config threading removed first). Phase 5 depends on Phase 2 (both touch index.ts). All other phases are independent. No new npm dependencies.
 
@@ -22,7 +22,7 @@ Each phase has its own detailed plan file. Execute in order.
 | 2 | `2026-07-16-phase-2-session-lifecycle.md` | Extract session lifecycle logic from index.ts into session.ts |
 | 3 | `2026-07-16-phase-3-config-self-resolution.md` | Extraction pipeline resolves its own config via loadMergedConfig |
 | 4 | `2026-07-16-phase-4-collapse-web-fetch-multi.md` | Absorb web-fetch-multi into web-fetch, fix fallback asymmetry |
-| 5 | `2026-07-16-phase-5-absorb-config-manager.md` | Absorb ConfigManager into ProviderRegistry |
+| 5 | `2026-07-16-phase-5-config-lifecycle.md` | Initialize config and tools from Pi's trusted session context |
 
 ---
 

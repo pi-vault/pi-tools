@@ -1,14 +1,14 @@
 # Architecture Deepening Spec: 5 Assessed Candidates
 
 **Date:** 2026-07-16
-**Status:** In progress -- Phases 1-3 implemented, Phase 4 planned, Phase 5 rejected
+**Status:** In progress -- Phases 1-3 and the Phase 5 lifecycle correction implemented; Phase 4 planned
 **Delivery:** One branch and PR per implemented phase
 
 ---
 
 ## Overview
 
-This document records five assessed architecture candidates. Phases 1-3 have landed, Phase 4 is the next approved change, and Phase 5 was rejected after review against Pi's extension lifecycle. Implemented phases preserve external interfaces. Phase 4 is the one behavioral improvement: multi-URL fetches gain the provider fallback already used by single-URL fetches.
+This document records five assessed architecture candidates. Phases 1-3 have landed, Phase 4 is the next approved change, and the proposed Phase 5 absorption was replaced by a session-lifecycle correction. Implemented phases preserve external interfaces. Phase 4 gives multi-URL fetches the provider fallback already used by single-URL fetches.
 
 ### Phase Summary
 
@@ -18,7 +18,7 @@ This document records five assessed architecture candidates. Phases 1-3 have lan
 | 2     | Extract session lifecycle from index.ts    | Implemented | None       | Lifecycle logic is tested independently  |
 | 3     | Extraction config self-resolution          | Implemented | None       | `ExtractOptions` dropped 4 config fields |
 | 4     | Collapse web-fetch-multi into web-fetch    | Planned     | Phase 3    | Unify per-URL provider fallback           |
-| 5     | Absorb ConfigManager into ProviderRegistry | Rejected    | Phase 2    | Keep the existing responsibility boundary |
+| 5     | Initialize config from session context      | Implemented | Phase 2    | Keep `ConfigManager`; use trusted `ctx.cwd` |
 
 ### Vocabulary
 
@@ -332,7 +332,7 @@ This is a behavioral improvement: multi-URL fetches become more resilient.
 
 ---
 
-## Phase 5: Absorb ConfigManager into ProviderRegistry -- Rejected
+## Phase 5: Initialize Config from Session Context -- Implemented
 
 ### Original proposal
 
@@ -340,7 +340,7 @@ Delete `ConfigManager` and move TTL refresh, config diffing, provider constructi
 
 ### Decision
 
-Keep `ConfigManager` as the config-driven provider lifecycle coordinator. Do not execute `docs/superpowers/plans/2026-07-16-phase-5-absorb-config-manager.md`; that plan is obsolete.
+Keep `ConfigManager` as the config-driven provider lifecycle coordinator. The rejected absorption plan was replaced by `docs/superpowers/plans/2026-07-16-phase-5-config-lifecycle.md`.
 
 ### Rationale
 
@@ -351,6 +351,4 @@ Keep `ConfigManager` as the config-driven provider lifecycle coordinator. Do not
 
 ### Pi lifecycle follow-up
 
-The current extension factory creates `ConfigManager` before `session_start` provides authoritative cwd and trust state. `handleSessionStart()` records trust and then performs a non-forced refresh, which can be skipped by the 30-second TTL and temporarily retain sanitized pre-trust config. Conditional tool registration also happens before that trusted refresh.
-
-Fixing config and conditional-tool initialization requires its own focused design against Pi's lifecycle and runtime `registerTool()` support. It is not part of Phase 4, and it should not be smuggled into `ProviderRegistry` as an incidental refactor.
+The extension now records trust during `session_start`, constructs `ConfigManager` with the authoritative `ctx.cwd`, and registers config-dependent tools from that initialized state. This keeps the correction at the Pi lifecycle boundary instead of smuggling config loading into `ProviderRegistry`.
