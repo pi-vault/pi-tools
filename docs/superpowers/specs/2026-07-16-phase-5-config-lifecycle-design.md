@@ -61,6 +61,27 @@ session, and fork events. Runtime `registerTool()` writes tools by name and
 refreshes the active tool set, so registering tools from `session_start` is
 supported without an additional compatibility layer.
 
+## Pi Compatibility Review
+
+This design requires `@earendil-works/pi-coding-agent` 0.80.6 or newer. The
+reviewed and installed version is 0.80.6; no fallback for older Pi versions is
+required.
+
+The contract was checked against the Pi source checkout at commit `8479bd84`,
+whose coding-agent package is version 0.80.6:
+
+- `AgentSession.bindExtensions()` awaits `session_start` before completing
+  extension binding.
+- `ExtensionContext.cwd` and `isProjectTrusted()` resolve from the bound session
+  and settings manager at call time.
+- `registerTool()` updates the extension tool map and immediately refreshes the
+  session tool registry. Newly registered tools become active unless excluded
+  by Pi's normal tool filters.
+- New, resumed, forked, and reloaded sessions receive fresh extension runtimes
+  before `session_start`.
+- Pi's dynamic-tool and runtime-event tests cover registration from
+  `session_start` and replacement-session lifecycle ordering.
+
 ## Components
 
 ### `src/index.ts`
@@ -136,8 +157,9 @@ lifecycle tests followed by `pnpm check`.
 ## Out of Scope
 
 - Absorbing `ConfigManager` into `ProviderRegistry`.
-- Dynamically removing conditional tools within a session; Pi exposes runtime
-  tool registration but no tool-unregistration API.
+- Dynamically changing conditional tools within a session. Pi provides
+  `setActiveTools()`, but session-scoped tool availability is the simpler
+  contract for this extension.
 - Updating tool guidance within a session.
 - Correcting extraction modules that independently call
   `loadMergedConfig(process.cwd())`; those calls are a separate boundary.
