@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-16
+
+### Added
+
+- Search providers for Brave LLM Context, fastCRW, LangSearch, Linkup, Marginalia, Ollama, OpenAI web search, Sofya, and You.com.
+- YouTube transcript and thumbnail extraction, local video analysis, and frame extraction through `web_fetch`.
+- Scanned PDF OCR using model vision or Gemini, plus Gemini fallback for difficult HTML pages.
+- Interactive `/tools` setup, provider management subcommands, connection tests, and an optional activity monitor widget.
+- Cloudflare AI Gateway support for Gemini and environment-aware tool guidance for available command-line tools.
+- Trust gating for sensitive project configuration, including credentials, browser cookies, and private-network exceptions.
+
+### Changed
+
+- Replaced `openai-native` with the dual-mode `openai-codex` provider while retaining the old name as a compatibility alias.
+- Expanded credential resolution with environment-variable fallbacks, shell-command caching, and safer handling of invalid values.
+- Added configurable DuckDuckGo backend, region, and time filters; Perplexity models; keyless Firecrawl; and optional Jina credentials.
+- Added HEAD probes before large downloads and a second request with an honest user agent when Cloudflare returns a bot challenge.
+- Consolidated HTTP provider adapters, response parsers, session lifecycle handling, configuration loading, and single/multi-URL fetching.
+- Updated Pi development and peer dependencies to `0.80.10` and Biome to `2.5.4`.
+
+### Fixed
+
+- Provider fallback now stops immediately when a request is cancelled.
+- Multi-URL fetches no longer duplicate extraction work and now preserve returned images.
+- Session configuration now initializes from the active project directory after Pi records project trust.
+
 ## [0.3.0] - 2026-07-11
 
 ### Added
