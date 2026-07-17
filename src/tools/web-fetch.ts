@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { ContentStore } from "../storage.ts";
 import type { FetchProvider } from "../providers/types.ts";
@@ -11,14 +11,40 @@ import {
   type ImageBlock,
 } from "../extract/pipeline.ts";
 import { truncateContent } from "../utils/truncate.ts";
+import { fetchWithConcurrencyLimit } from "../utils/concurrency.ts";
 import { sanitizeError } from "../utils/errors.ts";
 import { executeWithFallback } from "../providers/execute.ts";
 import type { ContentCache } from "../cache.ts";
 import type { GuidanceOverride } from "../config.ts";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { executeMultiUrl, type UrlResult } from "./web-fetch-multi.ts";
 
 const INLINE_LIMIT = 15_000;
+const MANIFEST_PREVIEW_CHARS = 512;
+const MAX_CONCURRENT = 5;
+
+interface FetchParams {
+  raw?: boolean;
+  fresh?: boolean;
+  prompt?: string;
+  timestamp?: string;
+  frames?: number;
+  model?: string;
+}
+
+interface UrlResult {
+  url: string;
+  title?: string;
+  chars: number;
+  contentId?: string;
+  error?: string;
+}
+
+function perUrlCap(count: number): number {
+  return count <= 1
+    ? INLINE_LIMIT
+    : count <= 5
+      ? Math.floor(INLINE_LIMIT / count)
+      : MANIFEST_PREVIEW_CHARS;
+}
 
 const WebFetchParams = Type.Object({
   url: Type.Optional(Type.String({ description: "HTTP(S) URL to fetch" })),
@@ -63,29 +89,20 @@ export function createWebFetchTool(
   cache?: ContentCache,
   guidance?: GuidanceOverride,
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
-  async function executeSingleUrl(
+  async function fetchUrl(
     url: string,
-    params: {
-      raw?: boolean;
-      fresh?: boolean;
-      prompt?: string;
-      timestamp?: string;
-      frames?: number;
-      model?: string;
-    },
+    params: FetchParams,
     signal: AbortSignal | undefined,
     ctx?: ExtensionContext,
-  ) {
-    try {
-      // Check cache first (unless fresh)
-      if (!params.fresh) {
-        const cached = cache?.get(url);
-        if (cached) {
-          return buildResult(cached, url, store);
-        }
-      }
+  ): Promise<ExtractedContent> {
+    if (!params.fresh) {
+      const cached = cache?.get(url);
+      if (cached) return cached;
+    }
 
-      const extracted = await extractContent(url, signal, {
+    let extracted: ExtractedContent;
+    try {
+      extracted = await extractContent(url, signal, {
         raw: params.raw,
         prompt: params.prompt,
         timestamp: params.timestamp,
@@ -93,51 +110,127 @@ export function createWebFetchTool(
         model: params.model,
         ctx,
       });
-
-      // Write to cache
-      cache?.set(url, extracted);
-
-      return buildResult(extracted, url, store);
     } catch (pipelineError) {
-      // Only fall back to providers for retryable errors
       if (!(pipelineError instanceof RetryableExtractionError)) {
-        const msg = sanitizeError(pipelineError);
-        return errorResult(url, `Fetch error: ${msg}`);
+        throw pipelineError;
       }
 
-      // Try each registered FetchProvider as fallback
       const candidates = resolveFetchCandidates?.() ?? [];
       if (candidates.length === 0) {
-        const msg = sanitizeError(pipelineError);
-        return errorResult(url, `Fetch error: ${msg}`);
+        throw pipelineError;
       }
 
       try {
-        const { result: fetchResult, providerName } = await executeWithFallback({
+        const { result, providerName } = await executeWithFallback({
           candidates: candidates.map((provider) => ({
             name: provider.name,
             execute: () => provider.fetch(url, signal),
           })),
           operation: "fetch",
         });
-
-        const extracted: ExtractedContent = {
-          text: fetchResult.text,
-          title: fetchResult.title,
+        extracted = {
+          text: result.text,
+          title: result.title,
           url,
           extractionChain: [`fetch-provider:${providerName}`],
-          chars: fetchResult.text.length,
+          chars: result.text.length,
           truncated: false,
         };
-
-        cache?.set(url, extracted);
-        return buildResult(extracted, url, store);
       } catch (fallbackError) {
-        const providerMsg =
-          fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-        return errorResult(url, `Fetch error (pipeline: ${pipelineError.message}): ${providerMsg}`);
+        const pipelineMessage = sanitizeError(pipelineError).slice(0, 120);
+        const fallbackMessage = sanitizeError(fallbackError).slice(0, 120);
+        throw new Error(
+          `Pipeline failed: ${pipelineMessage}; provider fallback failed: ${fallbackMessage}`,
+        );
       }
     }
+
+    cache?.set(url, extracted);
+    return extracted;
+  }
+
+  async function executeSingleUrl(
+    url: string,
+    params: FetchParams,
+    signal: AbortSignal | undefined,
+    ctx?: ExtensionContext,
+  ) {
+    try {
+      return buildResult(await fetchUrl(url, params, signal, ctx), url, store);
+    } catch (error) {
+      return errorResult(url, `Fetch error: ${sanitizeError(error)}`);
+    }
+  }
+
+  async function executeMultiUrl(
+    urls: string[],
+    params: FetchParams,
+    signal: AbortSignal | undefined,
+    ctx?: ExtensionContext,
+  ) {
+    const cap = perUrlCap(urls.length);
+    const isManifest = urls.length >= 6;
+    const uniqueUrls = [...new Set(urls)];
+    const tasks = uniqueUrls.map((url) => () => fetchUrl(url, params, signal, ctx));
+    const settled = await fetchWithConcurrencyLimit(tasks, MAX_CONCURRENT);
+
+    const resultByUrl = new Map<string, PromiseSettledResult<ExtractedContent>>();
+    for (let index = 0; index < uniqueUrls.length; index++) {
+      resultByUrl.set(uniqueUrls[index], settled[index]);
+    }
+
+    const urlResults: UrlResult[] = [];
+    const outputParts: string[] = [];
+    const imageBlocks: ImageBlock[] = [];
+
+    for (const url of urls) {
+      const outcome = resultByUrl.get(url)!;
+      if (outcome.status === "rejected") {
+        const message = sanitizeError(outcome.reason);
+        urlResults.push({ url, chars: 0, error: message });
+        outputParts.push(`## ${url}\n\nError: ${message}\n`);
+        continue;
+      }
+
+      const extracted = outcome.value;
+      const contentId = store.store({
+        url: extracted.url,
+        title: extracted.title,
+        text: extracted.text,
+        source: "web_fetch",
+      });
+      const preview = extracted.chars > cap ? truncateContent(extracted.text, cap) : extracted.text;
+
+      urlResults.push({
+        url: extracted.url,
+        title: extracted.title,
+        chars: extracted.chars,
+        contentId,
+      });
+
+      const header = extracted.title ? `## ${extracted.title}` : `## ${extracted.url}`;
+      const meta = `Source: ${extracted.url} | ${extracted.chars} chars | contentId: ${contentId}`;
+      outputParts.push(`${header}\n${meta}\n\n${preview}\n`);
+      imageBlocks.push(...collectImageBlocks(extracted));
+    }
+
+    const failed = urlResults.filter((result) => result.error).length;
+    const succeeded = urls.length - failed;
+    const summary = `Fetched ${succeeded}/${urls.length} URLs successfully${failed > 0 ? ` (${failed} failed)` : ""}${isManifest ? ". Use web_read with contentId for full text." : ""}\n\n`;
+
+    return {
+      content: [
+        { type: "text" as const, text: summary + outputParts.join("\n---\n\n") },
+        ...imageBlocks,
+      ],
+      details: {
+        url: urls[0],
+        chars: urlResults.reduce((sum, result) => sum + result.chars, 0),
+        truncated: urlResults.some((result) => !result.error && result.chars > cap),
+        extractionChain: ["multi-url"],
+        urlResults,
+      },
+    };
   }
 
   return {
@@ -171,18 +264,11 @@ export function createWebFetchTool(
 
       // Single-URL path
       if (hasUrl) {
-        return executeSingleUrl(params.url!, params, signal ?? undefined, ctx);
+        return executeSingleUrl(params.url!, params, signal, ctx);
       }
 
       // Multi-URL path
-      return executeMultiUrl({
-        urls: params.urls!,
-        params,
-        signal: signal ?? undefined,
-        store,
-        cache,
-        ctx,
-      });
+      return executeMultiUrl(params.urls!, params, signal, ctx);
     },
     renderCall(args, theme: Theme, context) {
       const text =
