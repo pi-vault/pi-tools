@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import createExtension from "../src/index.ts";
 import { loadMergedConfig } from "../src/config.ts";
-import { createMockPi } from "./helpers.ts";
+import { createMockPi, makeCtx } from "./helpers.ts";
 
 vi.mock("../src/config.ts", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -37,6 +37,7 @@ function registeredToolNames() {
   const pi = createMockPi();
   // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
   createExtension(pi as any);
+  pi.events.get("session_start")?.[0]?.({ type: "session_start", reason: "startup" }, makeCtx());
   return pi.tools.map((t) => t.name);
 }
 

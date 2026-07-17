@@ -17,10 +17,7 @@ import { createWebSearchTool } from "./tools/web-search.ts";
 import { resolveApiKey } from "./config.ts";
 import { buildAugmentedGuidance, detectCapabilities } from "./utils/capabilities.ts";
 import { recordProjectTrust } from "./utils/trust.ts";
-import {
-  handleProviderRequest,
-  handleSessionStart,
-} from "./session.ts";
+import { handleProviderRequest, handleSessionStart } from "./session.ts";
 
 export default function createExtension(pi: ExtensionAPI): void {
   const store = new ContentStore((customType, data) => pi.appendEntry(customType, data));
@@ -119,9 +116,7 @@ export default function createExtension(pi: ExtensionAPI): void {
   };
 
   // Session lifecycle — delegated to session.ts
-  pi.on("session_start", (event, ctx) =>
-    handleSessionStart(event, ctx, store, initializeSession),
-  );
+  pi.on("session_start", (event, ctx) => handleSessionStart(event, ctx, store, initializeSession));
   pi.on("model_select", (_event, ctx) => {
     recordProjectTrust(ctx);
   });

@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  handleProviderRequest,
-  handleSessionStart,
-} from "../src/session.ts";
+import { handleProviderRequest, handleSessionStart } from "../src/session.ts";
 import type { PiToolsConfig } from "../src/config.ts";
 import { _resetTrustRegistry, isProjectTrustedCached } from "../src/utils/trust.ts";
 import { makeCtx } from "./helpers.ts";

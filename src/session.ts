@@ -7,10 +7,7 @@ import type {
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { PiToolsConfig } from "./config.ts";
-import {
-  isOpenAiNativeModel,
-  rewriteNativeWebSearch,
-} from "./providers/openai-native-rewrite.ts";
+import { isOpenAiNativeModel, rewriteNativeWebSearch } from "./providers/openai-native-rewrite.ts";
 import type { ContentStore, StoredContent } from "./storage.ts";
 import { recordProjectTrust } from "./utils/trust.ts";
 

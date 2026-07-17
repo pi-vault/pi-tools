@@ -29,11 +29,12 @@ describe("selectionStrategy routing", () => {
 
     const pi = createMockPi();
     createExtension(pi as unknown as ExtensionAPI);
+    const ctx = makeCtx();
+    pi.events.get("session_start")?.[0]?.({ type: "session_start", reason: "startup" }, ctx);
 
     const webSearch = pi.tools.find((t) => t.name === "web_search");
     expect(webSearch).toBeDefined();
     if (!webSearch) throw new Error("web_search tool not registered");
-    const ctx = makeCtx();
     await webSearch.execute("id", { query: "test" }, undefined, undefined, ctx);
 
     expect(byPerformanceSpy).toHaveBeenCalled();
@@ -49,11 +50,12 @@ describe("selectionStrategy routing", () => {
 
     const pi = createMockPi();
     createExtension(pi as unknown as ExtensionAPI);
+    const ctx = makeCtx();
+    pi.events.get("session_start")?.[0]?.({ type: "session_start", reason: "startup" }, ctx);
 
     const webSearch = pi.tools.find((t) => t.name === "web_search");
     expect(webSearch).toBeDefined();
     if (!webSearch) throw new Error("web_search tool not registered");
-    const ctx = makeCtx();
     await webSearch.execute("id", { query: "test" }, undefined, undefined, ctx);
 
     expect(byPerformanceSpy).not.toHaveBeenCalled();
