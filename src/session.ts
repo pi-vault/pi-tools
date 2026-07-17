@@ -29,17 +29,17 @@ function isStoredContent(data: unknown): data is StoredContent {
 }
 
 /**
- * Handle session_start: restore persisted content, record trust, refresh config.
+ * Handle session_start: restore persisted content, record trust, initialize session state.
  */
 export function handleSessionStart(
   _event: SessionStartEvent,
   ctx: ExtensionContext,
   store: ContentStore,
-  refresh: () => void,
+  initialize: (ctx: ExtensionContext) => void,
 ): void {
   restoreContent(ctx.sessionManager.getEntries(), store);
   recordProjectTrust(ctx);
-  refresh();
+  initialize(ctx);
 }
 
 /**
