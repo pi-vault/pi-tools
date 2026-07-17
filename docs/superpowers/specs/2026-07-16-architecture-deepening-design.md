@@ -1,28 +1,28 @@
-# Architecture Deepening Spec: 5 Refactoring Candidates
+# Architecture Deepening Spec: 5 Assessed Candidates
 
 **Date:** 2026-07-16
-**Status:** Draft
-**Branch:** 20260716-improve-codebase-architecture
+**Status:** In progress -- Phases 1-3 implemented, Phase 4 planned, Phase 5 rejected
+**Delivery:** One branch and PR per implemented phase
 
 ---
 
 ## Overview
 
-Five refactoring candidates that turn shallow modules into deep ones, improving locality, leverage, and testability. Each candidate gets its own PR, ordered simplest to most complex. All refactors preserve existing external interfaces. Phase 4 is the one exception: it adds provider fallback to multi-URL fetches, which is a behavioral improvement (multi-URL becomes more resilient).
+This document records five assessed architecture candidates. Phases 1-3 have landed, Phase 4 is the next approved change, and Phase 5 was rejected after review against Pi's extension lifecycle. Implemented phases preserve external interfaces. Phase 4 is the one behavioral improvement: multi-URL fetches gain the provider fallback already used by single-URL fetches.
 
 ### Phase Summary
 
-| Phase | Candidate                                          | Complexity | Depends on | Key metric                        |
-| ----- | -------------------------------------------------- | ---------- | ---------- | --------------------------------- |
-| 1     | Consolidate shallow HTTP search providers          | Easy       | None       | Delete 9 shallow provider files   |
-| 2     | Extract session lifecycle from index.ts            | Easy       | None       | Lifecycle testable independently  |
-| 3     | Extraction pipeline config self-resolution         | Medium     | None       | ExtractOptions drops 4 fields     |
-| 4     | Collapse web-fetch-multi into web-fetch            | Medium     | Phase 3    | Fix multi-URL fallback asymmetry  |
-| 5     | Absorb ConfigManager into ProviderRegistry         | Complex    | Phase 2    | Delete config-manager.ts          |
+| Phase | Candidate                                  | Status      | Depends on | Outcome                                  |
+| ----- | ------------------------------------------ | ----------- | ---------- | ---------------------------------------- |
+| 1     | Consolidate shallow HTTP search providers  | Implemented | None       | Deleted 9 shallow provider files         |
+| 2     | Extract session lifecycle from index.ts    | Implemented | None       | Lifecycle logic is tested independently  |
+| 3     | Extraction config self-resolution          | Implemented | None       | `ExtractOptions` dropped 4 config fields |
+| 4     | Collapse web-fetch-multi into web-fetch    | Planned     | Phase 3    | Unify per-URL provider fallback           |
+| 5     | Absorb ConfigManager into ProviderRegistry | Rejected    | Phase 2    | Keep the existing responsibility boundary |
 
 ### Vocabulary
 
-These terms are used precisely throughout (see LANGUAGE.md):
+These terms are used precisely throughout this document:
 
 - **Module** -- anything with an interface and an implementation
 - **Interface** -- everything a caller must know to use the module
@@ -33,13 +33,25 @@ These terms are used precisely throughout (see LANGUAGE.md):
 - **Leverage** -- what callers get from depth; one interface, N call sites
 - **Deletion test** -- if deleting a module makes complexity vanish, it was a pass-through
 
+### Pi compatibility review
+
+The design was checked against the clean local Pi checkout at commit `8479bd84`, whose `@earendil-works/pi-coding-agent` package is version `0.80.6`. That exactly matches this package's installed dependency.
+
+Relevant contracts:
+
+- `session_start` fires for startup, reload, new session, resume, and fork, after the replacement extension instance is bound.
+- `session_shutdown` is the cleanup hook before quit, reload, or session replacement.
+- `before_provider_request` handlers return the replacement payload directly; `undefined` preserves the current payload.
+- `ToolDefinition.execute()` receives `ExtensionContext`, and runtime tool registration is supported.
+- `ctx.cwd` and `ctx.isProjectTrusted()` are the authoritative project context. They are available in event/tool contexts, not in the extension factory.
+
 ---
 
-## Phase 1: Consolidate Shallow HTTP Search Providers
+## Phase 1: Consolidate Shallow HTTP Search Providers -- Implemented
 
 ### Problem
 
-9 provider modules are shallow -- their interface (file, export, import in all.ts, test file) is nearly as complex as their implementation (a few config properties passed to http-adapter). Each fails the deletion test: deleting any one would not cause complexity to reappear across callers because the implementation is trivial. All 9 already use `createHttpSearchProvider` from http-adapter.ts.
+Before this phase, 9 provider modules were shallow -- their interface (file, export, import in all.ts, test file) was nearly as complex as their implementation (a few config properties passed to http-adapter). Each failed the deletion test because deleting it did not cause complexity to reappear across callers. All 9 already used `createHttpSearchProvider` from http-adapter.ts.
 
 | Provider     | Lines | Unique logic |
 | ------------ | ----- | ------------ |
@@ -55,7 +67,7 @@ These terms are used precisely throughout (see LANGUAGE.md):
 
 ### Solution
 
-Replace 9 individual provider files with a single `src/providers/http-providers.ts` that exports an array of `ProviderMeta` definitions. Each definition uses `createHttpSearchProvider` from http-adapter.ts and references its parser from parsers.ts.
+The landed change replaced 9 individual provider files with `src/providers/http-providers.ts`, which exports an array of `ProviderMeta` definitions. Each definition uses `createHttpSearchProvider` and references its centralized parser.
 
 ### Files deleted
 
@@ -109,15 +121,15 @@ Each entry in the array is a `ProviderMeta`:
 
 ### Special cases
 
-**brave.ts:** Has a `buildFreshness` helper that maps date filters to Brave's freshness parameter. This logic moves into the provider definition's `endpoint` or `buildBody` function as an inline helper.
+**brave.ts:** Its `buildFreshness` date-filter mapping moved into `http-providers.ts`.
 
-**serper.ts:** Stays as its own file (48 lines). Has complex date filtering logic (`isoToMDY`, `buildTbs`) that is provider-specific enough to justify a separate module. Borderline shallow but the date conversion is non-trivial.
+**serper.ts:** Remained separate because its `isoToMDY` and `buildTbs` date conversion is non-trivial provider-specific behavior.
 
 ### Test changes
 
-- 9 individual provider test files get consolidated. Tests verify that each definition in `http-providers.ts` produces a working SearchProvider with correct metadata (name, tier, quota).
-- Parser functions remain tested in `tests/providers/parsers.test.ts`.
-- Per-provider HTTP behavior (correct URL construction, header injection, response parsing) can be tested via the factory output's `search()` method with stubbed fetch.
+- 9 individual provider test files were consolidated into `tests/providers/http-providers.test.ts`.
+- The consolidated tests cover metadata, request construction, headers, and response parsing through each factory output.
+- Parser functions remain covered in `tests/providers/parsers.test.ts`.
 
 ### Verification
 
@@ -127,42 +139,40 @@ Each entry in the array is a `ProviderMeta`:
 
 ---
 
-## Phase 2: Extract Session Lifecycle from index.ts
+## Phase 2: Extract Session Lifecycle from index.ts -- Implemented
 
 ### Problem
 
-index.ts has 6 responsibilities in a single `createExtension()` function: dependency wiring, session lifecycle management (restore content, record trust, detect capabilities, apply guidance), OpenAI native rewriting, tool registration (7 tools), command registration, and strategy resolution. Testing any lifecycle logic requires mocking the full Pi ExtensionAPI.
+Before this phase, `index.ts` mixed dependency wiring with content restoration, trust recording, and OpenAI request rewriting. Testing those lifecycle paths required mocking the full Pi `ExtensionAPI`.
 
 ### Solution
 
-Extract session lifecycle logic into `src/session.ts`. index.ts becomes thin wiring -- its job is to connect deep modules, not to contain logic.
+The landed change extracted the non-trivial lifecycle behavior into `src/session.ts`. `index.ts` retains dependency wiring, tool/command registration, and two trivial event handlers.
 
 ### Files created
 
-- `src/session.ts` -- exports functions for each lifecycle concern. Each function accepts the Pi event + context plus its dependencies, so index.ts wires them as `pi.on("event", (event, ctx) => handleX(event, ctx, ...deps))`.
-  - `restoreContent(entries, store)` -- filters stored content entries, calls `store.restore()`
-  - `handleSessionStart(event: SessionStartEvent, ctx: ExtensionContext, store, refresh: () => void, registry)` -- orchestrates session_start: restore content, record trust, detect capabilities, apply guidance, refresh config. Takes a `refresh: () => void` callback rather than ConfigManager directly, so Phase 5 can swap the implementation without changing session.ts
-  - `handleModelSelect(event: ModelSelectEvent, ctx: ExtensionContext, registry)` -- resolves selection strategy from model
-  - `handleProviderRequest(event: BeforeProviderRequestEvent, ctx: ExtensionContext, rewrite): BeforeProviderRequestEventResult | void` -- OpenAI native web search rewriting. Returns the event result type expected by the Pi framework.
-  - `handleSessionShutdown(event: SessionShutdownEvent, ctx: ExtensionContext, registry)` -- cleanup
+- `src/session.ts` exports two focused handlers:
+  - `handleSessionStart(event, ctx, store, refresh)` restores valid `pi-tools-content` entries, records Pi's current trust state, and refreshes configuration.
+  - `handleProviderRequest(event, ctx, configGetter)` records trust and returns a rewritten OpenAI provider payload only when native web search applies.
+- Stored-content validation and restoration remain private implementation details.
 
 ### Files modified
 
-- `src/index.ts` -- shrinks to ~80 lines of wiring. Creates dependencies, calls `pi.on('session_start', ...)` with handlers from session.ts, registers tools and commands. No business logic remains.
+- `src/index.ts` wires both handlers to Pi events. The one-line `model_select` trust update and `session_shutdown` monitor reset stay inline; extracting them would add indirection without isolating meaningful behavior.
 
 ### What stays unchanged
 
 - All tool files, provider files, config files, extraction files
-- The Pi extension API contract -- same events, same tools registered
+- The Pi extension API contract -- same events and tools remain registered
 
 ### Test changes
 
-- New `tests/session.test.ts` -- tests lifecycle functions through their own interface. Can test `restoreContent()` with a mock store without needing to mock tool registration. Can test `handleProviderRequest()` with a mock request without the full Pi API.
-- `tests/index.test.ts` -- simplifies. Tests verify that event handlers are registered and tools are registered. Lifecycle behavior is tested in session.test.ts.
+- `tests/session.test.ts` covers valid/corrupt content restoration, refresh invocation, OpenAI payload replacement, disabled native search, and non-OpenAI requests.
+- `tests/index.test.ts` retains wiring coverage while lifecycle behavior is tested through `session.ts`.
 
 ### Design rationale
 
-index.ts is intentionally shallow after this change. Entry points should be thin wiring. The depth moves to session.ts where it is testable through a focused interface.
+Pi reloads and rebinds extensions before emitting `session_start` for new, resumed, forked, and reloaded sessions. Restoring session-backed content there matches the framework lifecycle. Entry-point wiring stays shallow; only behavior with a useful test seam moved to `session.ts`.
 
 ### Verification
 
@@ -172,23 +182,23 @@ index.ts is intentionally shallow after this change. Entry points should be thin
 
 ---
 
-## Phase 3: Extraction Pipeline Config Self-Resolution
+## Phase 3: Extraction Pipeline Config Self-Resolution -- Implemented
 
 ### Problem
 
-Config leaks across the seam between the tool layer and the extraction layer. `web-fetch.ts` receives 5 config options (`githubConfig`, `ssrfAllowRanges`, `pdfConfig`, `geminiConfig`, `guidance`) at factory creation time and passes them through to `extractContent()`. `web-fetch-multi.ts` duplicates this config threading. Every new extractor config option requires editing 3 files.
+Before this phase, config leaked across the seam between the tool and extraction layers. `web-fetch.ts` received extraction config at factory creation and passed it through to `extractContent()`, while `web-fetch-multi.ts` duplicated the threading. Every new extractor option required editing three files.
 
-The extraction submodules (youtube.ts, gemini-api.ts, video.ts) already resolve config internally via direct import. The pipeline is in a mixed state.
+The extraction submodules already resolved config internally, leaving the pipeline in a mixed state.
 
 ### Solution
 
-The extraction pipeline resolves its own config internally via `loadMergedConfig()`, matching the pattern its submodules already use. Tools pass only user-facing options.
+The extraction pipeline now resolves its own config internally via `loadMergedConfig(process.cwd())`, matching the pattern its submodules already use. Tools pass only user-facing options plus Pi's runtime context.
 
 ### Files modified
 
 **`src/extract/pipeline.ts`:**
 
-`ExtractOptions` drops 4 config fields:
+`ExtractOptions` dropped 4 config fields:
 
 ```typescript
 // Before
@@ -219,24 +229,20 @@ interface ExtractOptions {
 Inside `extractContent()`, config is read once at the top:
 
 ```typescript
-const config = loadMergedConfig();
-const githubConfig = config.github ?? DEFAULT_GITHUB_CONFIG;
-const allowRanges = config.ssrf?.allowRanges ?? [];
-const pdfConfig = config.pdf;
-const geminiConfig = config.gemini;
+const { github, ssrf, pdf, gemini } = loadMergedConfig(process.cwd());
 ```
 
 **`src/tools/web-fetch.ts`:**
 
-`createWebFetchTool()` factory drops `githubConfig`, `ssrfAllowRanges`, `pdfConfig`, `geminiConfig` parameters. Tool calls `extractContent(url, signal, { raw, prompt, model })` without threading config.
+`createWebFetchTool()` dropped the `githubConfig`, `ssrfAllowRanges`, `pdfConfig`, and `geminiConfig` parameters. It calls `extractContent()` without threading config.
 
 **`src/tools/web-fetch-multi.ts`:**
 
-`MultiUrlOptions` drops `github`, `allowRanges`, `pdf`, `gemini` fields. `executeMultiUrl()` calls `extractContent(url, signal, options)` with user-facing options only.
+`MultiUrlOptions` dropped the `github`, `allowRanges`, `pdf`, and `gemini` fields. `executeMultiUrl()` calls `extractContent()` with user-facing options and `ExtensionContext` only.
 
 **`src/index.ts`:**
 
-`createWebFetchTool()` call simplifies -- no longer passes `config.github`, `config.ssrf?.allowRanges`, etc.
+The `createWebFetchTool()` call no longer passes extraction configuration.
 
 ### What stays unchanged
 
@@ -246,13 +252,12 @@ const geminiConfig = config.gemini;
 
 ### Test changes
 
-- `tests/extract/pipeline.test.ts` -- tests that currently pass config via `ExtractOptions` switch to mocking `loadMergedConfig` via `vi.mock("../config.ts")`. This matches the existing test pattern used by youtube.test.ts and gemini-api.test.ts.
-- `tests/tools/web-fetch.test.ts` -- simplifies. Factory call drops 4 parameters.
-- `tests/tools/web-fetch-multi.test.ts` -- same simplification.
+- `tests/extract/pipeline.test.ts` and `tests/extract/pipeline-ssrf.test.ts` mock `loadMergedConfig()` instead of passing config through `ExtractOptions`.
+- Existing tool tests verify the simplified factory and extraction call sites through their public behavior.
 
 ### Risk
 
-The pipeline currently receives config per-call, meaning different calls could theoretically get different config. After this change, config is read from `loadMergedConfig()` which has 30-second TTL caching. In practice this is the same behavior since config does not change mid-call.
+Pi identifies `ctx.cwd` as the authoritative session directory. The landed code uses `process.cwd()` while retaining `ctx` in `ExtractOptions`; a future correction should prefer `options?.ctx?.cwd ?? process.cwd()`. That compatibility correction is independent of Phase 4.
 
 ### Verification
 
@@ -262,17 +267,19 @@ The pipeline currently receives config per-call, meaning different calls could t
 
 ---
 
-## Phase 4: Collapse web-fetch-multi into web-fetch
+## Phase 4: Collapse web-fetch-multi into web-fetch -- Planned
 
 **Depends on:** Phase 3 (config threading is already gone)
 
+The existing Phase 4 implementation plan predates the shared-helper design and must be rewritten from this section before implementation.
+
 ### Problem
 
-Single-URL fetches can fall back to FetchProvider on `RetryableExtractionError`; multi-URL fetches cannot. This asymmetry means multi-URL fetches fail silently where single-URL would succeed. The two modules also duplicate config threading (eliminated by Phase 3) and share the same dependencies (extraction pipeline, cache, storage).
+Single-URL fetches can fall back to FetchProvider on `RetryableExtractionError`; multi-URL fetches cannot. This asymmetry means a multi-URL item reports an error where the same URL fetched alone could succeed. After Phase 3 removed config threading, the two modules share the same extraction, cache, storage, and provider dependencies, so the extra module boundary no longer buys isolation.
 
 ### Solution
 
-Absorb `web-fetch-multi.ts` (170 lines) into `web-fetch.ts`. One deep module handles both single and multi-URL paths with consistent provider fallback.
+Absorb `web-fetch-multi.ts` into `web-fetch.ts`. Inside `createWebFetchTool`, add one private `fetchUrl()` helper that owns cache lookup, extraction, retryable provider fallback, and cache writes. Both single- and multi-URL execution call this helper, so fallback behavior cannot drift between the two paths.
 
 ### Files deleted
 
@@ -282,33 +289,40 @@ Absorb `web-fetch-multi.ts` (170 lines) into `web-fetch.ts`. One deep module han
 
 **`src/tools/web-fetch.ts`:**
 
-- `executeMultiUrl()` becomes a private function inside the module
-- `UrlResult` and `MultiUrlOptions` types move in (simplified since config fields are gone from Phase 3)
-- Multi-URL path gains the same `RetryableExtractionError` -> FetchProvider fallback that single-URL already has
+- `executeMultiUrl()` becomes a private function inside `createWebFetchTool` and captures the tool dependencies it already needs
+- `UrlResult` and the moved helpers remain private; `MultiUrlOptions` is removed because the factory closure supplies its dependencies
+- `fetchUrl()` becomes the single path for cache lookup, `extractContent()`, `RetryableExtractionError` -> FetchProvider fallback, and cache writes
+- Single-URL execution formats the returned content as before; multi-URL execution keeps its existing concurrency, deduplication, ordering, preview, storage, image, and partial-failure behavior
+- Errors are sanitized consistently before being returned, including pipeline and provider context when both fail; exact error wording is not part of the compatibility contract
 
-The resulting module will be ~400 lines. This is appropriate depth for a module that handles single-URL fetch, multi-URL fetch, caching, storage, truncation, provider fallback, and result formatting -- all behind one `web_fetch` tool interface.
+The resulting module handles single-URL fetch, multi-URL fetch, caching, storage, truncation, provider fallback, and result formatting behind one `web_fetch` tool interface.
 
 ### Multi-URL fallback design
 
 Per-URL fallback, matching single-URL behavior:
 
-1. For each URL (within concurrency limit), try `extractContent(url)`
-2. If `RetryableExtractionError` for that URL, try FetchProvider fallback for that specific URL
-3. Collect results -- some URLs may succeed via extraction, others via provider fallback, others may fail
-4. Format combined output as before
+1. For each unique URL (within the existing concurrency limit), call `fetchUrl(url)`
+2. Return a cached value unless `fresh` is set
+3. Otherwise try `extractContent(url)`
+4. On `RetryableExtractionError`, try the registered FetchProviders for that URL
+5. Cache successful extraction and provider results
+6. Collect results in input order -- some URLs may succeed via extraction, others via provider fallback, and others may fail
+7. Format combined output as before
 
 This is a behavioral improvement: multi-URL fetches become more resilient.
 
 ### What stays unchanged
 
-- The `web_fetch` tool interface -- same parameters, same behavior for callers
+- The `web_fetch` parameters and result shape
 - `src/utils/concurrency.ts` -- still used for `fetchWithConcurrencyLimit`
 - All other tool files
 
 ### Test changes
 
-- Tests from `tests/tools/web-fetch-multi.test.ts` move into `tests/tools/web-fetch.test.ts` as a describe block.
-- New tests added for multi-URL provider fallback on `RetryableExtractionError`. Verify that if extraction fails for a URL in a multi-URL request, the FetchProvider fallback is attempted before returning an error.
+- Keep the existing multi-URL coverage in `tests/tools/web-fetch.test.ts`.
+- Add one mixed-result regression test covering normal extraction, provider recovery after a retryable error, and failure after provider fallback.
+- Add one regression test proving that non-retryable extraction errors do not call FetchProviders.
+- Existing single-URL fallback tests continue to cover provider ordering and no-provider behavior because both execution modes now share `fetchUrl()`.
 
 ### Verification
 
@@ -318,76 +332,25 @@ This is a behavioral improvement: multi-URL fetches become more resilient.
 
 ---
 
-## Phase 5: Absorb ConfigManager into ProviderRegistry
+## Phase 5: Absorb ConfigManager into ProviderRegistry -- Rejected
 
-**Depends on:** Phase 2 (both touch index.ts; Phase 2 should land first)
+### Original proposal
 
-### Problem
+Delete `ConfigManager` and move TTL refresh, config diffing, provider construction, aliases, and filesystem config loading into `ProviderRegistry`.
 
-ConfigManager (172 lines) tightly couples config change detection with provider registration. It calls `registry.registerSearch()`, `registry.registerFetch()`, `registry.unregisterAll()` directly. Callers must understand both ProviderRegistry and ProviderMeta to use ConfigManager. It exposes a test-only method (`expireTtlForTest`).
+### Decision
 
-### Solution
+Keep `ConfigManager` as the config-driven provider lifecycle coordinator. Do not execute `docs/superpowers/plans/2026-07-16-phase-5-absorb-config-manager.md`; that plan is obsolete.
 
-ProviderRegistry absorbs config-driven provider lifecycle. ConfigManager disappears.
+### Rationale
 
-### Files deleted
+- `ConfigManager` passes the deletion test: removing it does not remove its complexity, it moves that complexity into `ProviderRegistry`.
+- `ProviderRegistry` currently owns provider registration, selection, metrics, quotas, and persistence without depending on filesystem config or Pi lifecycle state. Absorbing the manager would widen that responsibility.
+- Pi defines `ctx.cwd` and `ctx.isProjectTrusted()` as authoritative runtime state, available in event and tool contexts rather than the extension factory. A registry constructor that loads config from `process.cwd()` would hide the wrong dependency.
+- A test-only TTL helper is not sufficient reason to merge modules; it can be replaced with fake timers independently if maintenance cost justifies it.
 
-- `src/config-manager.ts`
+### Pi lifecycle follow-up
 
-### Files modified
+The current extension factory creates `ConfigManager` before `session_start` provides authoritative cwd and trust state. `handleSessionStart()` records trust and then performs a non-forced refresh, which can be skipped by the 30-second TTL and temporarily retain sanitized pre-trust config. Conditional tool registration also happens before that trusted refresh.
 
-**`src/providers/registry.ts`:**
-
-Gains:
-
-- `loadFromConfig(config, providerMetas)` method that replaces the initial registration loop from ConfigManager's constructor
-- `refresh(force?: boolean)` method with TTL-cached config reloading (absorbs ConfigManager's 30-second TTL logic)
-- Internal change detection via `diffConfig()` -- on refresh, the registry diffs previous and current config, then registers/unregisters/re-registers providers as needed
-- `ProviderMeta[]` array and config state become internal to the registry
-- Provider alias resolution (`openai-native` -> `openai-codex`) moves in
-
-Constructor changes:
-
-```typescript
-// Before
-constructor(persistence: PersistenceAdapter)
-
-// After
-constructor(persistence: PersistenceAdapter, providerMetas: ProviderMeta[], cwd: string)
-```
-
-The registry reads config via `loadMergedConfig(cwd)` (direct import, matching Phase 3's established pattern). Initial provider registration happens in the constructor.
-
-**`src/index.ts` (already thinned in Phase 2):**
-
-- No more `ConfigManager` import or instantiation
-- Creates `ProviderRegistry` with persistence, provider metas, and cwd
-- Calls `registry.refresh()` where it previously called `configManager.refresh()`
-- The `onReload` callback for the `/tools` command becomes `() => registry.refresh(true)`
-
-**`src/commands/tools.ts`:** `onReload` callback type unchanged (still `() => void`)
-
-### Where does diffConfig live?
-
-`diffConfig` is currently in `config-manager.ts`. When config-manager.ts is deleted, `diffConfig` moves to `src/config.ts` alongside `loadMergedConfig` and `resolveApiKey` -- it's a pure function over `PiToolsConfig` and belongs with the config module. The `ConfigChangeSet` type it returns also moves to config.ts.
-
-### What stays unchanged
-
-- `src/providers/types.ts` -- `ProviderMeta` interface unchanged
-- All provider files, tool files, extraction files
-
-### Test changes
-
-- Tests from `tests/config-manager.test.ts` move to `tests/providers/registry.test.ts`. Registry tests gain: TTL refresh behavior, config change detection triggering re-registration, provider alias resolution.
-- `diffConfig` tests move to `tests/config.test.ts` alongside the function.
-- The `expireTtlForTest()` leak disappears. Tests use `registry.refresh(force: true)` which bypasses TTL, or `vi.useFakeTimers()` to advance past the TTL window.
-
-### Size impact
-
-ProviderRegistry grows from ~373 to ~450-480 lines. This is acceptable -- it absorbs a real responsibility (config-driven lifecycle) that was previously scattered. The module gets deeper, not wider: same external interface with more behavior behind it.
-
-### Verification
-
-- `pnpm run typecheck` passes
-- `pnpm run test` passes
-- `pnpm run lint` passes
+Fixing config and conditional-tool initialization requires its own focused design against Pi's lifecycle and runtime `registerTool()` support. It is not part of Phase 4, and it should not be smuggled into `ProviderRegistry` as an incidental refactor.
