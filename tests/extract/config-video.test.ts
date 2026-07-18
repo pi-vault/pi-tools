@@ -18,7 +18,7 @@ describe("FALLBACK_ENV_MAP — gemini entry", () => {
   it("preserves existing provider mappings", () => {
     expect(FALLBACK_ENV_MAP.brave).toBe("BRAVE_API_KEY");
     expect(FALLBACK_ENV_MAP.exa).toBe("EXA_API_KEY");
-    expect(FALLBACK_ENV_MAP["openai-codex"]).toBe("OPENAI_API_KEY");
+    expect(FALLBACK_ENV_MAP["openai-web-search"]).toBe("OPENAI_API_KEY");
   });
 });
 

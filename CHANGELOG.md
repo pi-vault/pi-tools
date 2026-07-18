@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Renamed the OpenAI web-search rewrite module to `openai-web-search-rewrite`.
+- `openai-codex` now resolves Pi OAuth credentials through the active ModelRegistry and no longer uses an OpenAI API-key fallback.
+
+### Fixed
+
+- Codex authentication, stream, and empty-result failures now trigger provider fallback.
 
 ### Removed
 

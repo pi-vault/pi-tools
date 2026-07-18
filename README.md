@@ -132,7 +132,7 @@ Provider configuration refreshes automatically every 30 seconds. Use `/tools rel
 | Linkup            | Search                        | `LINKUP_API_KEY`                   |
 | Marginalia        | Search                        | No API key                         |
 | Ollama            | Search, fetch                 | Local Ollama server                |
-| OpenAI Codex      | Search                        | Pi OpenAI auth or `OPENAI_API_KEY` |
+| OpenAI Codex      | Search                        | Pi `/login` OAuth                  |
 | OpenAI web search | Search                        | `OPENAI_API_KEY`                   |
 | Parallel          | Search, fetch                 | `PARALLEL_API_KEY`                 |
 | Perplexity        | Search, YouTube fallback      | `PERPLEXITY_API_KEY`               |
@@ -144,6 +144,8 @@ Provider configuration refreshes automatically every 30 seconds. Use `/tools rel
 | You.com           | Search                        | `YOUCOM_API_KEY`                   |
 
 Pi Tools ranks providers by tier, availability, quota, and optionally recent session performance. Provider-specific date and domain filters depend on the upstream API; unsupported filters are applied locally where possible.
+
+OpenAI Codex uses the active Pi OAuth session. Run `/login` and select `openai-codex` before using it. To search with `OPENAI_API_KEY` instead, configure `openai-web-search`.
 
 ## Configure files and credentials
 
