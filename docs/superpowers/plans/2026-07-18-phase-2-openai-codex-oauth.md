@@ -15,11 +15,12 @@
 - Modify `src/providers/types.ts`, `src/config-manager.ts`, and `src/index.ts` to pass the active registry into provider factories.
 - Modify `src/providers/openai-codex.ts` to remove AuthStorage/direct-fetch modes and use registry auth plus Pi streaming.
 - Modify Codex/config/index tests; delete `tests/providers/openai-codex-mode-a.test.ts`.
-- Modify `src/config.ts`, `tests/config.test.ts`, `README.md`, and `CHANGELOG.md` for the Codex API-key removal.
+- Modify `src/config.ts`, `tests/config.test.ts`, `tests/extract/config-video.test.ts`, `README.md`, and `CHANGELOG.md` for the Codex API-key removal.
 
 ## Task 1: Add the ModelRegistry factory boundary
 
 **Files:**
+
 - Modify: `src/providers/types.ts`, `src/config-manager.ts`, `src/index.ts`
 - Test: `tests/config-manager.test.ts`, `tests/index.test.ts`, `tests/helpers.ts`
 
@@ -77,6 +78,7 @@ git commit -m "refactor: pass active model registry to providers"
 ## Task 2: Define the OAuth-only Codex contract in tests
 
 **Files:**
+
 - Modify: `tests/providers/openai-codex.test.ts`
 - Keep: `tests/providers/openai-codex-helpers.test.ts`
 - Delete: `tests/providers/openai-codex-mode-a.test.ts`
@@ -121,6 +123,7 @@ Expected: FAIL because the current implementation uses dual modes, AuthStorage, 
 ## Task 3: Implement registry-backed Codex search
 
 **Files:**
+
 - Modify: `src/providers/openai-codex.ts`
 
 - [ ] **Step 1: Remove obsolete mode state and direct API code.**
@@ -138,13 +141,17 @@ Use this sequence on every search:
 ```ts
 signal?.throwIfAborted();
 if (!modelRegistry) throw new Error("Pi model registry unavailable");
-const model = modelRegistry.find("openai-codex", configuredModel ?? DEFAULT_MODEL_A);
+const model = modelRegistry.find(
+  "openai-codex",
+  configuredModel ?? DEFAULT_MODEL_A,
+);
 if (!model || !hasApi(model, "openai-codex-responses")) {
   throw new Error("OpenAI Codex model is unavailable");
 }
 const auth = await modelRegistry.getApiKeyAndHeaders(model);
 if (!auth.ok) throw new Error(`${auth.error}; run /login for openai-codex`);
-if (!auth.apiKey) throw new Error("OpenAI Codex OAuth credentials are unavailable; run /login");
+if (!auth.apiKey)
+  throw new Error("OpenAI Codex OAuth credentials are unavailable; run /login");
 const message = await streamOpenAICodexResponses(model, context, {
   apiKey: auth.apiKey,
   headers: auth.headers,
@@ -175,7 +182,8 @@ git commit -m "fix: resolve openai codex credentials through model registry"
 ## Task 4: Remove Codex API-key configuration and document Phase 2
 
 **Files:**
-- Modify: `src/config.ts`, `tests/config.test.ts`, `README.md`, `CHANGELOG.md`
+
+- Modify: `src/config.ts`, `tests/config.test.ts`, `tests/extract/config-video.test.ts`, `README.md`, `CHANGELOG.md`
 
 - [ ] **Step 1: Remove Codex fallback configuration.**
 
@@ -183,7 +191,7 @@ Delete `openai-codex` from `FALLBACK_ENV_MAP`. Change its default entry to `{ en
 
 - [ ] **Step 2: Update config tests.**
 
-Remove expectations for the Codex fallback mapping and assert that the default Codex entry has no `apiKey`.
+Remove expectations for the Codex fallback mapping from `tests/config.test.ts` and `tests/extract/config-video.test.ts`. Assert in `tests/config.test.ts` that the default Codex entry has no `apiKey`.
 
 - [ ] **Step 3: Update user-facing documentation.**
 
@@ -194,7 +202,7 @@ Describe Codex as Pi OAuth-authenticated search and direct API-key users to `ope
 Run:
 
 ```bash
-pnpm vitest run tests/providers/openai-codex.test.ts tests/providers/openai-codex-helpers.test.ts tests/config.test.ts tests/config-manager.test.ts tests/index.test.ts tests/session.test.ts
+pnpm vitest run tests/providers/openai-codex.test.ts tests/providers/openai-codex-helpers.test.ts tests/config.test.ts tests/extract/config-video.test.ts tests/config-manager.test.ts tests/index.test.ts tests/session.test.ts
 pnpm check
 pnpm pack --dry-run
 git diff --check origin/master...HEAD
@@ -205,7 +213,7 @@ Expected: all tests and checks pass; the package contains the updated provider s
 - [ ] **Step 5: Commit configuration and docs.**
 
 ```bash
-git add src/config.ts tests/config.test.ts README.md CHANGELOG.md
+git add src/config.ts tests/config.test.ts tests/extract/config-video.test.ts README.md CHANGELOG.md
 git commit -m "docs: document openai codex oauth configuration"
 ```
 
