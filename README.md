@@ -125,7 +125,6 @@ Provider configuration refreshes automatically every 30 seconds. Use `/tools rel
 | Context7          | Docs                          | `CONTEXT7_API_KEY`                 |
 | DuckDuckGo        | Search                        | `ddgs` CLI                         |
 | Exa               | Search, fetch, code, research | `EXA_API_KEY`                      |
-| Exa MCP           | Search                        | No API key                         |
 | fastCRW           | Search                        | `FASTCRW_API_KEY`                  |
 | Firecrawl         | Search, fetch                 | API key optional                   |
 | Jina              | Search, fetch                 | API key optional                   |
@@ -189,9 +188,6 @@ The following safe example includes every configuration section and all register
       "enabled": false,
       "monthlyQuota": 1000,
       "apiKey": "EXA_API_KEY"
-    },
-    "exa-mcp": {
-      "enabled": true
     },
     "fastcrw": {
       "enabled": false,
