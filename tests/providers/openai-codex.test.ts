@@ -66,10 +66,8 @@ describe("OpenAICodexProvider", () => {
     mockStream.mockReset().mockReturnValue({
       result: () => Promise.resolve(successMessage),
     });
-    vi.doMock("@earendil-works/pi-ai", () => ({
+    vi.doMock("@earendil-works/pi-ai/compat", () => ({
       hasApi: (candidate: { api?: string }, api: string) => candidate.api === api,
-    }));
-    vi.doMock("@earendil-works/pi-ai/api/openai-codex-responses", () => ({
       stream: mockStream,
     }));
   });

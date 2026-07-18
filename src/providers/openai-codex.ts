@@ -1,8 +1,6 @@
 // src/providers/openai-codex.ts
-import { hasApi } from "@earendil-works/pi-ai";
-import { stream as streamOpenAICodexResponses } from "@earendil-works/pi-ai/api/openai-codex-responses";
+import { hasApi, stream as streamOpenAICodexResponses } from "@earendil-works/pi-ai/compat";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import type { ProviderConfigEntry } from "../config.ts";
 import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 
 const DEFAULT_MODEL = "gpt-5.4-mini";
@@ -46,15 +44,10 @@ class OpenAICodexProvider implements SearchProvider {
   readonly name = "openai-codex";
   readonly label = "OpenAI Codex";
 
-  private readonly model?: string;
-  private readonly modelRegistry?: ModelRegistry;
-
-  constructor(_key?: string, providerConfig?: ProviderConfigEntry, modelRegistry?: ModelRegistry) {
-    this.model = (providerConfig as Record<string, unknown> | undefined)?.model as
-      | string
-      | undefined;
-    this.modelRegistry = modelRegistry;
-  }
+  constructor(
+    private readonly model?: string,
+    private readonly modelRegistry?: ModelRegistry,
+  ) {}
 
   async search(
     query: string,
@@ -178,7 +171,7 @@ export function normalizeCodexToolCallResults(args: unknown, maxResults: number)
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
 
-    const title = truncateText(cleanString(raw.title) || safeHostname(url), MAX_TITLE_LENGTH);
+    const title = truncateText(cleanString(raw.title) || new URL(url).hostname, MAX_TITLE_LENGTH);
     const snippet = truncateText(cleanString(raw.snippet), MAX_SNIPPET_LENGTH);
 
     results.push({ title, url, snippet });
@@ -201,14 +194,6 @@ function normalizeHttpUrl(value: unknown): string | undefined {
   }
 }
 
-function safeHostname(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
-}
-
 function cleanString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -222,7 +207,7 @@ export const providerMeta: ProviderMeta = {
   tier: 1,
   monthlyQuota: null,
   requiresKey: false,
-  create: (key?: string, providerConfig?: ProviderConfigEntry, modelRegistry?: ModelRegistry) => ({
-    search: new OpenAICodexProvider(key, providerConfig, modelRegistry),
+  create: (_key, providerConfig, modelRegistry) => ({
+    search: new OpenAICodexProvider(providerConfig?.model, modelRegistry),
   }),
 };
