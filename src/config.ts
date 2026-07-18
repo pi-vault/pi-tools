@@ -129,7 +129,6 @@ export const FALLBACK_ENV_MAP: Record<string, string> = {
   context7: "CONTEXT7_API_KEY",
   parallel: "PARALLEL_API_KEY",
   ollama: "OLLAMA_API_KEY",
-  "openai-codex": "OPENAI_API_KEY",
   "openai-web-search": "OPENAI_API_KEY",
   gemini: "GEMINI_API_KEY",
 };
@@ -181,7 +180,7 @@ const DEFAULT_CONFIG: PiToolsConfig = {
     serper: { enabled: false, apiKey: "SERPER_API_KEY" },
     perplexity: { enabled: true, apiKey: "PERPLEXITY_API_KEY" },
     firecrawl: { enabled: true, apiKey: "FIRECRAWL_API_KEY" },
-    "openai-codex": { enabled: true, apiKey: "OPENAI_API_KEY" },
+    "openai-codex": { enabled: true },
     "openai-web-search": { enabled: true, apiKey: "OPENAI_API_KEY" },
     ollama: { enabled: false, apiKey: "OLLAMA_API_KEY" },
     parallel: { enabled: false, apiKey: "PARALLEL_API_KEY" },

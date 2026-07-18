@@ -36,6 +36,7 @@ describe("loadConfig", () => {
     expect(config.defaultProvider).toBe("auto");
     expect(config.providers.duckduckgo.enabled).toBe(true);
     expect(config.providers.jina.enabled).toBe(true);
+    expect(config.providers["openai-codex"]).toEqual({ enabled: true });
   });
 
   it("parses valid config file", () => {
@@ -697,6 +698,11 @@ describe("FALLBACK_ENV_MAP", () => {
     expect(FALLBACK_ENV_MAP.brave).toBe("BRAVE_API_KEY");
     expect(FALLBACK_ENV_MAP.exa).toBe("EXA_API_KEY");
     expect(FALLBACK_ENV_MAP.tavily).toBe("TAVILY_API_KEY");
+  });
+
+  it("keeps API-key fallback only for OpenAI web search", () => {
+    expect(FALLBACK_ENV_MAP["openai-codex"]).toBeUndefined();
+    expect(FALLBACK_ENV_MAP["openai-web-search"]).toBe("OPENAI_API_KEY");
   });
 
   it("maps all expected providers", () => {

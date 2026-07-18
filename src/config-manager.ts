@@ -1,3 +1,4 @@
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { PiToolsConfig, ProviderConfigEntry } from "./config.ts";
 import { loadMergedConfig, resolveApiKey, clearCredentialCache } from "./config.ts";
 import type { ProviderRegistry } from "./providers/registry.ts";
@@ -59,11 +60,18 @@ export class ConfigManager {
   private readonly cwd: string;
   private readonly registry: ProviderRegistry;
   private readonly metaByName: Map<string, ProviderMeta>;
+  private readonly modelRegistry?: ModelRegistry;
 
-  constructor(cwd: string, registry: ProviderRegistry, providerMetas: ProviderMeta[]) {
+  constructor(
+    cwd: string,
+    registry: ProviderRegistry,
+    providerMetas: ProviderMeta[],
+    modelRegistry?: ModelRegistry,
+  ) {
     this.cwd = cwd;
     this.registry = registry;
     this.metaByName = new Map(providerMetas.map((m) => [m.name, m]));
+    this.modelRegistry = modelRegistry;
     this._config = loadMergedConfig(cwd);
     this.cacheTime = Date.now();
     this.registerFromConfig(this._config);
@@ -116,13 +124,11 @@ export class ConfigManager {
     if (meta.requiresKey && !resolvedKey) return;
 
     // Inject global ssrf.allowRanges into the per-provider config passed to meta.create.
-    // This avoids changing the ProviderMeta.create(key, providerConfig) signature which
-    // would touch every provider module.
     const configWithSsrf = { ...providerConfig, ssrfAllowRanges: config.ssrf.allowRanges };
 
     let instances: ReturnType<typeof meta.create>;
     try {
-      instances = meta.create(resolvedKey, configWithSsrf);
+      instances = meta.create(resolvedKey, configWithSsrf, this.modelRegistry);
     } catch {
       // Provider instantiation failed — skip, other providers unaffected
       return;

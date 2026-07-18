@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { PiToolsConfig } from "../src/config.ts";
 
 import { ConfigManager, diffConfig } from "../src/config-manager.ts";
@@ -177,6 +178,29 @@ describe("ConfigManager", () => {
     expect(registry.getSearchProviderNames().sort()).toEqual(["brave", "duckduckgo"]);
   });
 
+  it("passes the active model registry to provider factories", () => {
+    vi.mocked(loadMergedConfig).mockReturnValue(
+      makeConfig({ providers: { brave: { enabled: true } } }),
+    );
+    vi.mocked(resolveApiKey).mockReturnValue(undefined);
+
+    const modelRegistry = {} as ModelRegistry;
+    const create = vi.fn().mockReturnValue({
+      search: {
+        name: "brave",
+        label: "Brave",
+        search: vi.fn().mockResolvedValue([]),
+      },
+    });
+    new ConfigManager("/test/cwd", mem(), [makeMeta("brave", { create })], modelRegistry);
+
+    expect(create).toHaveBeenCalledWith(
+      undefined,
+      expect.objectContaining({ ssrfAllowRanges: [] }),
+      modelRegistry,
+    );
+  });
+
   it("refresh is a no-op within TTL", () => {
     const config = makeConfig();
     vi.mocked(loadMergedConfig).mockReturnValue(config);
@@ -326,10 +350,14 @@ describe("ConfigManager", () => {
     manager.refresh();
 
     expect(createFn).toHaveBeenCalledTimes(2);
-    expect(createFn).toHaveBeenLastCalledWith("new-resolved", {
-      ...updatedConfig.providers.brave,
-      ssrfAllowRanges: updatedConfig.ssrf.allowRanges,
-    });
+    expect(createFn).toHaveBeenLastCalledWith(
+      "new-resolved",
+      {
+        ...updatedConfig.providers.brave,
+        ssrfAllowRanges: updatedConfig.ssrf.allowRanges,
+      },
+      undefined,
+    );
   });
 
   it("preserves previous config when reload throws", () => {
@@ -432,5 +460,4 @@ describe("ConfigManager", () => {
     // exa's create throws — brave still registered, no crash
     expect(registry.getSearchProviderNames()).toEqual(["brave"]);
   });
-
 });

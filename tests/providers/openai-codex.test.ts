@@ -1,141 +1,223 @@
-// tests/providers/openai-codex.test.ts
+import type { Model } from "@earendil-works/pi-ai";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { stubFetch } from "../helpers.ts";
 
-/**
- * Tests for the OpenAI Codex provider, Mode B (Responses API) behavior.
- * Pi packages are mocked to return no auth key, forcing Mode B activation
- * when a user API key is provided.
- */
-describe("OpenAICodexProvider - Mode B (Responses API)", () => {
-  let fetchStub: ReturnType<typeof stubFetch>;
+const mockStream = vi.fn();
 
-  beforeEach(() => {
-    vi.resetModules();
+const model = {
+  id: "gpt-5.4",
+  provider: "openai-codex",
+  api: "openai-codex-responses",
+} as Model<"openai-codex-responses">;
 
-    // Mock Pi packages: available but no auth key → falls through to Mode B
-    vi.doMock("@earendil-works/pi-ai", () => ({
-      streamOpenAICodexResponses: vi.fn(),
-      getModel: vi.fn(),
-    }));
-    vi.doMock("@earendil-works/pi-coding-agent", () => ({
-      AuthStorage: {
-        create: () => ({ getApiKey: vi.fn().mockResolvedValue(undefined) }),
-      },
-    }));
-
-    fetchStub = stubFetch();
-  });
-
-  afterEach(() => {
-    fetchStub.restore();
-    vi.restoreAllMocks();
-  });
-
-  it("has correct name and label", async () => {
-    const { providerMeta } = await import("../../src/providers/openai-codex.ts");
-    const provider = providerMeta.create("test-key").search!;
-    expect(provider.name).toBe("openai-codex");
-    expect(provider.label).toBe("OpenAI Codex");
-  });
-
-  it("extracts search results from url_citation annotations", async () => {
-    fetchStub.addResponse("api.openai.com", {
-      body: {
-        output: [
+const successMessage = {
+  stopReason: "end_turn",
+  content: [
+    {
+      type: "toolCall",
+      name: "submit_search_results",
+      arguments: {
+        results: [
           {
-            type: "message",
-            role: "assistant",
-            content: [
-              {
-                type: "output_text",
-                text: "Results found",
-                annotations: [
-                  { type: "url_citation", url: "https://example.com", title: "Example" },
-                  { type: "url_citation", url: "https://other.com", title: "Other" },
-                ],
-              },
-            ],
+            title: "Codex Result",
+            url: "https://example.com/result#source",
+            snippet: "Useful source evidence.",
           },
         ],
       },
+    },
+  ],
+};
+
+function makeModelRegistry(
+  overrides: Partial<{
+    find: ReturnType<typeof vi.fn>;
+    isUsingOAuth: ReturnType<typeof vi.fn>;
+    getApiKeyAndHeaders: ReturnType<typeof vi.fn>;
+  }> = {},
+): ModelRegistry {
+  return {
+    find: vi.fn().mockReturnValue(model),
+    isUsingOAuth: vi.fn().mockReturnValue(true),
+    getApiKeyAndHeaders: vi.fn().mockResolvedValue({
+      ok: true,
+      apiKey: "oauth-token",
+      headers: { "chatgpt-account-id": "acct" },
+      env: { OPENAI_BASE_URL: "https://chatgpt.com/backend-api" },
+    }),
+    ...overrides,
+  } as unknown as ModelRegistry;
+}
+
+async function makeProvider(modelRegistry?: ModelRegistry, configuredModel?: string) {
+  const { providerMeta } = await import("../../src/providers/openai-codex.ts");
+  const provider = providerMeta.create(
+    undefined,
+    configuredModel ? { enabled: true, model: configuredModel } : undefined,
+    modelRegistry,
+  ).search;
+  if (!provider) throw new Error("OpenAI Codex search provider unavailable");
+  return provider;
+}
+
+describe("OpenAICodexProvider", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    mockStream.mockReset().mockReturnValue({
+      result: () => Promise.resolve(successMessage),
     });
-
-    const { providerMeta } = await import("../../src/providers/openai-codex.ts");
-    const provider = providerMeta.create("test-key").search!;
-    const results = await provider.search("test query", 5);
-
-    expect(results).toHaveLength(2);
-    expect(results[0]).toEqual({ title: "Example", url: "https://example.com", snippet: "" });
-    expect(results[1]).toEqual({ title: "Other", url: "https://other.com", snippet: "" });
-  });
-
-  it("sends correct Authorization header and request body", async () => {
-    fetchStub.addResponse("api.openai.com", { body: { output: [] } });
-
-    const { providerMeta } = await import("../../src/providers/openai-codex.ts");
-    const provider = providerMeta.create("sk-my-key").search!;
-    await provider.search("test", 5);
-
-    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(fetchCall[1].headers["Authorization"]).toBe("Bearer sk-my-key");
-    const body = JSON.parse(fetchCall[1].body);
-    expect(body.model).toBe("gpt-4.1-nano");
-    expect(body.tools).toEqual([{ type: "web_search" }]);
-    expect(body.tool_choice).toBe("required");
-    expect(body.input).toContain("test");
-  });
-
-  it("throws on non-2xx response", async () => {
-    fetchStub.addResponse("api.openai.com", { status: 429, body: "Rate limited" });
-
-    const { providerMeta } = await import("../../src/providers/openai-codex.ts");
-    const provider = providerMeta.create("sk-key").search!;
-    await expect(provider.search("test", 5)).rejects.toThrow("429");
-  });
-
-  it("respects maxResults limit", async () => {
-    const annotations = Array.from({ length: 20 }, (_, i) => ({
-      type: "url_citation", url: `https://site${i}.com`, title: `Site ${i}`,
+    vi.doMock("@earendil-works/pi-ai/compat", () => ({
+      hasApi: (candidate: { api?: string }, api: string) => candidate.api === api,
+      stream: mockStream,
     }));
-    fetchStub.addResponse("api.openai.com", {
-      body: {
-        output: [{
-          type: "message", role: "assistant",
-          content: [{ type: "output_text", text: "text", annotations }],
-        }],
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("uses fresh Pi OAuth credentials for every search", async () => {
+    const modelRegistry = makeModelRegistry();
+    const provider = await makeProvider(modelRegistry);
+    const signal = new AbortController().signal;
+
+    const first = await provider.search("codex query", 5, signal);
+    await provider.search("second query", 5, signal);
+
+    expect(first).toEqual([
+      {
+        title: "Codex Result",
+        url: "https://example.com/result",
+        snippet: "Useful source evidence.",
       },
-    });
-
-    const { providerMeta } = await import("../../src/providers/openai-codex.ts");
-    const provider = providerMeta.create("sk-key").search!;
-    const results = await provider.search("test", 5);
-    expect(results).toHaveLength(5);
+    ]);
+    expect(modelRegistry.find).toHaveBeenCalledWith("openai-codex", "gpt-5.4-mini");
+    expect(modelRegistry.getApiKeyAndHeaders).toHaveBeenCalledTimes(2);
+    expect(mockStream).toHaveBeenCalledWith(
+      model,
+      expect.objectContaining({
+        systemPrompt: expect.stringContaining("submit_search_results"),
+        messages: [expect.objectContaining({ role: "user", content: "codex query" })],
+        tools: [expect.objectContaining({ name: "submit_search_results" })],
+      }),
+      {
+        apiKey: "oauth-token",
+        headers: { "chatgpt-account-id": "acct" },
+        env: { OPENAI_BASE_URL: "https://chatgpt.com/backend-api" },
+        signal,
+        transport: "sse",
+        reasoningEffort: "minimal",
+        textVerbosity: "low",
+        onPayload: expect.any(Function),
+      },
+    );
   });
 
-  it("uses custom model from config", async () => {
-    fetchStub.addResponse("api.openai.com", { body: { output: [] } });
+  it("uses the configured model", async () => {
+    const modelRegistry = makeModelRegistry();
+    const provider = await makeProvider(modelRegistry, "gpt-5.4");
 
-    const { providerMeta } = await import("../../src/providers/openai-codex.ts");
-    const provider = providerMeta.create("sk-key", { enabled: true, model: "gpt-4.1" } as any).search!;
-    await provider.search("test", 5);
+    await provider.search("query", 5);
 
-    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    const body = JSON.parse(fetchCall[1].body);
-    expect(body.model).toBe("gpt-4.1");
+    expect(modelRegistry.find).toHaveBeenCalledWith("openai-codex", "gpt-5.4");
   });
 
-  it("returns empty results when no key and no Pi packages", async () => {
-    const { providerMeta } = await import("../../src/providers/openai-codex.ts");
-    const provider = providerMeta.create(undefined).search!;
-    const results = await provider.search("test", 5);
-    expect(results).toEqual([]);
+  it.each([
+    {
+      name: "a missing model registry",
+      registry: undefined,
+      message: "Pi model registry unavailable",
+    },
+    {
+      name: "a missing model",
+      registry: () => makeModelRegistry({ find: vi.fn().mockReturnValue(undefined) }),
+      message: "OpenAI Codex model is unavailable",
+    },
+    {
+      name: "a model using the wrong API",
+      registry: () =>
+        makeModelRegistry({
+          find: vi.fn().mockReturnValue({ ...model, api: "openai-responses" }),
+        }),
+      message: "OpenAI Codex model is unavailable",
+    },
+    {
+      name: "non-OAuth credentials",
+      registry: () => makeModelRegistry({ isUsingOAuth: vi.fn().mockReturnValue(false) }),
+      message: "OpenAI Codex requires Pi OAuth",
+    },
+    {
+      name: "an auth resolution failure",
+      registry: () =>
+        makeModelRegistry({
+          getApiKeyAndHeaders: vi.fn().mockResolvedValue({ ok: false, error: "expired" }),
+        }),
+      message: "OpenAI Codex auth failed: expired",
+    },
+    {
+      name: "missing OAuth credentials",
+      registry: () =>
+        makeModelRegistry({
+          getApiKeyAndHeaders: vi.fn().mockResolvedValue({ ok: true }),
+        }),
+      message: "OpenAI Codex OAuth credentials are unavailable",
+    },
+  ])("rejects $name", async ({ registry, message }) => {
+    const provider = await makeProvider(typeof registry === "function" ? registry() : registry);
+
+    await expect(provider.search("query", 5)).rejects.toThrow(message);
   });
 
-  it("provider meta has requiresKey: false and tier 1", async () => {
+  it.each([
+    {
+      name: "an error stream",
+      message: { stopReason: "error", errorMessage: "rate limited", content: [] },
+      error: "OpenAI Codex search failed: rate limited",
+    },
+    {
+      name: "an aborted stream",
+      message: { stopReason: "aborted", content: [] },
+      error: "OpenAI Codex search aborted",
+    },
+    {
+      name: "a response without the structured tool call",
+      message: { stopReason: "end_turn", content: [] },
+      error: "OpenAI Codex returned no structured search results",
+    },
+    {
+      name: "a response without usable results",
+      message: {
+        stopReason: "end_turn",
+        content: [
+          {
+            type: "toolCall",
+            name: "submit_search_results",
+            arguments: { results: [{ title: "Bad", url: "ftp://example.com", snippet: "" }] },
+          },
+        ],
+      },
+      error: "OpenAI Codex returned no usable search results",
+    },
+  ])("rejects $name", async ({ message, error }) => {
+    mockStream.mockReturnValue({ result: () => Promise.resolve(message) });
+    const provider = await makeProvider(makeModelRegistry());
+
+    await expect(provider.search("query", 5)).rejects.toThrow(error);
+  });
+
+  it("rejects a pre-aborted search before resolving the model", async () => {
+    const modelRegistry = makeModelRegistry();
+    const provider = await makeProvider(modelRegistry);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(provider.search("query", 5, controller.signal)).rejects.toThrow();
+    expect(modelRegistry.find).not.toHaveBeenCalled();
+    expect(mockStream).not.toHaveBeenCalled();
+  });
+
+  it("does not require an API key in provider configuration", async () => {
     const { providerMeta } = await import("../../src/providers/openai-codex.ts");
     expect(providerMeta.requiresKey).toBe(false);
-    expect(providerMeta.name).toBe("openai-codex");
-    expect(providerMeta.tier).toBe(1);
   });
 });
