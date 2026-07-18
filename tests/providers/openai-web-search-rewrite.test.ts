@@ -1,42 +1,42 @@
-// tests/providers/openai-native-rewrite.test.ts
+// tests/providers/openai-web-search-rewrite.test.ts
 import { describe, expect, it } from "vitest";
 import {
-  isOpenAiNativeModel,
-  rewriteNativeWebSearch,
-} from "../../src/providers/openai-native-rewrite.ts";
+  isOpenAiModel,
+  rewriteOpenAiWebSearchTool,
+} from "../../src/providers/openai-web-search-rewrite.ts";
 
-describe("isOpenAiNativeModel", () => {
+describe("isOpenAiModel", () => {
   it("returns true for 'openai' provider", () => {
-    expect(isOpenAiNativeModel({ provider: "openai" })).toBe(true);
+    expect(isOpenAiModel({ provider: "openai" })).toBe(true);
   });
 
   it("returns true for 'openai-codex' provider", () => {
-    expect(isOpenAiNativeModel({ provider: "openai-codex" })).toBe(true);
+    expect(isOpenAiModel({ provider: "openai-codex" })).toBe(true);
   });
 
   it("returns true for providers starting with 'openai-'", () => {
-    expect(isOpenAiNativeModel({ provider: "openai-gpt4" })).toBe(true);
+    expect(isOpenAiModel({ provider: "openai-gpt4" })).toBe(true);
   });
 
   it("returns false for 'anthropic' provider", () => {
-    expect(isOpenAiNativeModel({ provider: "anthropic" })).toBe(false);
+    expect(isOpenAiModel({ provider: "anthropic" })).toBe(false);
   });
 
   it("returns false for undefined model", () => {
-    expect(isOpenAiNativeModel(undefined)).toBe(false);
+    expect(isOpenAiModel(undefined)).toBe(false);
   });
 
   it("returns false for model without provider", () => {
-    expect(isOpenAiNativeModel({})).toBe(false);
+    expect(isOpenAiModel({})).toBe(false);
   });
 
   it("is case-insensitive", () => {
-    expect(isOpenAiNativeModel({ provider: "OpenAI" })).toBe(true);
-    expect(isOpenAiNativeModel({ provider: "OPENAI-CODEX" })).toBe(true);
+    expect(isOpenAiModel({ provider: "OpenAI" })).toBe(true);
+    expect(isOpenAiModel({ provider: "OPENAI-CODEX" })).toBe(true);
   });
 });
 
-describe("rewriteNativeWebSearch", () => {
+describe("rewriteOpenAiWebSearchTool", () => {
   it("rewrites web_search function tool to native format", () => {
     const payload = {
       model: "gpt-4.1",
@@ -49,7 +49,7 @@ describe("rewriteNativeWebSearch", () => {
       messages: [{ role: "user", content: "hello" }],
     };
 
-    const result = rewriteNativeWebSearch(payload);
+    const result = rewriteOpenAiWebSearchTool(payload);
 
     expect(result.rewritten).toEqual(["web_search"]);
     expect(result.payload.tools).toEqual([
@@ -77,7 +77,7 @@ describe("rewriteNativeWebSearch", () => {
       ],
     };
 
-    const result = rewriteNativeWebSearch(payload);
+    const result = rewriteOpenAiWebSearchTool(payload);
 
     expect(result.rewritten).toEqual(["web_search"]);
     expect(result.payload.tools).toHaveLength(3);
@@ -100,7 +100,7 @@ describe("rewriteNativeWebSearch", () => {
       ],
     };
 
-    const result = rewriteNativeWebSearch(payload);
+    const result = rewriteOpenAiWebSearchTool(payload);
 
     expect(result.rewritten).toEqual([]);
     expect(result.payload.tools).toEqual(payload.tools);
@@ -109,7 +109,7 @@ describe("rewriteNativeWebSearch", () => {
   it("handles payload without tools array", () => {
     const payload = { model: "gpt-4.1", messages: [] };
 
-    const result = rewriteNativeWebSearch(payload as any);
+    const result = rewriteOpenAiWebSearchTool(payload as any);
 
     expect(result.rewritten).toEqual([]);
     expect(result.payload).toEqual(payload);
@@ -125,7 +125,7 @@ describe("rewriteNativeWebSearch", () => {
       ],
     };
 
-    const result = rewriteNativeWebSearch(payload, {
+    const result = rewriteOpenAiWebSearchTool(payload, {
       externalWebAccess: false,
     });
 
@@ -145,7 +145,7 @@ describe("rewriteNativeWebSearch", () => {
       ],
     };
 
-    const result = rewriteNativeWebSearch(payload);
+    const result = rewriteOpenAiWebSearchTool(payload);
 
     expect(result.payload.tools[0]).toEqual({
       type: "web_search",
@@ -158,7 +158,7 @@ describe("rewriteNativeWebSearch", () => {
       tools: [null, undefined, 42, { type: "function", function: { name: "web_search" } }],
     };
 
-    const result = rewriteNativeWebSearch(payload as any);
+    const result = rewriteOpenAiWebSearchTool(payload as any);
 
     expect(result.rewritten).toEqual(["web_search"]);
     expect(result.payload.tools).toHaveLength(4);
@@ -180,7 +180,7 @@ describe("rewriteNativeWebSearch", () => {
       ],
     };
 
-    const result = rewriteNativeWebSearch(payload);
+    const result = rewriteOpenAiWebSearchTool(payload);
 
     // Both web_search tools are rewritten; "web_search" appears once per rewrite
     expect(result.rewritten).toEqual(["web_search", "web_search"]);
@@ -201,7 +201,7 @@ describe("rewriteNativeWebSearch", () => {
       ],
     };
 
-    const result = rewriteNativeWebSearch(payload);
+    const result = rewriteOpenAiWebSearchTool(payload);
 
     expect(result.rewritten).toEqual(["web_search"]);
     expect(result.payload.tools).toHaveLength(2);
