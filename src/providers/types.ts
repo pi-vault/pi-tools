@@ -1,3 +1,4 @@
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { ProviderConfigEntry } from "../config.ts";
 
 export interface SearchResult {
@@ -56,6 +57,7 @@ export interface ProviderMeta {
   create: (
     key?: string,
     providerConfig?: ProviderConfigEntry,
+    modelRegistry?: ModelRegistry,
   ) => {
     search?: SearchProvider;
     fetch?: FetchProvider;

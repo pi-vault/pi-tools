@@ -1,7 +1,11 @@
 import * as fs from "node:fs";
 import type { ExecFileFn } from "../src/providers/duckduckgo.ts";
 import { vi } from "vitest";
-import type { ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionContext,
+  ModelRegistry,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 
 // Simplified mock interface — avoids inheriting ExtensionAPI's 30+ overloaded
 // `on()` signatures which cannot be satisfied by a generic implementation.
@@ -69,6 +73,7 @@ export function makeCtx(overrides?: Partial<ExtensionContext>): ExtensionContext
     mode: "tui",
     hasUI: true,
     cwd: "/tmp/test",
+    modelRegistry: {} as ModelRegistry,
     sessionManager: {
       getEntries: vi.fn().mockReturnValue([]),
     },

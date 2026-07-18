@@ -27,7 +27,7 @@ export default function createExtension(pi: ExtensionAPI): void {
   let configManager: ConfigManager;
 
   const initializeSession = (ctx: ExtensionContext): void => {
-    configManager = new ConfigManager(ctx.cwd, registry, allProviders);
+    configManager = new ConfigManager(ctx.cwd, registry, allProviders, ctx.modelRegistry);
 
     const resolveCandidates = (name?: string, combine?: boolean) => {
       configManager.refresh();
