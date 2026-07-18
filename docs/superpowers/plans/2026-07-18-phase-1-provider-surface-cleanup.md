@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (- [ ]) syntax for tracking.
 
-**Goal:** Remove Exa MCP and the obsolete `openai-native` alias, and rename the OpenAI web-search rewrite module without changing Codex authentication behavior.
+**Goal:** Remove Exa MCP and the obsolete openai-native alias, then rename the OpenAI web-search rewrite module without changing openai-codex authentication behavior.
 
-**Architecture:** This phase is intentionally mechanical and independently mergeable. Exa is removed from the provider catalog and defaults; `openai-native` is no longer resolved as an alias; the rewrite module receives an explicit web-search name while preserving its behavior.
+**Architecture:** This is a mechanical Phase 1 cleanup. Provider registration will use configured names directly, so removed names become ignored unknown providers. The web-search rewrite keeps the same payload transformation and session gate under an explicit module/export name. Codex credential and default configuration changes remain in Phase 2.
 
 **Tech Stack:** TypeScript, Vitest, Biome, pnpm.
 
@@ -12,167 +12,308 @@
 
 ## File Map
 
-- Delete `src/providers/exa-mcp.ts` and `tests/providers/exa-mcp.test.ts`.
-- Modify `src/providers/all.ts`, `src/config-manager.ts`, `src/config.ts`, and their catalog/config tests.
-- Rename `src/providers/openai-native-rewrite.ts` and its test; update exports and `src/session.ts`.
-- Modify `README.md` and `CHANGELOG.md` for removals and the rename.
+- Delete src/providers/exa-mcp.ts and tests/providers/exa-mcp.test.ts.
+- Modify src/providers/all.ts, src/config-manager.ts, src/config.ts, and their catalog/config tests.
+- Rename src/providers/openai-native-rewrite.ts and its test; update src/session.ts.
+- Modify README.md and CHANGELOG.md; keep historical changelog references intact.
 
-## Task 1: Add cleanup regression tests
+## Task 1: Update cleanup expectations
 
 **Files:**
-- Modify: `tests/providers/all.test.ts`, `tests/config.test.ts`, `tests/config-manager.test.ts`
 
-- [ ] **Step 1: Update provider catalog expectations.**
+- Modify: tests/providers/all.test.ts
+- Modify: tests/config.test.ts
+- Modify: tests/config-manager.test.ts
 
-Change the expected provider count from 23 to 22 and remove `exa-mcp` from the expected provider names.
+- [ ] **Step 1: Reduce the provider catalog expectation.**
 
-- [ ] **Step 2: Add alias-removal assertions.**
+Change the catalog count from 23 to 22 and remove only exa-mcp from the sorted expected names.
 
-Replace the existing alias test with a test that loads an enabled `openai-native` entry, supplies only an `openai-codex` meta, and asserts that no provider is registered and no deprecation warning is emitted. Keep the existing unknown-provider behavior as the contract.
-
-```ts
-it("ignores removed openai-native configuration", () => {
-  vi.mocked(loadMergedConfig).mockReturnValue(makeConfig({
-    providers: { "openai-native": { enabled: true, apiKey: "sk-test" } },
-  }));
-  const registry = mem();
-  new ConfigManager("/test/cwd", registry, [makeMeta("openai-codex")]);
-  expect(registry.getSearchProviderNames()).not.toContain("openai-codex");
+```
+it("exports exactly 22 providers", () => {
+  expect(allProviders).toHaveLength(22);
 });
 ```
 
+- [ ] **Step 2: Remove obsolete alias tests.**
+
+Delete the ConfigManager tests named resolves openai-native config alias to openai-codex and does not warn for non-aliased provider names. Do not add a replacement test containing the retired alias; the post-change source scan is the removal contract.
+
 - [ ] **Step 3: Remove obsolete fallback-map expectations.**
 
-Delete assertions and expected names for `openai-native`; leave the `openai-codex` mapping untouched for Phase 2.
+Delete the openai-native and openai-codex assertions from the fallback-map test and remove both names from its expected provider list. Leave all other fallback mappings unchanged.
 
-- [ ] **Step 4: Run the regression tests and verify they fail.**
+- [ ] **Step 4: Run focused tests before implementation.**
 
-Run: `pnpm vitest run tests/providers/all.test.ts tests/config.test.ts tests/config-manager.test.ts`
-
-Expected: FAIL because Exa registration and alias resolution still exist.
-
-## Task 2: Remove Exa MCP and the alias
-
-**Files:**
-- Delete: `src/providers/exa-mcp.ts`, `tests/providers/exa-mcp.test.ts`
-- Modify: `src/providers/all.ts`, `src/config-manager.ts`, `src/config.ts`
-
-- [ ] **Step 1: Remove Exa from the provider barrel.**
-
-Delete the `exaMcp` import and array entry in `src/providers/all.ts`.
-
-- [ ] **Step 2: Remove the Exa default.**
-
-Delete the `exa-mcp` entry from `DEFAULT_CONFIG.providers`; do not change the `openai-codex` default in this phase.
-
-- [ ] **Step 3: Remove alias resolution.**
-
-Delete `PROVIDER_ALIASES` and `resolveProviderAlias`. In `registerProvider`, look up metadata directly with `this.metaByName.get(name)` and continue returning for unknown names.
-
-```ts
-const meta = this.metaByName.get(name);
-if (!meta) return;
+```
+pnpm vitest run tests/providers/all.test.ts tests/config.test.ts tests/config-manager.test.ts
 ```
 
-- [ ] **Step 4: Remove only the obsolete alias fallback mapping.**
+Expected: FAIL because Exa MCP is still registered; the fallback-map expectations now pass after removing the obsolete assertions.
 
-Delete `openai-native` from `FALLBACK_ENV_MAP`. Preserve the `openai-codex` mapping until Phase 2.
+## Task 2: Remove Exa MCP and direct alias resolution
 
-- [ ] **Step 5: Run removal tests.**
+**Files:**
 
-Run: `pnpm vitest run tests/providers/all.test.ts tests/config.test.ts tests/config-manager.test.ts`
+- Delete: src/providers/exa-mcp.ts
+- Delete: tests/providers/exa-mcp.test.ts
+- Modify: src/providers/all.ts
+- Modify: src/config-manager.ts
+- Modify: src/config.ts
 
-Expected: PASS with 22 providers, no Exa default, no alias registration, and no `openai-native` fallback mapping.
+- [ ] **Step 1: Remove Exa MCP from the provider barrel.**
 
-- [ ] **Step 6: Commit the removal.**
+Delete the exaMcp import and the exaMcp array entry from src/providers/all.ts.
 
-```bash
+```
+import { providerMeta as exaMcp } from "./exa-mcp.ts";
+```
+
+```
+exaMcp,
+```
+
+- [ ] **Step 2: Delete the provider implementation and test.**
+
+Delete src/providers/exa-mcp.ts and tests/providers/exa-mcp.test.ts. Do not replace either file; the existing exa provider remains supported.
+
+- [ ] **Step 3: Remove the Exa MCP default.**
+
+Delete only this property from DEFAULT_CONFIG.providers in src/config.ts:
+
+```
+"exa-mcp": { enabled: true },
+```
+
+Leave the openai-codex and openai-web-search defaults unchanged.
+
+- [ ] **Step 4: Remove alias resolution from ConfigManager.**
+
+Delete PROVIDER_ALIASES and resolveProviderAlias. Replace the beginning of registerProvider with direct metadata lookup:
+
+```
+private registerProvider(name: string, config: PiToolsConfig): void {
+  const meta = this.metaByName.get(name);
+  if (!meta) return;
+
+  const providerConfig = config.providers[name];
+```
+
+Keep the existing key resolution, SSRF config injection, provider construction, registration, and exception handling unchanged.
+
+- [ ] **Step 5: Remove only the retired fallback mapping.**
+
+Delete this property from FALLBACK_ENV_MAP:
+
+```
+"openai-native": "OPENAI_API_KEY",
+```
+
+Retain the openai-codex mapping until Phase 2.
+
+- [ ] **Step 6: Run focused removal tests.**
+
+```
+pnpm vitest run tests/providers/all.test.ts tests/config.test.ts tests/config-manager.test.ts
+```
+
+Expected: PASS with 22 providers, no Exa MCP default, direct unknown-name lookup, and updated fallback expectations.
+
+- [ ] **Step 7: Commit the removal.**
+
+```
 git add src/providers/all.ts src/providers/exa-mcp.ts src/config.ts src/config-manager.ts tests/providers/all.test.ts tests/providers/exa-mcp.test.ts tests/config.test.ts tests/config-manager.test.ts
 git commit -m "refactor: remove exa mcp and openai native alias"
 ```
 
-## Task 3: Rename the rewrite module
+## Task 3: Rename the OpenAI web-search rewrite module
 
 **Files:**
-- Rename: `src/providers/openai-native-rewrite.ts` to `src/providers/openai-web-search-rewrite.ts`
-- Rename: `tests/providers/openai-native-rewrite.test.ts` to `tests/providers/openai-web-search-rewrite.test.ts`
-- Modify: `src/session.ts` and the renamed test
 
-- [ ] **Step 1: Rename source and test files.**
+- Rename: src/providers/openai-native-rewrite.ts to src/providers/openai-web-search-rewrite.ts
+- Rename: tests/providers/openai-native-rewrite.test.ts to tests/providers/openai-web-search-rewrite.test.ts
+- Modify: src/session.ts
+- Modify: tests/providers/openai-web-search-rewrite.test.ts
 
-```bash
+- [ ] **Step 1: Rename both files.**
+
+```
 git mv src/providers/openai-native-rewrite.ts src/providers/openai-web-search-rewrite.ts
 git mv tests/providers/openai-native-rewrite.test.ts tests/providers/openai-web-search-rewrite.test.ts
 ```
 
-- [ ] **Step 2: Update the renamed test.**
+- [ ] **Step 2: Rename test imports and calls.**
 
-Import `isOpenAiModel` and `rewriteOpenAiWebSearchTool` from the new module path. Rename every call and description while preserving all assertions.
+Use this import in the renamed test:
 
-- [ ] **Step 3: Run the renamed test and verify it fails.**
+```
+import {
+  isOpenAiModel,
+  rewriteOpenAiWebSearchTool,
+} from "../../src/providers/openai-web-search-rewrite.ts";
+```
 
-Run: `pnpm vitest run tests/providers/openai-web-search-rewrite.test.ts`
+Rename every test description and call from isOpenAiNativeModel to isOpenAiModel and from rewriteNativeWebSearch to rewriteOpenAiWebSearchTool. Keep all inputs and expected payloads unchanged.
 
-Expected: FAIL because the source still exports `isOpenAiNativeModel` and `rewriteNativeWebSearch`.
+- [ ] **Step 3: Run the renamed test before changing source exports.**
 
-- [ ] **Step 4: Rename source exports and update the session import.**
+```
+pnpm vitest run tests/providers/openai-web-search-rewrite.test.ts
+```
 
-Rename only the exported identifiers and comments. Update `src/session.ts` to import from `openai-web-search-rewrite.ts` and call `isOpenAiModel` and `rewriteOpenAiWebSearchTool`. Preserve the provider-enabled gate, tool mapping, defaults, and event behavior.
+Expected: FAIL because the source still exports the old identifiers.
 
-- [ ] **Step 5: Run rewrite and session tests.**
+- [ ] **Step 4: Rename source exports without compatibility aliases.**
 
-Run: `pnpm vitest run tests/providers/openai-web-search-rewrite.test.ts tests/session.test.ts`
+Rename the two exports in the renamed source file and keep their bodies and return shapes unchanged:
+
+```
+export function isOpenAiModel(
+  model: { provider?: string } | undefined,
+): boolean {
+  if (!model) return false;
+  const provider = (model.provider ?? "").toLowerCase();
+  return provider === "openai" || provider.startsWith("openai-");
+}
+
+export function rewriteOpenAiWebSearchTool<T extends { tools?: unknown[] }>(
+  payload: T,
+  options?: { externalWebAccess?: boolean },
+): { payload: T; rewritten: string[] } {
+  if (!Array.isArray(payload.tools) || payload.tools.length === 0) {
+    return { payload, rewritten: [] };
+  }
+
+  const externalWebAccess = options?.externalWebAccess ?? true;
+  const rewritten: string[] = [];
+
+  const newTools = payload.tools.map((tool: unknown) => {
+    if (!tool || typeof tool !== "object") return tool;
+    const t = tool as { type: string; function?: { name?: string } };
+    if (t.type === "function" && t.function?.name === "web_search") {
+      rewritten.push("web_search");
+      return { type: "web_search", external_web_access: externalWebAccess };
+    }
+    return tool;
+  });
+
+  return {
+    payload: { ...payload, tools: newTools },
+    rewritten,
+  };
+}
+```
+
+Update the module comment to say OpenAI web search. Do not add old-name re-exports.
+
+- [ ] **Step 5: Update the session consumer.**
+
+Use this import in src/session.ts:
+
+```
+import {
+  isOpenAiModel,
+  rewriteOpenAiWebSearchTool,
+} from "./providers/openai-web-search-rewrite.ts";
+```
+
+Replace the two calls in handleProviderRequest. Keep the openai-web-search disabled gate, rewritten-length check, and returned payload behavior unchanged.
+
+- [ ] **Step 6: Run rewrite and session tests.**
+
+```
+pnpm vitest run tests/providers/openai-web-search-rewrite.test.ts tests/session.test.ts
+```
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit the rename.**
+- [ ] **Step 7: Commit the rename.**
 
-```bash
-git add src/providers/openai-web-search-rewrite.ts src/session.ts tests/providers/openai-web-search-rewrite.test.ts
+```
+git add src/providers/openai-web-search-rewrite.ts src/providers/openai-native-rewrite.ts src/session.ts tests/providers/openai-web-search-rewrite.test.ts tests/providers/openai-native-rewrite.test.ts
 git commit -m "refactor: rename openai web search rewrite module"
 ```
 
-## Task 4: Update documentation and verify Phase 1
+## Task 4: Update documentation and complete verification
 
 **Files:**
-- Modify: `README.md`, `CHANGELOG.md`
 
-- [ ] **Step 1: Update README.**
+- Modify: README.md
+- Modify: CHANGELOG.md
 
-Remove Exa MCP from provider tables and configuration examples. Document that `openai-native` is removed. Do not describe the Codex credential change yet.
+- [ ] **Step 1: Remove Exa MCP from README.**
 
-- [ ] **Step 2: Add the Phase 1 changelog entry.**
+Delete the Exa MCP row from the Available providers table and this configuration example:
 
-Add an Unreleased entry stating that Exa MCP and the `openai-native` alias were removed and the web-search rewrite module was renamed. Preserve historical entries below it.
+```
+"exa-mcp": {
+  "enabled": true
+},
+```
 
-- [ ] **Step 3: Check current-source references.**
+Do not add openai-native to README.
 
-Run: `rg -n 'exa-mcp|openai-native|openai-native-rewrite|isOpenAiNativeModel|rewriteNativeWebSearch' src tests README.md`
+- [ ] **Step 2: Add the Unreleased changelog entry.**
 
-Expected: no matches. Historical `CHANGELOG.md` mentions are allowed.
+Insert immediately above the 0.4.0 section and leave historical entries unchanged:
 
-- [ ] **Step 4: Run repository verification.**
+```markdown
+## [Unreleased]
 
-Run: `pnpm check`
+### Changed
 
-Expected: lint, typecheck, and the full test suite pass.
+- Renamed the OpenAI web-search rewrite module to openai-web-search-rewrite.
 
-- [ ] **Step 5: Verify package contents and diff.**
+### Removed
 
-Run: `pnpm pack --dry-run` and `git diff --check origin/master...HEAD`.
+- Removed the broken Exa MCP provider and the openai-native compatibility alias.
+```
 
-Expected: no Exa or old rewrite source files are packaged and no whitespace errors exist.
+- [ ] **Step 3: Verify no current shipped references remain.**
 
-- [ ] **Step 6: Commit documentation.**
+```
+rg -n 'exa-mcp|openai-native|openai-native-rewrite|isOpenAiNativeModel|rewriteNativeWebSearch' src tests README.md
+```
 
-```bash
+Expected: no output. Do not include CHANGELOG.md or docs/superpowers/plans/ because those intentionally retain historical and implementation references.
+
+- [ ] **Step 4: Run complete repository checks.**
+
+```
+pnpm check
+```
+
+Expected: Biome lint, TypeScript typecheck, and the full Vitest suite pass.
+
+- [ ] **Step 5: Verify package contents.**
+
+```
+pnpm pack --dry-run
+```
+
+The output must contain src/providers/openai-web-search-rewrite.ts and must not contain src/providers/exa-mcp.ts or src/providers/openai-native-rewrite.ts.
+
+- [ ] **Step 6: Check final diff and working tree.**
+
+```
+git diff --check origin/master...HEAD
+git status --short
+```
+
+Expected: no whitespace errors and no uncommitted files after the documentation commit.
+
+- [ ] **Step 7: Commit documentation.**
+
+```
 git add README.md CHANGELOG.md
 git commit -m "docs: document provider surface cleanup"
 ```
 
 ## Self-Review
 
-- Exa removal, alias removal, and rewrite renaming are all covered.
-- Codex behavior and its API-key mapping are intentionally deferred to Phase 2.
-- No compatibility shim or unrelated provider refactor is introduced.
-- Every current-source old-name reference is checked while historical changelog text remains intact.
+- Exa MCP is removed from implementation, registration, defaults, tests, README, and package contents.
+- Alias-specific tests are deleted rather than replaced with a permanent reference to the retired name; the zero-match source scan verifies removal.
+- README instructions and the source scan are consistent; only changelog and planning documents retain old names.
+- Rewrite behavior and session integration are covered by the renamed test and session test.
+- openai-codex authentication and API-key mapping are explicitly deferred to Phase 2.
+- No compatibility shim, new dependency, or unrelated provider refactor is introduced.

@@ -2,7 +2,6 @@ import type { ProviderMeta } from "./types.ts";
 import { providerMeta as context7 } from "./context7.ts";
 import { providerMeta as duckduckgo } from "./duckduckgo.ts";
 import { providerMeta as exa } from "./exa.ts";
-import { providerMeta as exaMcp } from "./exa-mcp.ts";
 import { providerMeta as firecrawl } from "./firecrawl.ts";
 import { httpProviders } from "./http-providers.ts";
 import { providerMeta as jina } from "./jina.ts";
@@ -20,7 +19,6 @@ export const allProviders: ProviderMeta[] = [
   context7,
   duckduckgo,
   exa,
-  exaMcp,
   firecrawl,
   jina,
   ollama,

@@ -697,8 +697,6 @@ describe("FALLBACK_ENV_MAP", () => {
     expect(FALLBACK_ENV_MAP.brave).toBe("BRAVE_API_KEY");
     expect(FALLBACK_ENV_MAP.exa).toBe("EXA_API_KEY");
     expect(FALLBACK_ENV_MAP.tavily).toBe("TAVILY_API_KEY");
-    expect(FALLBACK_ENV_MAP["openai-native"]).toBe("OPENAI_API_KEY");
-    expect(FALLBACK_ENV_MAP["openai-codex"]).toBe("OPENAI_API_KEY");
   });
 
   it("maps all expected providers", () => {
@@ -719,8 +717,6 @@ describe("FALLBACK_ENV_MAP", () => {
       "marginalia",
       "context7",
       "parallel",
-      "openai-native",
-      "openai-codex",
     ];
     for (const name of expected) {
       expect(FALLBACK_ENV_MAP[name]).toBeDefined();

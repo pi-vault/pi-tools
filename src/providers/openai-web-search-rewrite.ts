@@ -1,14 +1,14 @@
-// src/providers/openai-native-rewrite.ts
+// src/providers/openai-web-search-rewrite.ts
 
 /**
- * Layer 1: Transparent payload rewrite for OpenAI native web search.
+ * Layer 1: Transparent payload rewrite for OpenAI web search.
  *
  * When running on OpenAI/Codex models, rewrites the `web_search` function tool
  * definition to OpenAI's native `{ type: "web_search" }` format. The model then
  * uses its built-in web search — no API call from us, no quota cost.
  */
 
-export function isOpenAiNativeModel(
+export function isOpenAiModel(
   model: { provider?: string } | undefined,
 ): boolean {
   if (!model) return false;
@@ -16,7 +16,7 @@ export function isOpenAiNativeModel(
   return provider === "openai" || provider.startsWith("openai-");
 }
 
-export function rewriteNativeWebSearch<T extends { tools?: unknown[] }>(
+export function rewriteOpenAiWebSearchTool<T extends { tools?: unknown[] }>(
   payload: T,
   options?: { externalWebAccess?: boolean },
 ): { payload: T; rewritten: string[] } {

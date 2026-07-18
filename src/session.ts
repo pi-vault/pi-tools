@@ -7,7 +7,10 @@ import type {
   SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { PiToolsConfig } from "./config.ts";
-import { isOpenAiNativeModel, rewriteNativeWebSearch } from "./providers/openai-native-rewrite.ts";
+import {
+  isOpenAiModel,
+  rewriteOpenAiWebSearchTool,
+} from "./providers/openai-web-search-rewrite.ts";
 import type { ContentStore, StoredContent } from "./storage.ts";
 import { recordProjectTrust } from "./utils/trust.ts";
 
@@ -53,8 +56,8 @@ export function handleProviderRequest(
   const config = configGetter();
   const openaiNativeConfig = config.providers["openai-web-search"];
   if (openaiNativeConfig?.enabled === false) return undefined;
-  if (!isOpenAiNativeModel(ctx?.model as { provider?: string } | undefined)) return undefined;
-  const result = rewriteNativeWebSearch(event.payload as { tools?: unknown[] });
+  if (!isOpenAiModel(ctx?.model as { provider?: string } | undefined)) return undefined;
+  const result = rewriteOpenAiWebSearchTool(event.payload as { tools?: unknown[] });
   return result.rewritten.length > 0 ? result.payload : undefined;
 }
 
