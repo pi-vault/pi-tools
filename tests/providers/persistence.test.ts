@@ -15,6 +15,7 @@ describe("createFilePersistence", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   describe("load", () => {
@@ -45,6 +46,21 @@ describe("createFilePersistence", () => {
   });
 
   describe("save", () => {
+    it("uses Pi's agent cache directory by default", () => {
+      vi.stubEnv("PI_CODING_AGENT_DIR", "/tmp/pi-agent");
+      const adapter = createFilePersistence();
+
+      adapter.save({ brave: { count: 10, month: "2026-07" } });
+
+      expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/pi-agent/cache/pi-tools", {
+        recursive: true,
+      });
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        "/tmp/pi-agent/cache/pi-tools/usage.json",
+        JSON.stringify({ brave: { count: 10, month: "2026-07" } }, null, 2),
+      );
+    });
+
     it("writes data as JSON to the primary path", () => {
       const adapter = createFilePersistence("/tmp/test-usage.json");
       adapter.save({ brave: { count: 10, month: "2026-07" } });
