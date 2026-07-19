@@ -172,6 +172,7 @@ describe("SearXNGProvider", () => {
     it("creates provider with instanceUrl from config", () => {
       const instance = providerMeta.create(undefined, {
         enabled: true,
+        budget: { mode: "unlimited" },
         instanceUrl: "http://my-searx.local:9090",
       });
       expect(instance.search).toBeDefined();
@@ -183,6 +184,7 @@ describe("SearXNGProvider", () => {
 
       const instance = providerMeta.create(undefined, {
         enabled: true,
+        budget: { mode: "unlimited" },
         instanceUrl: "http://my-searx.local:9090",
         apiKey: "my-token",
       });
@@ -195,7 +197,10 @@ describe("SearXNGProvider", () => {
     it("creates provider without apiKey when not in config", async () => {
       fetchStub.addResponse("localhost:8080", { body: { results: [] } });
 
-      const instance = providerMeta.create(undefined, { enabled: true });
+      const instance = providerMeta.create(undefined, {
+        enabled: true,
+        budget: { mode: "unlimited" },
+      });
       await instance.search!.search("test", 5);
 
       const fetchCall = (globalThis.fetch as any).mock.calls[0];

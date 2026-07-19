@@ -79,7 +79,7 @@ export default function createExtension(pi: ExtensionAPI): void {
           configManager.refresh();
           return registry.selectCodeSearch();
         },
-        // Usage tick only — code-search has no failure callback
+        // Success outcome only — code-search has no failure callback
         (providerName) => registry.recordOutcome(providerName, { success: true }),
         configManager.current.guidance?.code_search,
       ),
@@ -90,7 +90,7 @@ export default function createExtension(pi: ExtensionAPI): void {
     if (docsProvider) {
       const selectDocs = () => {
         configManager.refresh();
-        return registry.selectDocs() ?? docsProvider;
+        return registry.selectDocs();
       };
       pi.registerTool(
         createWebDocsSearchTool(selectDocs, configManager.current.guidance?.web_docs_search),
@@ -103,13 +103,27 @@ export default function createExtension(pi: ExtensionAPI): void {
     // Register web_research when Exa key is available and deep research enabled
     const exaConfig = configManager.current.providers?.exa;
     const resolvedExaKey = resolveApiKey(exaConfig?.apiKey);
-    if (resolvedExaKey && configManager.current.deepResearch?.enabled !== false) {
+    if (
+      exaConfig?.enabled !== false &&
+      resolvedExaKey &&
+      configManager.current.deepResearch?.enabled !== false
+    ) {
       pi.registerTool(
         createWebResearchTool(
-          resolvedExaKey,
+          () => {
+            configManager.refresh();
+            const currentExa = configManager.current.providers.exa;
+            if (
+              currentExa?.enabled === false ||
+              configManager.current.deepResearch.enabled === false
+            )
+              return undefined;
+            return resolveApiKey(currentExa?.apiKey);
+          },
           configManager.current.deepResearch,
           (customType, data) => pi.appendEntry(customType, data),
           configManager.current.deepResearch?.guidance,
+          (operation) => registry.consume("exa", operation),
         ),
       );
     }

@@ -53,13 +53,19 @@ describe("provider types", () => {
     const meta: ProviderMeta = {
       name: "brave",
       tier: 1,
-      monthlyQuota: 2000,
       requiresKey: true,
+      usageCost: () => 0.005,
       create: (_key) => ({ search: mockSearch }),
     };
     expect(meta.tier).toBe(1);
     expect(meta.requiresKey).toBe(true);
-    expect(meta.monthlyQuota).toBe(2000);
+    expect(meta).not.toHaveProperty("monthlyQuota");
+    expect(
+      meta.usageCost?.(
+        { capability: "search", maxResults: 10 },
+        { enabled: true, budget: { mode: "managed" } },
+      ),
+    ).toBe(0.005);
     const instances = meta.create("key");
     expect(instances.search).toBe(mockSearch);
     expect(instances.fetch).toBeUndefined();

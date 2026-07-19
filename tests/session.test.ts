@@ -140,7 +140,9 @@ describe("handleProviderRequest", () => {
   it("returns undefined when openai-web-search is disabled", () => {
     const config: PiToolsConfig = {
       ...baseConfig,
-      providers: { "openai-web-search": { enabled: false } },
+      providers: {
+        "openai-web-search": { enabled: false, budget: { mode: "managed" } },
+      },
     };
     const payload = {
       tools: [{ type: "function", function: { name: "web_search", parameters: {} } }],

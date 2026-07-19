@@ -114,7 +114,7 @@ describe("prompt guidance overrides", () => {
     const guidance: GuidanceOverride = {
       promptSnippet: "Custom research snippet",
     };
-    const tool = createWebResearchTool("key", { enabled: true }, vi.fn(), guidance);
+    const tool = createWebResearchTool(() => "key", { enabled: true }, vi.fn(), guidance);
     expect(tool.promptSnippet).toBe("Custom research snippet");
   });
 
@@ -122,12 +122,12 @@ describe("prompt guidance overrides", () => {
     const guidance: GuidanceOverride = {
       promptGuidelines: ["Research guideline A"],
     };
-    const tool = createWebResearchTool("key", { enabled: true }, vi.fn(), guidance);
+    const tool = createWebResearchTool(() => "key", { enabled: true }, vi.fn(), guidance);
     expect(tool.promptGuidelines).toEqual(["Research guideline A"]);
   });
 
   it("web_research uses defaults when no guidance provided", () => {
-    const tool = createWebResearchTool("key", { enabled: true }, vi.fn());
+    const tool = createWebResearchTool(() => "key", { enabled: true }, vi.fn());
     expect(tool.promptSnippet).toContain("Exa deep research");
     expect(tool.promptGuidelines!.length).toBeGreaterThan(0);
   });

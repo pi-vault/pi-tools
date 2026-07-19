@@ -134,7 +134,6 @@ export class Context7DocsProvider implements DocsProvider {
 export const providerMeta: ProviderMeta = {
   name: "context7",
   tier: 1,
-  monthlyQuota: null,
   requiresKey: true,
   create: (key?: string, _providerConfig?: ProviderConfigEntry) => ({
     docs: key ? new Context7DocsProvider(key) : undefined,

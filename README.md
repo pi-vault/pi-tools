@@ -104,7 +104,7 @@ Use `/tools` without arguments for guided setup, or run a subcommand directly:
 | Command                     | Action                                                       |
 | --------------------------- | ------------------------------------------------------------ |
 | `/tools`                    | Open the setup wizard                                        |
-| `/tools status`             | Show enabled providers, quota, outcomes, and average latency |
+| `/tools status`             | Show enabled providers, budgets, outcomes, and average latency |
 | `/tools reload`             | Reload configuration from disk                               |
 | `/tools enable <name>`      | Enable a provider                                            |
 | `/tools disable <name>`     | Disable a provider                                           |
@@ -143,13 +143,13 @@ Provider configuration refreshes automatically every 30 seconds. Use `/tools rel
 | WebSearchAPI      | Search                        | `WEBSEARCHAPI_API_KEY`             |
 | You.com           | Search                        | `YOUCOM_API_KEY`                   |
 
-Pi Tools ranks providers by tier, availability, quota, and optionally recent session performance. Provider-specific date and domain filters depend on the upstream API; unsupported filters are applied locally where possible.
+Pi Tools ranks providers by tier and availability, and optionally by recent session performance. Automatic selection skips exhausted hard budgets. Provider-specific date and domain filters depend on the upstream API; unsupported filters are applied locally where possible.
 
 OpenAI Codex uses the active Pi OAuth session. Run `/login` and select `openai-codex` before using it. To search with `OPENAI_API_KEY` instead, configure `openai-web-search`.
 
 ## Configure files and credentials
 
-The global config is ~/.pi/agent/extensions/tools.json. A project .pi/tools.json overrides it. Pi Tools deep-merges project settings, global settings, and built-in defaults in that order.
+The global config is `$PI_CODING_AGENT_DIR/extensions/tools.json`; when the variable is unset, Pi supplies its agent directory. A project `.pi/tools.json` overrides it. Pi Tools deep-merges project settings, global settings, and built-in defaults in that order.
 
 A provider `apiKey` can be:
 
@@ -168,12 +168,10 @@ The following safe example includes every configuration section and all register
   "providers": {
     "brave": {
       "enabled": false,
-      "monthlyQuota": 2000,
       "apiKey": "BRAVE_API_KEY"
     },
     "brave-llm": {
       "enabled": false,
-      "monthlyQuota": 2000,
       "apiKey": "BRAVE_API_KEY",
       "tokenBudget": 4096
     },
@@ -188,12 +186,10 @@ The following safe example includes every configuration section and all register
     },
     "exa": {
       "enabled": false,
-      "monthlyQuota": 1000,
       "apiKey": "EXA_API_KEY"
     },
     "fastcrw": {
       "enabled": false,
-      "monthlyQuota": 500,
       "apiKey": "FASTCRW_API_KEY",
       "baseUrl": "https://api.fastcrw.com"
     },
@@ -318,7 +314,7 @@ The following safe example includes every configuration section and all register
       },
       "full": {
         "type": "deep-reasoning",
-        "numResults": 150,
+        "numResults": 100,
         "textMaxCharacters": 24000,
         "timeoutSeconds": 1800,
         "highlightsMaxCharacters": 1200,
@@ -342,6 +338,34 @@ The following safe example includes every configuration section and all register
   }
 }
 ```
+
+### Provider budgets
+
+Every built-in provider has a default `budget`. Omit it to keep that default, or replace the complete object for one provider:
+
+```json
+{
+  "providers": {
+    "exa": {
+      "budget": {
+        "mode": "hard",
+        "limit": 10,
+        "period": "month",
+        "unit": "usd",
+        "pool": "exa"
+      }
+    },
+    "jina": { "budget": { "mode": "managed" } },
+    "duckduckgo": { "budget": { "mode": "unlimited" } }
+  }
+}
+```
+
+Hard budgets accept `day`, `month`, or `lifetime` periods and `request`, `credit`, or `usd` units. Day and month boundaries use UTC calendar time. A `pool` shares one counter across providers; every provider in that pool must use the same limit, period, and unit. Invalid or conflicting overrides are ignored as a group.
+
+`managed` delegates limits to the provider or plan. `unlimited` means Pi Tools does not meter the provider. Local reservations are saved before requests to `$PI_CODING_AGENT_DIR/cache/pi-tools/usage.json`. Version 2 keeps compatible current-month legacy request counts for non-shared monthly budgets; `monthlyQuota` settings are not migrated.
+
+Enforcement is atomic within one Pi process. Separate concurrent Pi processes can briefly exceed the same local ceiling; interprocess locking is intentionally deferred until that becomes an observed need.
 
 Useful advanced settings:
 

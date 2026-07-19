@@ -7,7 +7,7 @@ import type { ProviderMeta } from "./providers/types.ts";
 interface ConfigChangeSet {
   added: string[];
   removed: string[];
-  keyChanged: string[];
+  changed: string[];
 }
 
 function isEnabled(entry: ProviderConfigEntry | undefined): boolean {
@@ -26,7 +26,7 @@ export function diffConfig(
 ): ConfigChangeSet {
   const added: string[] = [];
   const removed: string[] = [];
-  const keyChanged: string[] = [];
+  const changed: string[] = [];
 
   const allNames = new Set([...Object.keys(prev.providers), ...Object.keys(next.providers)]);
 
@@ -43,13 +43,18 @@ export function diffConfig(
     } else if (wasPrevEnabled && isNextEnabled) {
       const prevResolved = resolveKey(prevEntry?.apiKey);
       const nextResolved = resolveKey(nextEntry?.apiKey);
-      if (prevResolved !== nextResolved) {
-        keyChanged.push(name);
+      const { apiKey: _prevKey, ...prevStructure } = prevEntry;
+      const { apiKey: _nextKey, ...nextStructure } = nextEntry;
+      if (
+        prevResolved !== nextResolved ||
+        JSON.stringify(prevStructure) !== JSON.stringify(nextStructure)
+      ) {
+        changed.push(name);
       }
     }
   }
 
-  return { added, removed, keyChanged };
+  return { added, removed, changed };
 }
 
 const CONFIG_TTL_MS = 30_000;
@@ -89,7 +94,7 @@ export class ConfigManager {
 
     let nextConfig: PiToolsConfig;
     try {
-      nextConfig = loadMergedConfig(this.cwd);
+      nextConfig = loadMergedConfig(this.cwd, true);
     } catch {
       // Malformed config — keep previous, reset TTL to retry next cycle
       this.cacheTime = now;
@@ -106,7 +111,7 @@ export class ConfigManager {
     for (const name of changeSet.removed) {
       this.registry.unregisterAll(name);
     }
-    for (const name of changeSet.keyChanged) {
+    for (const name of changeSet.changed) {
       this.registry.unregisterAll(name);
       this.registerProvider(name, nextConfig);
     }
@@ -133,20 +138,13 @@ export class ConfigManager {
       // Provider instantiation failed — skip, other providers unaffected
       return;
     }
-    const quota = providerConfig?.monthlyQuota ?? meta.monthlyQuota;
-
-    if (instances.search) {
-      this.registry.registerSearch(instances.search, { tier: meta.tier, monthlyQuota: quota });
-    }
-    if (instances.fetch) {
-      this.registry.registerFetch(instances.fetch);
-    }
-    if (instances.codeSearch) {
-      this.registry.registerCodeSearch(instances.codeSearch);
-    }
-    if (instances.docs) {
-      this.registry.registerDocs(instances.docs);
-    }
+    this.registry.registerProvider(instances, {
+      name,
+      tier: meta.tier,
+      budget: providerConfig.budget,
+      config: configWithSsrf,
+      usageCost: meta.usageCost,
+    });
   }
 
   private registerFromConfig(config: PiToolsConfig): void {

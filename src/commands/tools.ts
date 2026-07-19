@@ -12,30 +12,35 @@ import { handleEnhancedSetup } from "./tools-setup.ts";
 import { activityMonitor } from "../monitor/activity-monitor.ts";
 import { renderWidgetLines } from "../monitor/widget.ts";
 
-function formatNumber(n: number): string {
-  if (!Number.isFinite(n)) return "unlimited";
-  return n.toLocaleString("en-US");
+function formatAmount(value: number, unit: string): string {
+  return unit === "usd" ? value.toFixed(6) : value.toLocaleString("en-US");
 }
 
 export function buildStatusTable(
   registry: ProviderRegistry,
   tierMap: ReadonlyMap<string, ProviderTier>,
 ): string {
-  const names = registry.getSearchProviderNames();
+  const names = registry.getProviderNames();
   if (names.length === 0) return "No providers registered.";
 
-  const rows: Array<{
-    name: string;
-    tier: string;
-    remaining: string;
-    session: string;
-    latency: string;
-  }> = [];
+  const rows: string[][] = [];
 
   for (const name of names) {
     const tier = tierMap.get(name) ?? 3;
-    const remaining = registry.getRemaining(name);
+    const budget = registry.getBudgetStatus(name);
     const metrics = registry.getMetrics(name);
+    let used = "--";
+    let limit = "--";
+    let unit = "--";
+    let period = "--";
+    if (budget?.mode === "hard") {
+      used = formatAmount(budget.used, budget.unit);
+      limit = formatAmount(budget.limit, budget.unit);
+      unit = budget.unit;
+      period = budget.pool ? `${budget.period} (pool: ${budget.pool})` : budget.period;
+    } else if (budget) {
+      used = budget.mode;
+    }
 
     const successes = metrics?.successes ?? 0;
     const failures = metrics?.failures ?? 0;
@@ -47,53 +52,31 @@ export function buildStatusTable(
       latencyStr = `${avgMs}ms`;
     }
 
-    rows.push({
-      name,
-      tier: String(tier),
-      remaining: formatNumber(remaining),
-      session: sessionStr,
-      latency: latencyStr,
-    });
+    rows.push([name, String(tier), used, limit, unit, period, sessionStr, latencyStr]);
   }
 
-  const headers = {
-    name: "Provider",
-    tier: "Tier",
-    remaining: "Remaining",
-    session: "Session (ok/fail)",
-    latency: "Avg Latency",
-  };
-
-  const colWidths = {
-    name: Math.max(headers.name.length, ...rows.map((r) => r.name.length)),
-    tier: Math.max(headers.tier.length, ...rows.map((r) => r.tier.length)),
-    remaining: Math.max(headers.remaining.length, ...rows.map((r) => r.remaining.length)),
-    session: Math.max(headers.session.length, ...rows.map((r) => r.session.length)),
-    latency: Math.max(headers.latency.length, ...rows.map((r) => r.latency.length)),
-  };
-
-  const sep = "  ";
-  const headerLine = [
-    headers.name.padEnd(colWidths.name),
-    headers.tier.padEnd(colWidths.tier),
-    headers.remaining.padStart(colWidths.remaining),
-    headers.session.padStart(colWidths.session),
-    headers.latency.padStart(colWidths.latency),
-  ].join(sep);
-
-  const divider = "-".repeat(headerLine.length);
-
-  const dataLines = rows.map((r) =>
-    [
-      r.name.padEnd(colWidths.name),
-      r.tier.padEnd(colWidths.tier),
-      r.remaining.padStart(colWidths.remaining),
-      r.session.padStart(colWidths.session),
-      r.latency.padStart(colWidths.latency),
-    ].join(sep),
+  const headers = [
+    "Provider",
+    "Tier",
+    "Used",
+    "Limit",
+    "Unit",
+    "Period",
+    "Session (ok/fail)",
+    "Avg Latency",
+  ];
+  const widths = headers.map((header, column) =>
+    Math.max(header.length, ...rows.map((row) => row[column].length)),
   );
-
-  return [headerLine, divider, ...dataLines].join("\n");
+  const rightAligned = new Set([2, 3, 6, 7]);
+  const render = (row: string[]) =>
+    row
+      .map((cell, column) =>
+        rightAligned.has(column) ? cell.padStart(widths[column]) : cell.padEnd(widths[column]),
+      )
+      .join("  ");
+  const header = render(headers);
+  return [header, "-".repeat(header.length), ...rows.map(render)].join("\n");
 }
 
 const USAGE = `Usage: /tools [subcommand]
@@ -200,9 +183,7 @@ export function createToolsCommand(
         }
 
         default:
-          ctx.ui.notify(
-            `Unknown subcommand "${subcommand}".\n\n${USAGE}`,
-          );
+          ctx.ui.notify(`Unknown subcommand "${subcommand}".\n\n${USAGE}`);
       }
     },
 

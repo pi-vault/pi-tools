@@ -38,6 +38,25 @@ describe("deepMerge", () => {
     });
   });
 
+  it("replaces budget objects atomically", () => {
+    const base = {
+      providers: {
+        brave: {
+          budget: { mode: "hard", limit: 5, period: "month", unit: "usd" },
+        },
+      },
+    };
+    const override = {
+      providers: {
+        brave: { budget: { mode: "managed" } },
+      },
+    };
+
+    expect(deepMerge(base, override)).toEqual({
+      providers: { brave: { budget: { mode: "managed" } } },
+    });
+  });
+
   it("replaces arrays entirely from override", () => {
     const base = { tags: ["a", "b", "c"] };
     const override = { tags: ["x"] };

@@ -79,9 +79,7 @@ describe("OllamaProvider", () => {
     it("uses experimental paths for localhost", async () => {
       fetchStub.addResponse("localhost:11434/api/experimental/web_search", {
         body: {
-          results: [
-            { title: "Result 1", url: "https://example.com", content: "A snippet" },
-          ],
+          results: [{ title: "Result 1", url: "https://example.com", content: "A snippet" }],
         },
       });
 
@@ -191,7 +189,9 @@ describe("OllamaProvider", () => {
       const originalFetch = globalThis.fetch;
       const err = new TypeError("fetch failed");
       (err as any).cause = { code: "ECONNREFUSED" };
-      globalThis.fetch = (async () => { throw err; }) as any;
+      globalThis.fetch = (async () => {
+        throw err;
+      }) as any;
 
       try {
         const provider = new OllamaProvider();
@@ -274,7 +274,9 @@ describe("OllamaProvider", () => {
       const originalFetch = globalThis.fetch;
       const err = new TypeError("fetch failed");
       (err as any).cause = { code: "ECONNREFUSED" };
-      globalThis.fetch = (async () => { throw err; }) as any;
+      globalThis.fetch = (async () => {
+        throw err;
+      }) as any;
 
       try {
         const provider = new OllamaProvider();
@@ -302,7 +304,7 @@ describe("providerMeta", () => {
   it("has correct metadata", () => {
     expect(providerMeta.name).toBe("ollama");
     expect(providerMeta.tier).toBe(3);
-    expect(providerMeta.monthlyQuota).toBeNull();
+    expect(providerMeta).not.toHaveProperty("monthlyQuota");
     expect(providerMeta.requiresKey).toBe(false);
   });
 
@@ -315,6 +317,7 @@ describe("providerMeta", () => {
   it("creates search and fetch providers when enabled", () => {
     const instance = providerMeta.create(undefined, {
       enabled: true,
+      budget: { mode: "unlimited" },
       baseUrl: "http://localhost:11434",
     });
     expect(instance.search).toBeDefined();
@@ -324,6 +327,7 @@ describe("providerMeta", () => {
   it("creates provider with custom baseUrl from config", () => {
     const instance = providerMeta.create(undefined, {
       enabled: true,
+      budget: { mode: "unlimited" },
       baseUrl: "http://my-ollama:11434",
     });
     expect(instance.search).toBeDefined();

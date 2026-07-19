@@ -264,7 +264,7 @@ describe("component reuse across renders", () => {
 });
 
 describe("web_research rendering", () => {
-  const tool = createWebResearchTool("key", { enabled: true }, vi.fn());
+  const tool = createWebResearchTool(() => "key", { enabled: true }, vi.fn());
 
   it("renderCall shows tool name and query preview with mode", () => {
     const component = tool.renderCall!(

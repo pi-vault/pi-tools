@@ -157,7 +157,6 @@ function computeTimelimit(filters?: SearchFilters): string | undefined {
 export const providerMeta: ProviderMeta = {
   name: "duckduckgo",
   tier: 3,
-  monthlyQuota: null,
   requiresKey: false,
   create: (_key, providerConfig) => ({
     search: new DuckDuckGoProvider(undefined, {

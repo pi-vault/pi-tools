@@ -113,7 +113,7 @@ export const researchModeDefaults: Record<ResearchMode, ResearchModeDefaults> = 
   },
   full: {
     type: "deep-reasoning",
-    numResults: 150,
+    numResults: 100,
     textMaxCharacters: 24000,
     timeoutSeconds: 1800,
     highlightsMaxCharacters: 1200,

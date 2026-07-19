@@ -24,7 +24,6 @@ function buildTbs(filters?: SearchFilters): string | null {
 export const providerMeta: ProviderMeta = {
   name: "serper",
   tier: 1,
-  monthlyQuota: 2500,
   requiresKey: true,
   create: (key) => ({
     search: createHttpSearchProvider(key!, {

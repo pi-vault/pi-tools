@@ -53,7 +53,9 @@ async function makeProvider(modelRegistry?: ModelRegistry, configuredModel?: str
   const { providerMeta } = await import("../../src/providers/openai-codex.ts");
   const provider = providerMeta.create(
     undefined,
-    configuredModel ? { enabled: true, model: configuredModel } : undefined,
+    configuredModel
+      ? { enabled: true, budget: { mode: "managed" }, model: configuredModel }
+      : undefined,
     modelRegistry,
   ).search;
   if (!provider) throw new Error("OpenAI Codex search provider unavailable");

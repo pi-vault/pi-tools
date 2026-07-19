@@ -1,8 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
-import type { PiToolsConfig } from "../src/config.ts";
-
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigManager, diffConfig } from "../src/config-manager.ts";
+import type { PiToolsConfig, ProviderBudget } from "../src/config.ts";
 import { ProviderRegistry } from "../src/providers/registry.ts";
 import type { ProviderMeta } from "../src/providers/types.ts";
 
@@ -17,183 +16,125 @@ vi.mock("../src/config.ts", async (importOriginal) => {
 
 import { loadMergedConfig, resolveApiKey } from "../src/config.ts";
 
-function makeConfig(overrides: Partial<PiToolsConfig> = {}): PiToolsConfig {
+const managed: ProviderBudget = { mode: "managed" };
+const hard: ProviderBudget = { mode: "hard", limit: 5, period: "month", unit: "usd" };
+
+function makeConfig(providers: PiToolsConfig["providers"] = {}): PiToolsConfig {
   return {
     defaultProvider: "auto",
     selectionStrategy: "auto",
-    providers: {
-      brave: { enabled: true, monthlyQuota: 2000, apiKey: "BRAVE_API_KEY" },
-      duckduckgo: { enabled: true },
-      exa: { enabled: false, apiKey: "EXA_API_KEY" },
-    },
+    providers,
     github: { enabled: true, maxRepoSizeMB: 350, cloneTimeoutSeconds: 30 },
     ssrf: { allowRanges: [] },
     combine: { enabled: false, mode: "targeted", targetBackends: 3, k: 60 },
     deepResearch: { enabled: true },
+  };
+}
+
+function entry(budget: ProviderBudget = managed, extra = {}) {
+  return { enabled: true, budget, ...extra };
+}
+
+function meta(name: string, overrides: Partial<ProviderMeta> = {}): ProviderMeta {
+  return {
+    name,
+    tier: 1,
+    requiresKey: false,
+    create: () => ({
+      search: { name, label: name, search: vi.fn().mockResolvedValue([]) },
+    }),
     ...overrides,
   };
 }
 
+function memory(): ProviderRegistry {
+  return new ProviderRegistry({
+    load: () => ({ version: 2, counters: {} }),
+    save: () => {},
+  });
+}
+
 describe("diffConfig", () => {
-  it("detects no changes when configs are identical", () => {
-    const config = makeConfig();
-    const result = diffConfig(config, config, (key) => key);
-    expect(result.added).toEqual([]);
-    expect(result.removed).toEqual([]);
-    expect(result.keyChanged).toEqual([]);
-  });
-
-  it("detects added provider (disabled → enabled)", () => {
-    const prev = makeConfig();
-    const next = makeConfig({
-      providers: {
-        ...prev.providers,
-        exa: { enabled: true, apiKey: "EXA_API_KEY" },
-      },
+  it("returns no changes for identical configs", () => {
+    const config = makeConfig({ brave: entry(hard) });
+    expect(diffConfig(config, config, (key) => key)).toEqual({
+      added: [],
+      removed: [],
+      changed: [],
     });
-    const result = diffConfig(prev, next, (key) => key);
-    expect(result.added).toEqual(["exa"]);
-    expect(result.removed).toEqual([]);
   });
 
-  it("detects removed provider (enabled → disabled)", () => {
-    const prev = makeConfig();
-    const next = makeConfig({
-      providers: {
-        ...prev.providers,
-        brave: { enabled: false, apiKey: "BRAVE_API_KEY" },
-      },
+  it("detects enable and disable changes", () => {
+    const prev = makeConfig({
+      brave: entry(hard),
+      exa: { ...entry(hard), enabled: false },
     });
-    const result = diffConfig(prev, next, (key) => key);
-    expect(result.removed).toEqual(["brave"]);
-    expect(result.added).toEqual([]);
-  });
-
-  it("detects key changed for enabled provider", () => {
-    const prev = makeConfig();
     const next = makeConfig({
-      providers: {
-        ...prev.providers,
-        brave: { enabled: true, monthlyQuota: 2000, apiKey: "NEW_KEY" },
-      },
+      brave: { ...entry(hard), enabled: false },
+      exa: entry(hard),
     });
-    const resolveKey = (key: string | undefined) => {
-      if (key === "BRAVE_API_KEY") return "old-resolved";
-      if (key === "NEW_KEY") return "new-resolved";
-      return key;
-    };
-    const result = diffConfig(prev, next, resolveKey);
-    expect(result.keyChanged).toEqual(["brave"]);
-    expect(result.added).toEqual([]);
-    expect(result.removed).toEqual([]);
+    expect(diffConfig(prev, next, (key) => key)).toEqual({
+      added: ["exa"],
+      removed: ["brave"],
+      changed: [],
+    });
   });
 
-  it("does not report key change when resolved values are the same", () => {
-    const prev = makeConfig();
-    const next = makeConfig({
-      providers: {
-        ...prev.providers,
-        brave: { enabled: true, monthlyQuota: 2000, apiKey: "DIFFERENT_VAR" },
-      },
-    });
-    const resolveKey = () => "same-value";
-    const result = diffConfig(prev, next, resolveKey);
-    expect(result.keyChanged).toEqual([]);
+  it("detects structural provider-entry changes", () => {
+    const prev = makeConfig({ brave: entry(hard, { depth: "standard" }) });
+    const next = makeConfig({ brave: entry(managed, { depth: "deep" }) });
+    expect(diffConfig(prev, next, (key) => key).changed).toEqual(["brave"]);
   });
 
-  it("does not flag disabled providers as key-changed", () => {
-    const prev = makeConfig();
-    const next = makeConfig({
-      providers: {
-        ...prev.providers,
-        exa: { enabled: false, apiKey: "CHANGED_KEY" },
-      },
-    });
-    const resolveKey = (key: string | undefined) => key;
-    const result = diffConfig(prev, next, resolveKey);
-    expect(result.keyChanged).toEqual([]);
-  });
-
-  it("handles provider appearing in next but not in prev", () => {
-    const prev = makeConfig();
-    const next = makeConfig({
-      providers: {
-        ...prev.providers,
-        tavily: { enabled: true, apiKey: "TAVILY_API_KEY" },
-      },
-    });
-    const result = diffConfig(prev, next, (key) => key);
-    expect(result.added).toEqual(["tavily"]);
-  });
-
-  it("handles provider disappearing from next config", () => {
-    const prev = makeConfig();
-    const { brave, ...rest } = prev.providers;
-    const next = makeConfig({ providers: rest });
-    const result = diffConfig(prev, next, (key) => key);
-    expect(result.removed).toEqual(["brave"]);
+  it("detects resolved key changes but ignores equivalent resolutions", () => {
+    const prev = makeConfig({ brave: entry(hard, { apiKey: "OLD" }) });
+    const next = makeConfig({ brave: entry(hard, { apiKey: "NEW" }) });
+    expect(diffConfig(prev, next, (key) => key).changed).toEqual(["brave"]);
+    expect(diffConfig(prev, next, () => "same").changed).toEqual([]);
   });
 });
-
-// ---------------------------------------------------------------------------
-// ConfigManager tests
-// ---------------------------------------------------------------------------
-
-const mem = () => new ProviderRegistry({ load: () => ({}), save: () => {} });
-
-function makeMeta(name: string, opts: Partial<ProviderMeta> = {}): ProviderMeta {
-  return {
-    name,
-    tier: 1,
-    monthlyQuota: null,
-    requiresKey: false,
-    create: (_key, _config) => ({
-      search: { name, label: name, search: vi.fn().mockResolvedValue([]) },
-    }),
-    ...opts,
-  };
-}
 
 describe("ConfigManager", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.mocked(resolveApiKey).mockImplementation((key) => key);
   });
 
-  it("loads config on construction and registers providers", () => {
-    vi.mocked(loadMergedConfig).mockReturnValue(
-      makeConfig({
-        providers: {
-          brave: { enabled: true, monthlyQuota: 2000 },
-          duckduckgo: { enabled: true },
-          exa: { enabled: false },
-        },
-      }),
-    );
-    vi.mocked(resolveApiKey).mockReturnValue(undefined);
-
-    const registry = mem();
-    const metas = [makeMeta("brave"), makeMeta("duckduckgo"), makeMeta("exa")];
-    new ConfigManager("/test/cwd", registry, metas);
-
-    expect(registry.getSearchProviderNames().sort()).toEqual(["brave", "duckduckgo"]);
-  });
-
-  it("passes the active model registry to provider factories", () => {
-    vi.mocked(loadMergedConfig).mockReturnValue(
-      makeConfig({ providers: { brave: { enabled: true } } }),
-    );
-    vi.mocked(resolveApiKey).mockReturnValue(undefined);
-
-    const modelRegistry = {} as ModelRegistry;
-    const create = vi.fn().mockReturnValue({
-      search: {
-        name: "brave",
-        label: "Brave",
-        search: vi.fn().mockResolvedValue([]),
+  it("registers every capability once with its policy and config", () => {
+    const providers = { all: entry(hard) };
+    vi.mocked(loadMergedConfig).mockReturnValue(makeConfig(providers));
+    const instances = {
+      search: { name: "all", label: "all", search: vi.fn().mockResolvedValue([]) },
+      fetch: { name: "all", fetch: vi.fn().mockResolvedValue({ text: "ok" }) },
+      codeSearch: { name: "all", codeSearch: vi.fn().mockResolvedValue([]) },
+      docs: {
+        name: "all",
+        label: "all",
+        searchLibrary: vi.fn().mockResolvedValue([]),
+        getContext: vi.fn().mockResolvedValue("ok"),
       },
-    });
-    new ConfigManager("/test/cwd", mem(), [makeMeta("brave", { create })], modelRegistry);
+    };
+    const registry = memory();
+    const register = vi.spyOn(registry, "registerProvider");
+    const usageCost = vi.fn(() => 0.5);
 
+    new ConfigManager("/cwd", registry, [meta("all", { create: () => instances, usageCost })]);
+
+    expect(register).toHaveBeenCalledOnce();
+    expect(register).toHaveBeenCalledWith(instances, {
+      name: "all",
+      tier: 1,
+      budget: hard,
+      config: expect.objectContaining({ ...providers.all, ssrfAllowRanges: [] }),
+      usageCost,
+    });
+  });
+
+  it("passes the active model registry to the provider factory", () => {
+    vi.mocked(loadMergedConfig).mockReturnValue(makeConfig({ brave: entry() }));
+    const create = vi.fn().mockReturnValue({});
+    const modelRegistry = {} as ModelRegistry;
+    new ConfigManager("/cwd", memory(), [meta("brave", { create })], modelRegistry);
     expect(create).toHaveBeenCalledWith(
       undefined,
       expect.objectContaining({ ssrfAllowRanges: [] }),
@@ -201,263 +142,57 @@ describe("ConfigManager", () => {
     );
   });
 
-  it("refresh is a no-op within TTL", () => {
-    const config = makeConfig();
-    vi.mocked(loadMergedConfig).mockReturnValue(config);
-    vi.mocked(resolveApiKey).mockReturnValue(undefined);
-
-    const registry = mem();
-    const manager = new ConfigManager("/test/cwd", registry, [
-      makeMeta("brave"),
-      makeMeta("duckduckgo"),
-    ]);
-
-    expect(vi.mocked(loadMergedConfig)).toHaveBeenCalledTimes(1);
-
-    manager.refresh();
-
-    expect(vi.mocked(loadMergedConfig)).toHaveBeenCalledTimes(1);
-  });
-
-  it("refresh reloads config after TTL expires", () => {
-    const config = makeConfig();
-    vi.mocked(loadMergedConfig).mockReturnValue(config);
-    vi.mocked(resolveApiKey).mockReturnValue(undefined);
-
-    const registry = mem();
-    const manager = new ConfigManager("/test/cwd", registry, [
-      makeMeta("brave"),
-      makeMeta("duckduckgo"),
-    ]);
+  it("re-registers a provider after a structural config change", () => {
+    vi.mocked(loadMergedConfig)
+      .mockReturnValueOnce(makeConfig({ brave: entry(hard) }))
+      .mockReturnValueOnce(makeConfig({ brave: entry(managed) }));
+    const registry = memory();
+    const register = vi.spyOn(registry, "registerProvider");
+    const manager = new ConfigManager("/cwd", registry, [meta("brave")]);
 
     manager.expireTtlForTest();
     manager.refresh();
 
-    expect(vi.mocked(loadMergedConfig)).toHaveBeenCalledTimes(2);
+    expect(register).toHaveBeenCalledTimes(2);
+    expect(registry.getBudgetStatus("brave")).toEqual({ mode: "managed" });
   });
 
-  it("refresh(force=true) reloads regardless of TTL", () => {
-    const config = makeConfig();
-    vi.mocked(loadMergedConfig).mockReturnValue(config);
-    vi.mocked(resolveApiKey).mockReturnValue(undefined);
-
-    const registry = mem();
-    const manager = new ConfigManager("/test/cwd", registry, [
-      makeMeta("brave"),
-      makeMeta("duckduckgo"),
-    ]);
-
-    manager.refresh(true);
-
-    expect(vi.mocked(loadMergedConfig)).toHaveBeenCalledTimes(2);
-  });
-
-  it("adds newly enabled provider on refresh", () => {
-    const initialConfig = makeConfig({
-      providers: {
-        brave: { enabled: true },
-        exa: { enabled: false },
-      },
-    });
-    const updatedConfig = makeConfig({
-      providers: {
-        brave: { enabled: true },
-        exa: { enabled: true },
-      },
-    });
-
+  it("keeps the previous config when reload parsing fails", () => {
     vi.mocked(loadMergedConfig)
-      .mockReturnValueOnce(initialConfig)
-      .mockReturnValueOnce(updatedConfig);
-    vi.mocked(resolveApiKey).mockReturnValue(undefined);
-
-    const registry = mem();
-    const manager = new ConfigManager("/test/cwd", registry, [makeMeta("brave"), makeMeta("exa")]);
-
-    expect(registry.getSearchProviderNames()).toEqual(["brave"]);
-
-    manager.expireTtlForTest();
-    manager.refresh();
-
-    expect(registry.getSearchProviderNames().sort()).toEqual(["brave", "exa"]);
-  });
-
-  it("removes newly disabled provider on refresh", () => {
-    const initialConfig = makeConfig({
-      providers: {
-        brave: { enabled: true },
-        duckduckgo: { enabled: true },
-      },
-    });
-    const updatedConfig = makeConfig({
-      providers: {
-        brave: { enabled: false },
-        duckduckgo: { enabled: true },
-      },
-    });
-
-    vi.mocked(loadMergedConfig)
-      .mockReturnValueOnce(initialConfig)
-      .mockReturnValueOnce(updatedConfig);
-    vi.mocked(resolveApiKey).mockReturnValue(undefined);
-
-    const registry = mem();
-    const manager = new ConfigManager("/test/cwd", registry, [
-      makeMeta("brave"),
-      makeMeta("duckduckgo"),
-    ]);
-
-    expect(registry.getSearchProviderNames().sort()).toEqual(["brave", "duckduckgo"]);
-
-    manager.expireTtlForTest();
-    manager.refresh();
-
-    expect(registry.getSearchProviderNames()).toEqual(["duckduckgo"]);
-  });
-
-  it("re-registers provider when key changes", () => {
-    const initialConfig = makeConfig({
-      providers: {
-        brave: { enabled: true, apiKey: "OLD_KEY" },
-      },
-    });
-    const updatedConfig = makeConfig({
-      providers: {
-        brave: { enabled: true, apiKey: "NEW_KEY" },
-      },
-    });
-
-    vi.mocked(loadMergedConfig)
-      .mockReturnValueOnce(initialConfig)
-      .mockReturnValueOnce(updatedConfig);
-    vi.mocked(resolveApiKey).mockImplementation((key) => {
-      if (key === "OLD_KEY") return "old-resolved";
-      if (key === "NEW_KEY") return "new-resolved";
-      return undefined;
-    });
-
-    const createFn = vi.fn().mockReturnValue({
-      search: { name: "brave", label: "Brave", search: vi.fn() },
-    });
-    const registry = mem();
-    const manager = new ConfigManager("/test/cwd", registry, [
-      makeMeta("brave", { create: createFn }),
-    ]);
-
-    expect(createFn).toHaveBeenCalledTimes(1);
-
-    manager.expireTtlForTest();
-    manager.refresh();
-
-    expect(createFn).toHaveBeenCalledTimes(2);
-    expect(createFn).toHaveBeenLastCalledWith(
-      "new-resolved",
-      {
-        ...updatedConfig.providers.brave,
-        ssrfAllowRanges: updatedConfig.ssrf.allowRanges,
-      },
-      undefined,
-    );
-  });
-
-  it("preserves previous config when reload throws", () => {
-    const validConfig = makeConfig({
-      providers: {
-        brave: { enabled: true },
-      },
-    });
-
-    vi.mocked(loadMergedConfig)
-      .mockReturnValueOnce(validConfig)
+      .mockReturnValueOnce(makeConfig({ brave: entry(hard) }))
       .mockImplementationOnce(() => {
-        throw new Error("JSON parse error");
+        throw new Error("invalid config");
       });
-    vi.mocked(resolveApiKey).mockReturnValue(undefined);
-
-    const registry = mem();
-    const manager = new ConfigManager("/test/cwd", registry, [makeMeta("brave")]);
+    const manager = new ConfigManager("/cwd", memory(), [meta("brave")]);
 
     manager.expireTtlForTest();
     manager.refresh();
 
-    expect(manager.current.providers.brave.enabled).toBe(true);
-    expect(registry.getSearchProviderNames()).toEqual(["brave"]);
+    expect(manager.current.providers.brave.budget).toEqual(hard);
+    expect(loadMergedConfig).toHaveBeenLastCalledWith("/cwd", true);
   });
 
-  it("updates current config when selectionStrategy changes", () => {
-    const initialConfig = makeConfig({ selectionStrategy: "auto" });
-    const updatedConfig = makeConfig({ selectionStrategy: "best-performing" });
-
-    vi.mocked(loadMergedConfig)
-      .mockReturnValueOnce(initialConfig)
-      .mockReturnValueOnce(updatedConfig);
-    vi.mocked(resolveApiKey).mockReturnValue(undefined);
-
-    const registry = mem();
-    const manager = new ConfigManager("/test/cwd", registry, [
-      makeMeta("brave"),
-      makeMeta("duckduckgo"),
-    ]);
-
-    expect(manager.current.selectionStrategy).toBe("auto");
-
-    manager.expireTtlForTest();
-    manager.refresh();
-
-    expect(manager.current.selectionStrategy).toBe("best-performing");
-  });
-
-  it("skips provider requiring key when key resolves to undefined", () => {
+  it("skips disabled, unkeyed, and failing providers without affecting siblings", () => {
     vi.mocked(loadMergedConfig).mockReturnValue(
       makeConfig({
-        providers: {
-          brave: { enabled: true, apiKey: "BRAVE_API_KEY" },
-        },
+        enabled: entry(),
+        disabled: { ...entry(), enabled: false },
+        unkeyed: entry(managed, { apiKey: "MISSING" }),
+        broken: entry(),
       }),
     );
-    vi.mocked(resolveApiKey).mockReturnValue(undefined);
-
-    const registry = mem();
-    new ConfigManager("/test/cwd", registry, [makeMeta("brave", { requiresKey: true })]);
-
-    expect(registry.getSearchProviderNames()).toEqual([]);
-  });
-
-  it("skips provider when meta.create throws during hot-add", () => {
-    const initialConfig = makeConfig({
-      providers: {
-        brave: { enabled: true },
-        exa: { enabled: false },
-      },
-    });
-    const updatedConfig = makeConfig({
-      providers: {
-        brave: { enabled: true },
-        exa: { enabled: true },
-      },
-    });
-
-    vi.mocked(loadMergedConfig)
-      .mockReturnValueOnce(initialConfig)
-      .mockReturnValueOnce(updatedConfig);
-    vi.mocked(resolveApiKey).mockReturnValue(undefined);
-
-    const throwingCreate = () => {
-      throw new Error("provider init failed");
-    };
-
-    const registry = mem();
-    const manager = new ConfigManager("/test/cwd", registry, [
-      makeMeta("brave"),
-      makeMeta("exa", { create: throwingCreate }),
+    vi.mocked(resolveApiKey).mockImplementation((key) => (key === "MISSING" ? undefined : key));
+    const registry = memory();
+    new ConfigManager("/cwd", registry, [
+      meta("enabled"),
+      meta("disabled"),
+      meta("unkeyed", { requiresKey: true }),
+      meta("broken", {
+        create: () => {
+          throw new Error("broken");
+        },
+      }),
     ]);
-
-    expect(registry.getSearchProviderNames()).toEqual(["brave"]);
-
-    manager.expireTtlForTest();
-    manager.refresh();
-
-    // exa's create throws — brave still registered, no crash
-    expect(registry.getSearchProviderNames()).toEqual(["brave"]);
+    expect(registry.getSearchProviderNames()).toEqual(["enabled"]);
   });
 });

@@ -29,8 +29,14 @@ describe("createWebResearchTool", () => {
     vi.restoreAllMocks();
   });
 
-  function makeTool() {
-    return createWebResearchTool("test-exa-key", { enabled: true }, appendEntry);
+  function makeTool(beforeResearch = vi.fn()) {
+    return createWebResearchTool(
+      () => "test-exa-key",
+      { enabled: true },
+      appendEntry,
+      undefined,
+      beforeResearch,
+    );
   }
 
   it("has correct name and description", () => {
@@ -225,8 +231,49 @@ describe("createWebResearchTool", () => {
     expect(fetchCalls.length).toBe(1);
   });
 
+  it("reserves once per unique query with exact operation metadata", async () => {
+    fetchStub.addResponse("api.exa.ai/search", { body: { results: [], answer: "Answer" } });
+    const beforeResearch = vi.fn();
+    const tool = makeTool(beforeResearch);
+
+    await tool.execute(
+      "call-budget",
+      {
+        query: "same question",
+        researchMode: "full",
+        additionalQueries: ["same question"],
+        type: "deep",
+        numResults: 12,
+        summaryQuery: "summarize",
+      },
+      undefined,
+      vi.fn(),
+      makeCtx(),
+    );
+
+    expect(beforeResearch).toHaveBeenCalledOnce();
+    expect(beforeResearch).toHaveBeenCalledWith({
+      capability: "research",
+      type: "deep",
+      maxResults: 12,
+      contentTypes: 3,
+    });
+  });
+
+  it("reserves immediately before delegation and stops when rejected", async () => {
+    const beforeResearch = vi.fn(() => {
+      throw new Error("budget rejected");
+    });
+    const tool = makeTool(beforeResearch);
+
+    await expect(
+      tool.execute("call-rejected", { query: "test" }, undefined, vi.fn(), makeCtx()),
+    ).rejects.toThrow("budget rejected");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
   it("throws when deepResearch is disabled", async () => {
-    const tool = createWebResearchTool("key", { enabled: false }, appendEntry);
+    const tool = createWebResearchTool(() => "key", { enabled: false }, appendEntry);
     await expect(
       tool.execute("call-6", { query: "test" }, undefined, vi.fn(), makeCtx()),
     ).rejects.toThrow(/disabled/);

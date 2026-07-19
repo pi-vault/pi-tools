@@ -26,10 +26,10 @@ describe("researchModeDefaults", () => {
     expect(standard.outputSchema).toBeDefined();
   });
 
-  it("full uses deep-reasoning type with 150 results and output schema", () => {
+  it("full uses deep-reasoning type with 100 results and output schema", () => {
     const full = researchModeDefaults.full;
     expect(full.type).toBe("deep-reasoning");
-    expect(full.numResults).toBe(150);
+    expect(full.numResults).toBe(100);
     expect(full.textMaxCharacters).toBe(24000);
     expect(full.highlightsMaxCharacters).toBe(1200);
     expect(full.highlightNumSentences).toBe(5);

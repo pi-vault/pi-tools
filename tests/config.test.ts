@@ -37,7 +37,45 @@ describe("loadConfig", () => {
     expect(config.defaultProvider).toBe("auto");
     expect(config.providers.duckduckgo.enabled).toBe(true);
     expect(config.providers.jina.enabled).toBe(true);
-    expect(config.providers["openai-codex"]).toEqual({ enabled: true });
+    expect(config.providers["openai-codex"]).toEqual({
+      enabled: true,
+      budget: { mode: "managed" },
+    });
+  });
+
+  it("provides budgets for every built-in provider", () => {
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error("ENOENT");
+    });
+
+    expect(
+      Object.fromEntries(
+        Object.entries(loadConfig().providers).map(([name, entry]) => [name, entry.budget]),
+      ),
+    ).toEqual({
+      brave: { mode: "hard", limit: 5, period: "month", unit: "usd", pool: "brave" },
+      "brave-llm": { mode: "hard", limit: 5, period: "month", unit: "usd", pool: "brave" },
+      exa: { mode: "hard", limit: 10, period: "month", unit: "usd", pool: "exa" },
+      tavily: { mode: "hard", limit: 1000, period: "month", unit: "credit" },
+      firecrawl: { mode: "hard", limit: 1000, period: "month", unit: "credit" },
+      serper: { mode: "hard", limit: 2500, period: "lifetime", unit: "request" },
+      websearchapi: { mode: "hard", limit: 2000, period: "month", unit: "credit" },
+      context7: { mode: "hard", limit: 1000, period: "month", unit: "request" },
+      fastcrw: { mode: "hard", limit: 500, period: "lifetime", unit: "credit" },
+      langsearch: { mode: "hard", limit: 1000, period: "day", unit: "request" },
+      linkup: { mode: "hard", limit: 20, period: "month", unit: "usd" },
+      youcom: { mode: "hard", limit: 100, period: "lifetime", unit: "usd" },
+      duckduckgo: { mode: "unlimited" },
+      ollama: { mode: "unlimited" },
+      searxng: { mode: "unlimited" },
+      jina: { mode: "managed" },
+      marginalia: { mode: "managed" },
+      "openai-codex": { mode: "managed" },
+      "openai-web-search": { mode: "managed" },
+      parallel: { mode: "managed" },
+      perplexity: { mode: "managed" },
+      sofya: { mode: "managed" },
+    });
   });
 
   it("parses valid config file", () => {
@@ -58,7 +96,94 @@ describe("loadConfig", () => {
     const config = loadConfig();
     expect(config.defaultProvider).toBe("brave");
     expect(config.providers.brave.enabled).toBe(true);
-    expect(config.providers.brave.monthlyQuota).toBe(2000);
+    expect(config.providers.brave).not.toHaveProperty("monthlyQuota");
+    expect(config.providers.brave.budget).toEqual({
+      mode: "hard",
+      limit: 5,
+      period: "month",
+      unit: "usd",
+      pool: "brave",
+    });
+  });
+
+  it("replaces a budget mode atomically", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        providers: { exa: { budget: { mode: "managed" } } },
+      }),
+    );
+
+    expect(loadConfig().providers.exa.budget).toEqual({ mode: "managed" });
+  });
+
+  it.each([
+    { mode: "hard", limit: 0, period: "month", unit: "usd" },
+    { mode: "hard", limit: Number.NaN, period: "month", unit: "usd" },
+    { mode: "hard", limit: 1, period: "week", unit: "usd" },
+    { mode: "hard", limit: 1, period: "month", unit: "token" },
+    { mode: "hard", limit: 1, period: "month", unit: "usd", pool: "" },
+    { mode: "unknown" },
+  ])("ignores invalid budget override %#", (budget) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        providers: { exa: { budget } },
+      }),
+    );
+
+    expect(loadConfig().providers.exa.budget).toEqual({
+      mode: "hard",
+      limit: 10,
+      period: "month",
+      unit: "usd",
+      pool: "exa",
+    });
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("warns once for multiple invalid budgets in one layer", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        providers: {
+          exa: { budget: { mode: "hard", limit: -1, period: "month", unit: "usd" } },
+          tavily: { budget: { mode: "invalid" } },
+        },
+      }),
+    );
+
+    loadConfig();
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("restores conflicting shared-pool budgets as a group", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        providers: {
+          brave: {
+            budget: { mode: "hard", limit: 8, period: "month", unit: "usd", pool: "brave" },
+          },
+        },
+      }),
+    );
+
+    const providers = loadConfig().providers;
+    expect(providers.brave.budget).toEqual(providers["brave-llm"].budget);
+    expect(providers.brave.budget).toMatchObject({ limit: 5, pool: "brave" });
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("accepts matching shared-pool budget overrides", () => {
+    const budget = { mode: "hard", limit: 8, period: "month", unit: "usd", pool: "brave" };
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        providers: { brave: { budget }, "brave-llm": { budget } },
+      }),
+    );
+
+    expect(loadConfig().providers.brave.budget).toEqual(budget);
+    expect(loadConfig().providers["brave-llm"].budget).toEqual(budget);
   });
 
   it("returns defaults for malformed JSON", () => {
@@ -77,6 +202,22 @@ describe("loadConfig", () => {
     });
     const config = loadConfig();
     expect(config.defaultProvider).toBe("brave");
+  });
+
+  it("resolves the global path from Pi's agent directory", () => {
+    const previous = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = "/custom/pi-agent";
+    try {
+      expect(getConfigPath()).toBe(path.join("/custom/pi-agent", "extensions", "tools.json"));
+      loadConfig();
+      expect(fs.readFileSync).toHaveBeenCalledWith(
+        path.join("/custom/pi-agent", "extensions", "tools.json"),
+        "utf-8",
+      );
+    } finally {
+      if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previous;
+    }
   });
 
   it("does not read a second global config path", () => {
@@ -249,7 +390,7 @@ describe("loadMergedConfig", () => {
   it("returns global config when no project config exists", () => {
     vi.mocked(fs.readFileSync).mockImplementation((p) => {
       const filePath = typeof p === "string" ? p : p.toString();
-      if (filePath.includes(path.join(".pi", "agent"))) {
+      if (filePath === getConfigPath()) {
         return JSON.stringify({
           defaultProvider: "brave",
           providers: { brave: { enabled: true, monthlyQuota: 2000 } },
@@ -263,10 +404,33 @@ describe("loadMergedConfig", () => {
     expect(config.defaultProvider).toBe("brave");
   });
 
+  it("ignores malformed global config during initial loading", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue("not json");
+
+    expect(loadMergedConfig().defaultProvider).toBe("auto");
+  });
+
+  it("surfaces malformed global config during reload", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue("not json");
+
+    expect(() => loadMergedConfig(undefined, true)).toThrow(SyntaxError);
+  });
+
+  it("surfaces malformed project config during reload", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      const resolved = typeof filePath === "string" ? filePath : filePath.toString();
+      if (resolved.includes(path.join(".pi", "tools.json"))) return "not json";
+      throw new Error("ENOENT");
+    });
+
+    expect(() => loadMergedConfig("/projects/my-app", true)).toThrow(SyntaxError);
+  });
+
   it("deep-merges project config over global config", () => {
     vi.mocked(fs.readFileSync).mockImplementation((p) => {
       const filePath = typeof p === "string" ? p : p.toString();
-      if (filePath.includes(path.join(".pi", "agent"))) {
+      if (filePath === getConfigPath()) {
         return JSON.stringify({
           defaultProvider: "auto",
           providers: {
@@ -295,7 +459,7 @@ describe("loadMergedConfig", () => {
     expect(config.providers.exa.enabled).toBe(false);
     // brave untouched — kept from global config
     expect(config.providers.brave.enabled).toBe(true);
-    expect(config.providers.brave.monthlyQuota).toBe(2000);
+    expect(config.providers.brave).not.toHaveProperty("monthlyQuota");
   });
 
   it("project config overrides built-in defaults when no global config", () => {
@@ -322,7 +486,7 @@ describe("loadMergedConfig", () => {
   it("preserves github defaults when neither global nor project config includes them", () => {
     vi.mocked(fs.readFileSync).mockImplementation((p) => {
       const filePath = typeof p === "string" ? p : p.toString();
-      if (filePath.includes(path.join(".pi", "agent"))) {
+      if (filePath === getConfigPath()) {
         return JSON.stringify({
           defaultProvider: "brave",
           providers: { brave: { enabled: true } },
@@ -342,7 +506,7 @@ describe("loadMergedConfig", () => {
   it("deep-merges github config from project over global", () => {
     vi.mocked(fs.readFileSync).mockImplementation((p) => {
       const filePath = typeof p === "string" ? p : p.toString();
-      if (filePath.includes(path.join(".pi", "agent"))) {
+      if (filePath === getConfigPath()) {
         return JSON.stringify({
           github: { maxRepoSizeMB: 500 },
         });
@@ -367,7 +531,7 @@ describe("loadMergedConfig", () => {
   it("loads only defaults and global config when cwd is undefined", () => {
     vi.mocked(fs.readFileSync).mockImplementation((p) => {
       const filePath = typeof p === "string" ? p : p.toString();
-      if (filePath.includes(path.join(".pi", "agent"))) {
+      if (filePath === getConfigPath()) {
         return JSON.stringify({
           defaultProvider: "brave",
         });
@@ -600,9 +764,7 @@ describe("resolveApiKey — env var warning", () => {
   it("logs warning when ALL_CAPS env var is not set", () => {
     delete process.env.MISSING_PROVIDER_KEY;
     resolveApiKey("MISSING_PROVIDER_KEY");
-    expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining("MISSING_PROVIDER_KEY"),
-    );
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("MISSING_PROVIDER_KEY"));
   });
 
   it("does not warn when env var is set", () => {

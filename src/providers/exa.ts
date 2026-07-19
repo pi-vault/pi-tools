@@ -115,8 +115,20 @@ export class ExaProvider implements SearchProvider, FetchProvider, CodeSearchPro
 export const providerMeta: ProviderMeta = {
   name: "exa",
   tier: 1,
-  monthlyQuota: 1000,
   requiresKey: true,
+  usageCost: (operation) => {
+    if (operation.capability === "fetch") return 0.001;
+    if (operation.capability === "search" || operation.capability === "code-search") {
+      return 0.007 + 0.001 * Math.max(0, operation.maxResults - 10);
+    }
+    if (operation.capability === "research") {
+      const base = operation.type === "deep-reasoning" ? 0.015 : 0.012;
+      const extraResults = 0.001 * Math.max(0, operation.maxResults - 10);
+      const contents = 0.001 * operation.maxResults * operation.contentTypes;
+      return base + extraResults + contents;
+    }
+    return 1;
+  },
   create: (key) => {
     const p = new ExaProvider(key!);
     return { search: p, fetch: p, codeSearch: p };

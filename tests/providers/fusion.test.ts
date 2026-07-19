@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { reciprocalRankFusion, executeWithFusion } from "../../src/providers/fusion.ts";
 import type { SearchResult } from "../../src/providers/types.ts";
+import { BudgetExceededError } from "../../src/providers/registry.ts";
 
 describe("reciprocalRankFusion", () => {
   it("merges results from two providers and orders by RRF score", () => {
@@ -257,6 +258,66 @@ describe("reciprocalRankFusion", () => {
 });
 
 describe("executeWithFusion", () => {
+  it("replaces a budget-rejected candidate without recording a performance failure", async () => {
+    const onFailure = vi.fn();
+    const result = await executeWithFusion({
+      candidates: [
+        {
+          name: "exhausted",
+          execute: async () => {
+            throw new BudgetExceededError("exhausted", 1, {
+              mode: "hard",
+              used: 1,
+              limit: 1,
+              unit: "request",
+              period: "month",
+              periodKey: "2026-07",
+            });
+          },
+        },
+        {
+          name: "available",
+          execute: async () => [{ title: "ok", url: "https://ok.test", snippet: "ok" }],
+        },
+      ],
+      maxResults: 1,
+      mode: "targeted",
+      targetBackends: 1,
+      k: 60,
+      onFailure,
+    });
+
+    expect(result.providersUsed).toEqual(["available"]);
+    expect(result.providersFailed).toEqual([]);
+    expect(onFailure).not.toHaveBeenCalledWith("exhausted");
+  });
+
+  it("reports the budget rejection when every candidate is rejected", async () => {
+    await expect(
+      executeWithFusion({
+        candidates: [
+          {
+            name: "exhausted",
+            execute: async () => {
+              throw new BudgetExceededError("exhausted", 1, {
+                mode: "hard",
+                used: 1,
+                limit: 1,
+                unit: "request",
+                period: "month",
+                periodKey: "2026-07",
+              });
+            },
+          },
+        ],
+        maxResults: 1,
+        mode: "targeted",
+        targetBackends: 1,
+        k: 60,
+      }),
+    ).rejects.toThrow("budget exceeded");
+  });
+
   describe("all mode", () => {
     it("runs all candidates in parallel and fuses results", async () => {
       const candidates = [

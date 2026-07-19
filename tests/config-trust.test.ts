@@ -15,12 +15,19 @@ describe("stripSensitiveFields", () => {
   it("removes nested provider apiKey fields", () => {
     const config = {
       providers: {
-        brave: { enabled: true, apiKey: "BSA_xxx", monthlyQuota: 2000 },
+        brave: {
+          enabled: true,
+          apiKey: "BSA_xxx",
+          budget: { mode: "hard", limit: 5, period: "month", unit: "usd" },
+        },
         duckduckgo: { enabled: true },
       },
     };
     const result = stripSensitiveFields(config);
-    expect((result.providers as any).brave).toEqual({ enabled: true, monthlyQuota: 2000 });
+    expect((result.providers as any).brave).toEqual({
+      enabled: true,
+      budget: { mode: "hard", limit: 5, period: "month", unit: "usd" },
+    });
     expect((result.providers as any).duckduckgo).toEqual({ enabled: true });
   });
 

@@ -1,6 +1,11 @@
 import { readdir, readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
-import { researchModeDefaults, type ResearchMode, type ResearchModeDefaults } from "./types.ts";
+import {
+  researchModeDefaults,
+  type ExaDeepType,
+  type ResearchMode,
+  type ResearchModeDefaults,
+} from "./types.ts";
 
 export const MAX_CONTEXT_FILES = 25;
 
@@ -102,11 +107,21 @@ export function applyResearchMode(
     );
   }
   const profile = configDefaults?.[researchMode] ?? {};
+  const type = input.type ?? profile.type ?? defaults.type;
+  if (type !== "deep-lite" && type !== "deep" && type !== "deep-reasoning") {
+    throw new Error(
+      `Invalid research type '${type}'. Expected deep-lite, deep, or deep-reasoning.`,
+    );
+  }
+  const numResults = input.numResults ?? profile.numResults ?? defaults.numResults;
+  if (!Number.isInteger(numResults) || numResults < 1 || numResults > 100) {
+    throw new Error("numResults must be an integer from 1 to 100.");
+  }
 
   return {
     researchMode,
-    type: input.type ?? profile.type ?? defaults.type,
-    numResults: input.numResults ?? profile.numResults ?? defaults.numResults,
+    type: type as ExaDeepType,
+    numResults,
     textMaxCharacters:
       input.textMaxCharacters ?? profile.textMaxCharacters ?? defaults.textMaxCharacters,
     timeoutSeconds: profile.timeoutSeconds ?? defaults.timeoutSeconds,

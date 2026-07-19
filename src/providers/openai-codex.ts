@@ -205,7 +205,6 @@ function truncateText(value: string, maxLength: number): string {
 export const providerMeta: ProviderMeta = {
   name: "openai-codex",
   tier: 1,
-  monthlyQuota: null,
   requiresKey: false,
   create: (_key, providerConfig, modelRegistry) => ({
     search: new OpenAICodexProvider(providerConfig?.model, modelRegistry),

@@ -1,15 +1,28 @@
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { deepMerge } from "./utils/deep-merge.ts";
 import { parseAllowRanges } from "./utils/ssrf.ts";
 import type { ResearchMode, ResearchModeDefaults } from "./research/types.ts";
 import { isProjectTrustedCached } from "./utils/trust.ts";
 
+export type BudgetPeriod = "day" | "month" | "lifetime";
+export type BudgetUnit = "request" | "credit" | "usd";
+export type ProviderBudget =
+  | {
+      mode: "hard";
+      limit: number;
+      period: BudgetPeriod;
+      unit: BudgetUnit;
+      pool?: string;
+    }
+  | { mode: "managed" }
+  | { mode: "unlimited" };
+
 export interface ProviderConfigEntry {
   enabled: boolean;
-  monthlyQuota?: number;
+  budget: ProviderBudget;
   apiKey?: string;
   instanceUrl?: string;
   ssrfAllowRanges?: string[];
@@ -101,10 +114,7 @@ const SHELL_TIMEOUT_MS = 5000;
 
 const SENTINEL_VALUES = new Set(["null", "undefined", "none"]);
 
-const commandValueCache = new Map<
-  string,
-  { value?: string; errorMessage?: string }
->();
+const commandValueCache = new Map<string, { value?: string; errorMessage?: string }>();
 
 export function clearCredentialCache(): void {
   commandValueCache.clear();
@@ -150,7 +160,9 @@ export const DEFAULT_DEEP_RESEARCH_CONFIG: DeepResearchConfig = {
   enabled: true,
 };
 
-export const DEFAULT_GEMINI_CONFIG: Required<Pick<GeminiConfig, "baseUrl" | "allowBrowserCookies" | "chromeProfile">> = {
+export const DEFAULT_GEMINI_CONFIG: Required<
+  Pick<GeminiConfig, "baseUrl" | "allowBrowserCookies" | "chromeProfile">
+> = {
   baseUrl: "https://generativelanguage.googleapis.com",
   allowBrowserCookies: false,
   chromeProfile: "Default",
@@ -171,22 +183,100 @@ const DEFAULT_CONFIG: PiToolsConfig = {
   defaultProvider: "auto",
   selectionStrategy: "auto",
   providers: {
-    brave: { enabled: true, monthlyQuota: 2000, apiKey: "BRAVE_API_KEY" },
-    "brave-llm": { enabled: true, monthlyQuota: 2000, apiKey: "BRAVE_API_KEY" },
-    exa: { enabled: true, monthlyQuota: 1000, apiKey: "EXA_API_KEY" },
-    tavily: { enabled: false, apiKey: "TAVILY_API_KEY" },
-    jina: { enabled: true },
-    duckduckgo: { enabled: true },
-    serper: { enabled: false, apiKey: "SERPER_API_KEY" },
-    perplexity: { enabled: true, apiKey: "PERPLEXITY_API_KEY" },
-    firecrawl: { enabled: true, apiKey: "FIRECRAWL_API_KEY" },
-    "openai-codex": { enabled: true },
-    "openai-web-search": { enabled: true, apiKey: "OPENAI_API_KEY" },
-    ollama: { enabled: false, apiKey: "OLLAMA_API_KEY" },
-    parallel: { enabled: false, apiKey: "PARALLEL_API_KEY" },
-    searxng: { enabled: false, instanceUrl: "http://localhost:8080" },
-    websearchapi: { enabled: false, apiKey: "WEBSEARCHAPI_API_KEY" },
-    context7: { enabled: true, apiKey: "CONTEXT7_API_KEY" },
+    brave: {
+      enabled: true,
+      budget: { mode: "hard", limit: 5, period: "month", unit: "usd", pool: "brave" },
+      apiKey: "BRAVE_API_KEY",
+    },
+    "brave-llm": {
+      enabled: true,
+      budget: { mode: "hard", limit: 5, period: "month", unit: "usd", pool: "brave" },
+      apiKey: "BRAVE_API_KEY",
+    },
+    context7: {
+      enabled: true,
+      budget: { mode: "hard", limit: 1000, period: "month", unit: "request" },
+      apiKey: "CONTEXT7_API_KEY",
+    },
+    duckduckgo: { enabled: true, budget: { mode: "unlimited" } },
+    exa: {
+      enabled: true,
+      budget: { mode: "hard", limit: 10, period: "month", unit: "usd", pool: "exa" },
+      apiKey: "EXA_API_KEY",
+    },
+    fastcrw: {
+      enabled: false,
+      budget: { mode: "hard", limit: 500, period: "lifetime", unit: "credit" },
+      apiKey: "FASTCRW_API_KEY",
+    },
+    firecrawl: {
+      enabled: true,
+      budget: { mode: "hard", limit: 1000, period: "month", unit: "credit" },
+      apiKey: "FIRECRAWL_API_KEY",
+    },
+    jina: { enabled: true, budget: { mode: "managed" } },
+    langsearch: {
+      enabled: false,
+      budget: { mode: "hard", limit: 1000, period: "day", unit: "request" },
+      apiKey: "LANGSEARCH_API_KEY",
+    },
+    linkup: {
+      enabled: false,
+      budget: { mode: "hard", limit: 20, period: "month", unit: "usd" },
+      apiKey: "LINKUP_API_KEY",
+    },
+    marginalia: { enabled: false, budget: { mode: "managed" } },
+    ollama: {
+      enabled: false,
+      budget: { mode: "unlimited" },
+      apiKey: "OLLAMA_API_KEY",
+    },
+    "openai-codex": { enabled: true, budget: { mode: "managed" } },
+    "openai-web-search": {
+      enabled: true,
+      budget: { mode: "managed" },
+      apiKey: "OPENAI_API_KEY",
+    },
+    parallel: {
+      enabled: false,
+      budget: { mode: "managed" },
+      apiKey: "PARALLEL_API_KEY",
+    },
+    perplexity: {
+      enabled: true,
+      budget: { mode: "managed" },
+      apiKey: "PERPLEXITY_API_KEY",
+    },
+    searxng: {
+      enabled: false,
+      budget: { mode: "unlimited" },
+      instanceUrl: "http://localhost:8080",
+    },
+    serper: {
+      enabled: false,
+      budget: { mode: "hard", limit: 2500, period: "lifetime", unit: "request" },
+      apiKey: "SERPER_API_KEY",
+    },
+    sofya: {
+      enabled: false,
+      budget: { mode: "managed" },
+      apiKey: "SOFYA_API_KEY",
+    },
+    tavily: {
+      enabled: false,
+      budget: { mode: "hard", limit: 1000, period: "month", unit: "credit" },
+      apiKey: "TAVILY_API_KEY",
+    },
+    websearchapi: {
+      enabled: false,
+      budget: { mode: "hard", limit: 2000, period: "month", unit: "credit" },
+      apiKey: "WEBSEARCHAPI_API_KEY",
+    },
+    youcom: {
+      enabled: false,
+      budget: { mode: "hard", limit: 100, period: "lifetime", unit: "usd" },
+      apiKey: "YOUCOM_API_KEY",
+    },
   },
   github: DEFAULT_GITHUB_CONFIG,
   ssrf: { allowRanges: [] },
@@ -195,7 +285,79 @@ const DEFAULT_CONFIG: PiToolsConfig = {
 };
 
 export function getConfigPath(): string {
-  return path.join(os.homedir(), ".pi", "agent", "extensions", "tools.json");
+  return path.join(getAgentDir(), "extensions", "tools.json");
+}
+
+function isProviderBudget(value: unknown): value is ProviderBudget {
+  if (!value || typeof value !== "object") return false;
+  const budget = value as Record<string, unknown>;
+  if (budget.mode === "managed" || budget.mode === "unlimited") return true;
+  return (
+    budget.mode === "hard" &&
+    typeof budget.limit === "number" &&
+    Number.isFinite(budget.limit) &&
+    budget.limit > 0 &&
+    (budget.period === "day" || budget.period === "month" || budget.period === "lifetime") &&
+    (budget.unit === "request" || budget.unit === "credit" || budget.unit === "usd") &&
+    (budget.pool === undefined ||
+      (typeof budget.pool === "string" && budget.pool.trim().length > 0))
+  );
+}
+
+function sameHardBudget(a: ProviderBudget, b: ProviderBudget): boolean {
+  return (
+    a.mode === "hard" &&
+    b.mode === "hard" &&
+    a.limit === b.limit &&
+    a.period === b.period &&
+    a.unit === b.unit &&
+    a.pool === b.pool
+  );
+}
+
+function mergeConfigLayer(
+  base: Record<string, unknown>,
+  override: Record<string, unknown>,
+): Record<string, unknown> {
+  const layer = deepMerge(override, {});
+  const providers = layer.providers as Record<string, Record<string, unknown>> | undefined;
+  let invalid = false;
+
+  if (providers && typeof providers === "object") {
+    for (const entry of Object.values(providers)) {
+      delete entry.monthlyQuota;
+      if (entry.budget !== undefined && !isProviderBudget(entry.budget)) {
+        delete entry.budget;
+        invalid = true;
+      }
+    }
+  }
+
+  const merged = deepMerge(base, layer);
+  const baseProviders = (base.providers ?? {}) as Record<string, ProviderConfigEntry>;
+  const mergedProviders = (merged.providers ?? {}) as Record<string, ProviderConfigEntry>;
+  const pools = new Map<string, string[]>();
+
+  for (const [name, entry] of Object.entries(mergedProviders)) {
+    if (entry.budget?.mode !== "hard" || !entry.budget.pool) continue;
+    const names = pools.get(entry.budget.pool) ?? [];
+    names.push(name);
+    pools.set(entry.budget.pool, names);
+  }
+
+  for (const names of pools.values()) {
+    const first = mergedProviders[names[0]].budget;
+    if (names.every((name) => sameHardBudget(first, mergedProviders[name].budget))) continue;
+    invalid = true;
+    for (const name of names) {
+      if (baseProviders[name]?.budget) mergedProviders[name].budget = baseProviders[name].budget;
+    }
+  }
+
+  if (invalid) {
+    console.warn("[pi-tools] Invalid provider budget override ignored");
+  }
+  return merged;
 }
 
 function validateSsrfConfig(parsed: unknown): SsrfConfig {
@@ -249,6 +411,10 @@ function validateDeepResearchConfig(parsed: unknown): DeepResearchConfig {
 
 function parseConfigFile(raw: string): PiToolsConfig {
   const parsed = JSON.parse(raw);
+  const merged = mergeConfigLayer(
+    DEFAULT_CONFIG as unknown as Record<string, unknown>,
+    parsed as Record<string, unknown>,
+  ) as unknown as PiToolsConfig;
 
   const strategy =
     parsed.selectionStrategy === "auto" || parsed.selectionStrategy === "best-performing"
@@ -258,10 +424,7 @@ function parseConfigFile(raw: string): PiToolsConfig {
   return {
     defaultProvider: parsed.defaultProvider ?? DEFAULT_CONFIG.defaultProvider,
     selectionStrategy: strategy,
-    providers: {
-      ...DEFAULT_CONFIG.providers,
-      ...parsed.providers,
-    },
+    providers: merged.providers,
     github: {
       ...DEFAULT_CONFIG.github,
       ...parsed.github,
@@ -324,9 +487,7 @@ export function resolveApiKey(apiKey: string | undefined): string | undefined {
   if (ENV_VAR_PATTERN.test(apiKey)) {
     const value = process.env[apiKey] ?? undefined;
     if (!value) {
-      console.warn(
-        `[pi-tools] Environment variable ${apiKey} is referenced but not set`,
-      );
+      console.warn(`[pi-tools] Environment variable ${apiKey} is referenced but not set`);
     }
     return value;
   }
@@ -346,10 +507,7 @@ export function resolveApiKey(apiKey: string | undefined): string | undefined {
  * before falling through to the fallback. This is acceptable — the warning
  * helps users notice misconfigurations even when a fallback exists.
  */
-export function resolveProviderKey(
-  providerName: string,
-  configKey?: string,
-): string | undefined {
+export function resolveProviderKey(providerName: string, configKey?: string): string | undefined {
   if (configKey) {
     const resolved = resolveApiKey(configKey);
     if (resolved) return resolved;
@@ -367,7 +525,11 @@ export function resolveProviderKey(
 // --- Trust Gating ---
 
 const SENSITIVE_KEYS = new Set(["apiKey", "apiSecret", "token"]);
-const SENSITIVE_PATHS = new Set(["ssrf.allowRanges", "gemini.cloudflareApiKey", "gemini.allowBrowserCookies"]);
+const SENSITIVE_PATHS = new Set([
+  "ssrf.allowRanges",
+  "gemini.cloudflareApiKey",
+  "gemini.allowBrowserCookies",
+]);
 
 /**
  * Recursively remove sensitive fields from a config object.
@@ -412,34 +574,43 @@ export function findProjectConfigPath(startDir: string): string | undefined {
   return undefined;
 }
 
+function readOptionalConfig(
+  filePath: string,
+  strict: boolean,
+): Record<string, unknown> | undefined {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+  } catch (error) {
+    const missing =
+      (error as NodeJS.ErrnoException).code === "ENOENT" ||
+      (error instanceof Error && error.message.includes("ENOENT"));
+    if (missing || !strict) return undefined;
+    throw error;
+  }
+}
+
 /**
  * Load config with three-layer resolution:
  *   1. Project `.pi/tools.json` (highest priority)
- *   2. Global `~/.pi/agent/extensions/tools.json`
+ *   2. Global `<Pi agent dir>/extensions/tools.json`
  *   3. Built-in defaults (lowest priority)
  *
  * Layers are deep-merged: nested objects merge recursively,
  * scalars and arrays from higher-priority sources replace lower-priority values.
  */
-export function loadMergedConfig(cwd?: string): PiToolsConfig {
+export function loadMergedConfig(cwd?: string, strict = false): PiToolsConfig {
   let merged = deepMerge(DEFAULT_CONFIG as unknown as Record<string, unknown>, {});
 
   // Layer 2: global config
-  try {
-    merged = deepMerge(
-      merged,
-      JSON.parse(fs.readFileSync(getConfigPath(), "utf-8")) as Record<string, unknown>,
-    );
-  } catch {
-    // Missing or malformed global config — keep defaults.
-  }
+  const globalConfig = readOptionalConfig(getConfigPath(), strict);
+  if (globalConfig) merged = mergeConfigLayer(merged, globalConfig);
 
   // Layer 1: project config (highest priority)
   if (cwd) {
     const projectPath = findProjectConfigPath(cwd);
     if (projectPath) {
-      try {
-        const raw = JSON.parse(fs.readFileSync(projectPath, "utf-8")) as Record<string, unknown>;
+      const raw = readOptionalConfig(projectPath, strict);
+      if (raw) {
         const trusted = isProjectTrustedCached(cwd);
         const sanitized = trusted ? raw : stripSensitiveFields(raw);
         if (!trusted && JSON.stringify(sanitized) !== JSON.stringify(raw)) {
@@ -447,9 +618,7 @@ export function loadMergedConfig(cwd?: string): PiToolsConfig {
             "[pi-tools] Untrusted project: sensitive config fields ignored. Trust the project in Pi to allow full config.",
           );
         }
-        merged = deepMerge(merged, sanitized);
-      } catch {
-        // Malformed project config — skip
+        merged = mergeConfigLayer(merged, sanitized);
       }
     }
   }

@@ -3,10 +3,7 @@ import { providerMeta } from "../../src/providers/sofya.ts";
 import { parseSofyaResults } from "../../src/providers/parsers.ts";
 import { stubFetch } from "../helpers.ts";
 
-const makeProvider = (
-  key = "test-key",
-  providerConfig?: Record<string, unknown>,
-) => {
+const makeProvider = (key = "test-key", providerConfig?: Record<string, unknown>) => {
   const created = providerMeta.create(key, providerConfig as any);
   return { search: created.search!, fetch: created.fetch! };
 };
@@ -25,7 +22,7 @@ describe("SofyaProvider", () => {
   it("has correct metadata", () => {
     expect(providerMeta.name).toBe("sofya");
     expect(providerMeta.tier).toBe(2);
-    expect(providerMeta.monthlyQuota).toBeNull();
+    expect(providerMeta).not.toHaveProperty("monthlyQuota");
     expect(providerMeta.requiresKey).toBe(true);
   });
 
@@ -170,9 +167,7 @@ describe("SofyaProvider", () => {
         body: "Error",
       });
       const { fetch: fetchProvider } = makeProvider();
-      await expect(fetchProvider.fetch("https://example.com")).rejects.toThrow(
-        "Sofya fetch error",
-      );
+      await expect(fetchProvider.fetch("https://example.com")).rejects.toThrow("Sofya fetch error");
     });
   });
 });
