@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Provider usage persistence now lives at $PI_CODING_AGENT_DIR/cache/pi-tools/usage.json.
 - Renamed the OpenAI web-search rewrite module to `openai-web-search-rewrite`.
 - `openai-codex` now resolves Pi OAuth credentials through the active ModelRegistry and no longer uses an OpenAI API-key fallback.
 
@@ -18,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Removed legacy pi-tools.json config filename fallbacks.
 - Removed the broken Exa MCP provider and the `openai-native` compatibility alias.
 
 ## [0.4.0] - 2026-07-16

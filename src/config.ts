@@ -198,10 +198,6 @@ export function getConfigPath(): string {
   return path.join(os.homedir(), ".pi", "agent", "extensions", "tools.json");
 }
 
-function getLegacyConfigPath(): string {
-  return path.join(os.homedir(), ".pi", "agent", "extensions", "pi-tools.json");
-}
-
 function validateSsrfConfig(parsed: unknown): SsrfConfig {
   const ssrf = { ...DEFAULT_CONFIG.ssrf, ...(parsed as Record<string, unknown>) };
   // Eagerly validate so malformed config fails at load time, not on first URL fetch.
@@ -282,21 +278,17 @@ function parseConfigFile(raw: string): PiToolsConfig {
 }
 
 export function loadConfig(configPath?: string): PiToolsConfig {
-  const paths = configPath ? [configPath] : [getConfigPath(), getLegacyConfigPath()];
-  for (const p of paths) {
-    let raw: string;
-    try {
-      raw = fs.readFileSync(p, "utf-8");
-    } catch {
-      continue;
-    }
-    try {
-      return parseConfigFile(raw);
-    } catch (e) {
-      // JSON syntax errors → fall through to defaults; validation errors → propagate
-      if (e instanceof SyntaxError) continue;
-      throw e;
-    }
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath || getConfigPath(), "utf-8");
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+  try {
+    return parseConfigFile(raw);
+  } catch (e) {
+    // JSON syntax errors → fall through to defaults; validation errors → propagate
+    if (!(e instanceof SyntaxError)) throw e;
   }
   return { ...DEFAULT_CONFIG };
 }
@@ -401,10 +393,9 @@ export function stripSensitiveFields(
 
 const MAX_WALK_DEPTH = 10;
 const PROJECT_CONFIG_RELATIVE = path.join(".pi", "tools.json");
-const LEGACY_PROJECT_CONFIG_RELATIVE = path.join(".pi", "pi-tools.json");
 
 /**
- * Walk up from `startDir` looking for `.pi/tools.json` (or legacy `.pi/pi-tools.json`).
+ * Walk up from `startDir` looking for `.pi/tools.json`.
  * Returns the absolute path if found, or undefined.
  * Stops at the filesystem root or after MAX_WALK_DEPTH levels.
  */
@@ -412,16 +403,10 @@ export function findProjectConfigPath(startDir: string): string | undefined {
   let dir = path.resolve(startDir);
   for (let i = 0; i < MAX_WALK_DEPTH; i++) {
     const candidate = path.join(dir, PROJECT_CONFIG_RELATIVE);
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-    // Fallback: check legacy name at same level
-    const legacy = path.join(dir, LEGACY_PROJECT_CONFIG_RELATIVE);
-    if (fs.existsSync(legacy)) {
-      return legacy;
-    }
+    if (fs.existsSync(candidate)) return candidate;
+
     const parent = path.dirname(dir);
-    if (parent === dir) break; // filesystem root
+    if (parent === dir) break;
     dir = parent;
   }
   return undefined;
@@ -429,8 +414,8 @@ export function findProjectConfigPath(startDir: string): string | undefined {
 
 /**
  * Load config with three-layer resolution:
- *   1. Project `.pi/tools.json` (highest priority; falls back to `.pi/pi-tools.json`)
- *   2. Global `~/.pi/agent/extensions/tools.json` (falls back to `pi-tools.json`)
+ *   1. Project `.pi/tools.json` (highest priority)
+ *   2. Global `~/.pi/agent/extensions/tools.json`
  *   3. Built-in defaults (lowest priority)
  *
  * Layers are deep-merged: nested objects merge recursively,
@@ -439,17 +424,14 @@ export function findProjectConfigPath(startDir: string): string | undefined {
 export function loadMergedConfig(cwd?: string): PiToolsConfig {
   let merged = deepMerge(DEFAULT_CONFIG as unknown as Record<string, unknown>, {});
 
-  // Layer 2: global config (try new path, fall back to legacy)
-  for (const globalPath of [getConfigPath(), getLegacyConfigPath()]) {
-    try {
-      merged = deepMerge(
-        merged,
-        JSON.parse(fs.readFileSync(globalPath, "utf-8")) as Record<string, unknown>,
-      );
-      break;
-    } catch {
-      continue;
-    }
+  // Layer 2: global config
+  try {
+    merged = deepMerge(
+      merged,
+      JSON.parse(fs.readFileSync(getConfigPath(), "utf-8")) as Record<string, unknown>,
+    );
+  } catch {
+    // Missing or malformed global config — keep defaults.
   }
 
   // Layer 1: project config (highest priority)

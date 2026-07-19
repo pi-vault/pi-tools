@@ -1,5 +1,5 @@
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import type { SelectionStrategy } from "../config.ts";
 import type {
@@ -352,7 +352,7 @@ export class ProviderRegistry {
 }
 
 export function createFilePersistence(filePath?: string): PersistenceAdapter {
-  const usagePath = filePath ?? path.join(os.homedir(), ".pi", "agent", "tools-usage.json");
+  const usagePath = filePath ?? path.join(getAgentDir(), "cache", "pi-tools", "usage.json");
 
   return {
     load(): Record<string, UsageRecord> {

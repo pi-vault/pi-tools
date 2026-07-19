@@ -7,6 +7,7 @@ import {
   resolveProviderKey,
   FALLBACK_ENV_MAP,
   findProjectConfigPath,
+  getConfigPath,
   loadMergedConfig,
 } from "../src/config.ts";
 import * as path from "node:path";
@@ -69,8 +70,7 @@ describe("loadConfig", () => {
   it("reads from tools.json path", () => {
     vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
       const p = typeof filePath === "string" ? filePath : filePath.toString();
-      // Match only tools.json (not pi-tools.json)
-      if (p.endsWith("tools.json") && !p.endsWith("pi-tools.json")) {
+      if (p.endsWith("tools.json")) {
         return JSON.stringify({ defaultProvider: "brave" });
       }
       throw new Error("ENOENT");
@@ -79,15 +79,16 @@ describe("loadConfig", () => {
     expect(config.defaultProvider).toBe("brave");
   });
 
-  it("falls back to pi-tools.json if tools.json is missing", () => {
+  it("does not read a second global config path", () => {
+    const currentPath = getConfigPath();
     vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
-      if (typeof filePath === "string" && filePath.endsWith("pi-tools.json")) {
-        return JSON.stringify({ defaultProvider: "exa" });
-      }
-      throw new Error("ENOENT");
+      const resolved = typeof filePath === "string" ? filePath : filePath.toString();
+      if (resolved === currentPath) throw new Error("ENOENT");
+      return JSON.stringify({ defaultProvider: "unexpected" });
     });
-    const config = loadConfig();
-    expect(config.defaultProvider).toBe("exa");
+
+    expect(loadConfig().defaultProvider).toBe("auto");
+    expect(fs.readFileSync).toHaveBeenCalledTimes(1);
   });
 
   it("does not fall back to legacy when custom path is provided", () => {
@@ -197,23 +198,23 @@ describe("findProjectConfigPath", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns path when .pi/pi-tools.json exists in cwd", () => {
+  it("returns path when .pi/tools.json exists in cwd", () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => {
-      return p === path.join("/projects/my-app", ".pi", "pi-tools.json");
+      return p === path.join("/projects/my-app", ".pi", "tools.json");
     });
     const result = findProjectConfigPath("/projects/my-app");
-    expect(result).toBe(path.join("/projects/my-app", ".pi", "pi-tools.json"));
+    expect(result).toBe(path.join("/projects/my-app", ".pi", "tools.json"));
   });
 
-  it("walks up to find .pi/pi-tools.json in ancestor", () => {
+  it("walks up to find .pi/tools.json in ancestor", () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => {
-      return p === path.join("/projects", ".pi", "pi-tools.json");
+      return p === path.join("/projects", ".pi", "tools.json");
     });
     const result = findProjectConfigPath("/projects/my-app/src/deep");
-    expect(result).toBe(path.join("/projects", ".pi", "pi-tools.json"));
+    expect(result).toBe(path.join("/projects", ".pi", "tools.json"));
   });
 
-  it("returns undefined when no .pi/pi-tools.json found", () => {
+  it("returns undefined when no .pi/tools.json found", () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     const result = findProjectConfigPath("/projects/my-app");
     expect(result).toBeUndefined();
@@ -226,8 +227,7 @@ describe("findProjectConfigPath", () => {
       return false;
     });
     findProjectConfigPath("/a/b/c/d/e/f/g/h/i/j/k/l/m/n");
-    // 2 checks per level (new name + legacy), 10 levels max
-    expect(calls.length).toBeLessThanOrEqual(20);
+    expect(calls.length).toBeLessThanOrEqual(10);
   });
 
   it("stops at filesystem root", () => {
@@ -237,30 +237,7 @@ describe("findProjectConfigPath", () => {
       return false;
     });
     findProjectConfigPath("/a/b");
-    // /a/b, /a, / — 2 checks each = 6
-    expect(calls.length).toBe(6);
-  });
-
-  it("finds .pi/tools.json in directory", () => {
-    vi.mocked(fs.existsSync).mockImplementation((p) => {
-      return typeof p === "string" && p === path.join("/projects/my-app", ".pi", "tools.json");
-    });
-    const result = findProjectConfigPath("/projects/my-app");
-    expect(result).toBe(path.join("/projects/my-app", ".pi", "tools.json"));
-  });
-
-  it("prefers tools.json over pi-tools.json when both exist", () => {
-    vi.mocked(fs.existsSync).mockReturnValue(true);
-    const result = findProjectConfigPath("/projects/my-app");
-    expect(result).toBe(path.join("/projects/my-app", ".pi", "tools.json"));
-  });
-
-  it("falls back to .pi/pi-tools.json if tools.json missing", () => {
-    vi.mocked(fs.existsSync).mockImplementation((p) => {
-      return typeof p === "string" && p.includes(path.join(".pi", "pi-tools.json"));
-    });
-    const result = findProjectConfigPath("/projects/my-app");
-    expect(result).toContain(path.join(".pi", "pi-tools.json"));
+    expect(calls.length).toBe(3);
   });
 });
 
@@ -298,7 +275,7 @@ describe("loadMergedConfig", () => {
           },
         });
       }
-      if (filePath.includes(path.join(".pi", "pi-tools.json"))) {
+      if (filePath.includes(path.join(".pi", "tools.json"))) {
         return JSON.stringify({
           defaultProvider: "brave",
           providers: {
@@ -309,7 +286,7 @@ describe("loadMergedConfig", () => {
       throw new Error("ENOENT");
     });
     vi.mocked(fs.existsSync).mockImplementation((p) => {
-      return (p as string).includes(path.join(".pi", "pi-tools.json"));
+      return (p as string).includes(path.join(".pi", "tools.json"));
     });
 
     const config = loadMergedConfig("/projects/my-app");
@@ -324,7 +301,7 @@ describe("loadMergedConfig", () => {
   it("project config overrides built-in defaults when no global config", () => {
     vi.mocked(fs.readFileSync).mockImplementation((p) => {
       const filePath = typeof p === "string" ? p : p.toString();
-      if (filePath.includes(path.join(".pi", "pi-tools.json"))) {
+      if (filePath.includes(path.join(".pi", "tools.json"))) {
         return JSON.stringify({
           providers: { duckduckgo: { enabled: false } },
         });
@@ -332,7 +309,7 @@ describe("loadMergedConfig", () => {
       throw new Error("ENOENT");
     });
     vi.mocked(fs.existsSync).mockImplementation((p) => {
-      return (p as string).includes(path.join(".pi", "pi-tools.json"));
+      return (p as string).includes(path.join(".pi", "tools.json"));
     });
 
     const config = loadMergedConfig("/projects/my-app");
@@ -370,7 +347,7 @@ describe("loadMergedConfig", () => {
           github: { maxRepoSizeMB: 500 },
         });
       }
-      if (filePath.includes(path.join(".pi", "pi-tools.json"))) {
+      if (filePath.includes(path.join(".pi", "tools.json"))) {
         return JSON.stringify({
           github: { enabled: false },
         });
@@ -378,7 +355,7 @@ describe("loadMergedConfig", () => {
       throw new Error("ENOENT");
     });
     vi.mocked(fs.existsSync).mockImplementation((p) => {
-      return (p as string).includes(path.join(".pi", "pi-tools.json"));
+      return (p as string).includes(path.join(".pi", "tools.json"));
     });
 
     const config = loadMergedConfig("/projects/my-app");
@@ -405,18 +382,16 @@ describe("loadMergedConfig", () => {
     expect(config.github.enabled).toBe(true);
   });
 
-  it("falls back to legacy global config path when tools.json is missing", () => {
-    vi.mocked(fs.readFileSync).mockImplementation((p) => {
-      const filePath = typeof p === "string" ? p : p.toString();
-      if (filePath.endsWith("pi-tools.json") && filePath.includes(path.join(".pi", "agent"))) {
-        return JSON.stringify({ defaultProvider: "tavily" });
-      }
-      throw new Error("ENOENT");
+  it("does not read a second global config path", () => {
+    const currentPath = getConfigPath();
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      const resolved = typeof filePath === "string" ? filePath : filePath.toString();
+      if (resolved === currentPath) throw new Error("ENOENT");
+      return JSON.stringify({ defaultProvider: "unexpected" });
     });
-    vi.mocked(fs.existsSync).mockReturnValue(false);
 
-    const config = loadMergedConfig("/projects/my-app");
-    expect(config.defaultProvider).toBe("tavily");
+    expect(loadMergedConfig().defaultProvider).toBe("auto");
+    expect(fs.readFileSync).toHaveBeenCalledTimes(1);
   });
 });
 
