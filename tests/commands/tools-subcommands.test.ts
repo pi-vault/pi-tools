@@ -99,6 +99,25 @@ describe("updateConfig", () => {
     const written = JSON.parse(writeContent as string);
     expect(written.providers.brave.enabled).toBe(true);
   });
+
+  it("writes through Pi's configured agent directory", () => {
+    const previous = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = "/custom/pi-agent";
+    try {
+      vi.mocked(fs.readFileSync).mockImplementation(() => {
+        throw new Error("ENOENT");
+      });
+      updateConfig((config) => config);
+
+      expect(fs.writeFileSync).toHaveBeenCalledWith(
+        "/custom/pi-agent/extensions/tools.json",
+        expect.any(String),
+      );
+    } finally {
+      if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previous;
+    }
+  });
 });
 
 describe("handleToggle", () => {
@@ -185,9 +204,7 @@ describe("handleKey", () => {
 describe("handleDefault", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.mocked(fs.readFileSync).mockReturnValue(
-      JSON.stringify({ defaultProvider: "auto" }),
-    );
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ defaultProvider: "auto" }));
     vi.mocked(fs.writeFileSync).mockImplementation(() => {});
     vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
   });
@@ -231,9 +248,9 @@ describe("handleTest", () => {
 
   it("tests a specific provider by making a search call", async () => {
     const ctx = makeCtx() as unknown as ExtensionCommandContext;
-    const mockSearch = vi.fn().mockResolvedValue([
-      { title: "Test", url: "https://test.com", snippet: "test" },
-    ]);
+    const mockSearch = vi
+      .fn()
+      .mockResolvedValue([{ title: "Test", url: "https://test.com", snippet: "test" }]);
     const registry = {
       getSearchProviderNames: () => ["brave"],
       selectSearchCandidates: (name: string) =>

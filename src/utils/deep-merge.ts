@@ -39,7 +39,7 @@ export function deepMerge<T extends Record<string, unknown>>(
     const baseVal = result[key];
 
     // Recursively merge only when both sides are plain objects
-    if (isPlainObject(baseVal) && isPlainObject(overrideVal)) {
+    if (key !== "budget" && isPlainObject(baseVal) && isPlainObject(overrideVal)) {
       result[key] = deepMerge(baseVal, overrideVal);
     } else {
       result[key] = overrideVal;
