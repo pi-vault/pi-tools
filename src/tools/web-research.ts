@@ -8,6 +8,7 @@ import { ExaDeepResearchClient } from "../providers/exa-deep-research.ts";
 import type { DeepResearchConfig, GuidanceOverride } from "../config.ts";
 import type { AppendEntryFn } from "../storage.ts";
 import type { ExaDeepType, ReportFormat } from "../research/types.ts";
+import type { ProviderOperation } from "../providers/types.ts";
 import { applyResearchMode, prepareResearchInput, resolveOutputPath } from "../research/prepare.ts";
 import { buildRawSidecar, defaultRawOutputPath, renderFindingsReport } from "../research/report.ts";
 
@@ -38,7 +39,7 @@ const WebResearchParams = Type.Object({
     }),
   ),
   type: Type.Optional(
-    Type.String({
+    Type.Union([Type.Literal("deep-reasoning"), Type.Literal("deep-lite"), Type.Literal("deep")], {
       description: "Override Exa deep type: deep-reasoning, deep-lite, or deep.",
     }),
   ),
@@ -50,7 +51,9 @@ const WebResearchParams = Type.Object({
   additionalQueries: Type.Optional(
     Type.Array(Type.String(), { description: "Extra queries for full mode." }),
   ),
-  numResults: Type.Optional(Type.Number({ description: "Number of source results." })),
+  numResults: Type.Optional(
+    Type.Integer({ minimum: 1, maximum: 100, description: "Number of source results." }),
+  ),
   textMaxCharacters: Type.Optional(Type.Number({ description: "Max text characters per source." })),
   highlightsMaxCharacters: Type.Optional(Type.Number({ description: "Max highlight characters." })),
   highlightNumSentences: Type.Optional(Type.Number({ description: "Sentences per highlight." })),
@@ -116,6 +119,7 @@ export function createWebResearchTool(
   deepResearchConfig: DeepResearchConfig,
   appendEntry: AppendEntryFn,
   guidance?: GuidanceOverride,
+  beforeResearch?: (operation: Extract<ProviderOperation, { capability: "research" }>) => void,
 ): ToolDefinition<typeof WebResearchParams, WebResearchDetails> {
   return {
     name: "web_research",
@@ -155,6 +159,12 @@ export function createWebResearchTool(
       // Execute research queries
       const responses = [];
       for (const query of uniqueQueries) {
+        beforeResearch?.({
+          capability: "research",
+          type: mode.type,
+          maxResults: mode.numResults,
+          contentTypes: 2 + (mode.summaryQuery ? 1 : 0),
+        });
         responses.push(
           await client.deepResearch(
             {

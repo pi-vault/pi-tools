@@ -103,13 +103,18 @@ export default function createExtension(pi: ExtensionAPI): void {
     // Register web_research when Exa key is available and deep research enabled
     const exaConfig = configManager.current.providers?.exa;
     const resolvedExaKey = resolveApiKey(exaConfig?.apiKey);
-    if (resolvedExaKey && configManager.current.deepResearch?.enabled !== false) {
+    if (
+      exaConfig?.enabled !== false &&
+      resolvedExaKey &&
+      configManager.current.deepResearch?.enabled !== false
+    ) {
       pi.registerTool(
         createWebResearchTool(
           resolvedExaKey,
           configManager.current.deepResearch,
           (customType, data) => pi.appendEntry(customType, data),
           configManager.current.deepResearch?.guidance,
+          (operation) => registry.consume("exa", operation),
         ),
       );
     }

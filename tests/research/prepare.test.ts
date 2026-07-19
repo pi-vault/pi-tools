@@ -57,6 +57,25 @@ describe("applyResearchMode", () => {
     expect(result.textMaxCharacters).toBe(8000);
   });
 
+  it.each(["deep-lite", "deep", "deep-reasoning"] as const)(
+    "accepts Exa research type %s",
+    (type) => {
+      expect(applyResearchMode({ type }).type).toBe(type);
+    },
+  );
+
+  it.each([0, 101])("rejects numResults outside 1-100", (numResults) => {
+    expect(() => applyResearchMode({ numResults })).toThrow(/numResults/);
+  });
+
+  it("uses 100 results for full mode by default", () => {
+    expect(applyResearchMode({ researchMode: "full" }).numResults).toBe(100);
+  });
+
+  it("rejects invalid Exa research types", () => {
+    expect(() => applyResearchMode({ type: "fast" })).toThrow(/type/);
+  });
+
   it("config modeDefaults override built-in defaults", () => {
     const configDefaults = {
       standard: { numResults: 60, textMaxCharacters: 20000 },
