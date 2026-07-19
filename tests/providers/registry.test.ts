@@ -127,6 +127,15 @@ describe("ProviderRegistry budgets", () => {
     expect(registry.getBudgetStatus("duckduckgo")).toEqual({ mode: "unlimited" });
   });
 
+  it("rejects usage when no provider policy is registered", () => {
+    const { registry, save } = memory();
+
+    expect(() => registry.consume("missing", { capability: "fetch" })).toThrow(
+      "missing is not registered",
+    );
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("rounds accumulated usage to six decimals", () => {
     const { registry } = memory();
     register(registry, "brave", hard(1, "month", "usd"), undefined, () => 0.0000006);
@@ -173,6 +182,49 @@ describe("ProviderRegistry budgets", () => {
 
     registry.consume("brave", { capability: "search", maxResults: 1 });
     expect(registry.getBudgetStatus("brave-llm")).toMatchObject({ used: 1, pool: "brave" });
+  });
+
+  it("keeps pool counters separate from same-named provider counters", () => {
+    const { registry } = memory();
+    register(registry, "shared", hard(2));
+    register(registry, "pooled", hard(2, "month", "request", "shared"));
+
+    registry.consume("shared", { capability: "fetch" });
+
+    expect(registry.getBudgetStatus("shared")).toMatchObject({ used: 1 });
+    expect(registry.getBudgetStatus("pooled")).toMatchObject({ used: 0 });
+  });
+
+  it("preserves compatible bare V2 provider and pool counters", () => {
+    const { registry } = memory({
+      version: 2,
+      counters: {
+        serper: { used: 2, unit: "request", period: "month", periodKey: "2026-07" },
+        brave: { used: 1, unit: "request", period: "month", periodKey: "2026-07" },
+      },
+    });
+    register(registry, "serper", hard(10));
+    register(registry, "brave", hard(10, "month", "request", "brave"));
+    register(registry, "brave-llm", hard(10, "month", "request", "brave"));
+
+    expect(registry.getBudgetStatus("serper")).toMatchObject({ used: 2 });
+    expect(registry.getBudgetStatus("brave")).toMatchObject({ used: 1 });
+    expect(registry.getBudgetStatus("brave-llm")).toMatchObject({ used: 1 });
+  });
+
+  it("rolls back a reservation and blocks delegation when persistence fails", async () => {
+    const save = vi.fn(() => {
+      throw new Error("disk full");
+    });
+    const registry = new ProviderRegistry({ load: () => ({ version: 2, counters: {} }), save });
+    const provider = search("brave");
+    register(registry, "brave", hard(2), { search: provider });
+
+    await expect(registry.selectSearchCandidates()[0].search("query", 10)).rejects.toThrow(
+      "disk full",
+    );
+    expect(provider.search).not.toHaveBeenCalled();
+    expect(registry.getBudgetStatus("brave")).toMatchObject({ used: 0 });
   });
 
   it("migrates only compatible current-month legacy records", () => {

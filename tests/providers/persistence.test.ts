@@ -54,7 +54,7 @@ describe("createFilePersistence", () => {
     );
   });
 
-  it("treats missing files and write failures as non-fatal", () => {
+  it("treats missing files as empty and surfaces write failures", () => {
     vi.mocked(fs.readFileSync).mockImplementation(() => {
       throw new Error("ENOENT");
     });
@@ -64,6 +64,14 @@ describe("createFilePersistence", () => {
     vi.mocked(fs.writeFileSync).mockImplementation(() => {
       throw new Error("EACCES");
     });
-    expect(() => adapter.save(empty)).not.toThrow();
+    expect(() => adapter.save(empty)).toThrow("EACCES");
+  });
+
+  it("surfaces non-missing read failures", () => {
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw Object.assign(new Error("EACCES"), { code: "EACCES" });
+    });
+
+    expect(() => createFilePersistence("/tmp/usage.json").load()).toThrow("EACCES");
   });
 });

@@ -63,11 +63,6 @@ interface RegisteredPolicy {
   usageCost?: UsageCost;
 }
 
-interface RegisteredSearch {
-  provider: SearchProvider;
-  tier: ProviderTier;
-}
-
 export interface ProviderMetrics {
   successes: number;
   failures: number;
@@ -79,8 +74,6 @@ export interface ProviderMetrics {
 }
 
 const METRICS_WINDOW_MS = 60_000;
-const EMPTY_USAGE: UsageFileV2 = { version: 2, counters: {} };
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -131,11 +124,15 @@ function round6(value: number): number {
   return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
 }
 
+function counterKey(name: string, budget: Extract<ProviderBudget, { mode: "hard" }>): string {
+  return budget.pool ? `pool:${budget.pool}` : name;
+}
+
 export class BudgetExceededError extends Error {
   constructor(
-    readonly providerName: string,
-    readonly cost: number,
-    readonly status: Extract<BudgetStatus, { mode: "hard" }>,
+    providerName: string,
+    cost: number,
+    status: Extract<BudgetStatus, { mode: "hard" }>,
   ) {
     super(
       `${providerName} budget exceeded: ${status.used}/${status.limit} ${status.unit} used; operation costs ${cost}`,
@@ -145,20 +142,23 @@ export class BudgetExceededError extends Error {
 }
 
 export class ProviderRegistry {
-  private searchProviders = new Map<string, RegisteredSearch>();
+  private searchProviders = new Map<string, { provider: SearchProvider; tier: ProviderTier }>();
   private fetchProviders = new Map<string, FetchProvider>();
   private codeSearchProviders = new Map<string, CodeSearchProvider>();
   private docsProviders = new Map<string, DocsProvider>();
   private policies = new Map<string, RegisteredPolicy>();
   private metrics = new Map<string, ProviderMetrics>();
   private counters: Record<string, UsageCounter> = {};
+  private bareV2Keys = new Set<string>();
   private legacy: LegacyUsage = {};
   private warned = new Set<string>();
 
   constructor(private readonly persistence: PersistenceAdapter) {
     const loaded = persistence.load();
-    if (isUsageFileV2(loaded)) this.counters = { ...loaded.counters };
-    else if (isLegacyUsage(loaded)) this.legacy = loaded;
+    if (isUsageFileV2(loaded)) {
+      this.counters = { ...loaded.counters };
+      this.bareV2Keys = new Set(Object.keys(loaded.counters).filter((key) => !key.includes(":")));
+    } else if (isLegacyUsage(loaded)) this.legacy = loaded;
   }
 
   registerProvider(
@@ -244,8 +244,9 @@ export class ProviderRegistry {
     )
       return;
 
-    if (!this.counters[policy.name]) {
-      this.counters[policy.name] = {
+    const key = counterKey(policy.name, budget);
+    if (!this.counters[key]) {
+      this.counters[key] = {
         used: record.count,
         unit: budget.unit,
         period: budget.period,
@@ -259,9 +260,14 @@ export class ProviderRegistry {
     name: string,
     budget: Extract<ProviderBudget, { mode: "hard" }>,
   ): UsageCounter {
-    const key = budget.pool ?? name;
+    const key = counterKey(name, budget);
     const currentKey = periodKey(budget.period);
-    const existing = this.counters[key];
+    let existing = this.counters[key];
+    if (!existing && budget.pool && this.bareV2Keys.has(budget.pool)) {
+      existing = { ...this.counters[budget.pool] };
+      this.counters[key] = existing;
+      this.bareV2Keys.delete(budget.pool);
+    }
     if (
       existing &&
       existing.unit === budget.unit &&
@@ -277,7 +283,8 @@ export class ProviderRegistry {
 
   consume(providerName: string, operation: ProviderOperation): void {
     const policy = this.policies.get(providerName);
-    if (!policy || policy.budget.mode !== "hard") return;
+    if (!policy) throw new Error(`${providerName} is not registered`);
+    if (policy.budget.mode !== "hard") return;
 
     const cost = policy.usageCost?.(operation, policy.config) ?? 1;
     if (!Number.isFinite(cost) || cost <= 0) {
@@ -291,7 +298,12 @@ export class ProviderRegistry {
 
     const previous = counter.used;
     counter.used = next;
-    this.persistence.save({ version: 2, counters: this.counters });
+    try {
+      this.persistence.save({ version: 2, counters: this.counters });
+    } catch (error) {
+      counter.used = previous;
+      throw error;
+    }
     this.warnIfNeeded(providerName, policy.budget, previous, next);
   }
 
@@ -491,17 +503,25 @@ export function createFilePersistence(filePath?: string): PersistenceAdapter {
   const usagePath = filePath ?? path.join(getAgentDir(), "cache", "pi-tools", "usage.json");
   return {
     load(): UsageFileV2 | LegacyUsage {
+      let raw: string;
       try {
-        const parsed: unknown = JSON.parse(fs.readFileSync(usagePath, "utf-8"));
+        raw = fs.readFileSync(usagePath, "utf-8");
+      } catch (error) {
+        const missing =
+          (error as NodeJS.ErrnoException).code === "ENOENT" ||
+          (error instanceof Error && error.message.includes("ENOENT"));
+        if (!missing) throw error;
+        return { version: 2, counters: {} };
+      }
+      try {
+        const parsed: unknown = JSON.parse(raw);
         if (isUsageFileV2(parsed) || isLegacyUsage(parsed)) return parsed;
       } catch {}
       return { version: 2, counters: {} };
     },
     save(data: UsageFileV2): void {
-      try {
-        fs.mkdirSync(path.dirname(usagePath), { recursive: true });
-        fs.writeFileSync(usagePath, JSON.stringify(data, null, 2));
-      } catch {}
+      fs.mkdirSync(path.dirname(usagePath), { recursive: true });
+      fs.writeFileSync(usagePath, JSON.stringify(data, null, 2));
     },
   };
 }
