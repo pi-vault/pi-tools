@@ -67,8 +67,9 @@ export class FirecrawlProvider implements SearchProvider, FetchProvider {
 export const providerMeta: ProviderMeta = {
   name: "firecrawl",
   tier: 1,
-  monthlyQuota: 1000,
   requiresKey: false,
+  usageCost: (operation) =>
+    operation.capability === "search" ? 2 * Math.max(1, Math.ceil(operation.maxResults / 10)) : 1,
   create: (key) => {
     const p = new FirecrawlProvider(key);
     return { search: p, fetch: p };

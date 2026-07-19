@@ -70,7 +70,6 @@ export class JinaProvider implements SearchProvider, FetchProvider {
 export const providerMeta: ProviderMeta = {
   name: "jina",
   tier: 3,
-  monthlyQuota: null,
   requiresKey: false,
   create: (key) => {
     const p = new JinaProvider(key);

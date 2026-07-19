@@ -23,8 +23,8 @@ export const httpProviders: ProviderMeta[] = [
   {
     name: "brave",
     tier: 1,
-    monthlyQuota: 2000,
     requiresKey: true,
+    usageCost: () => 0.005,
     create: (key) => ({
       search: createHttpSearchProvider(key!, {
         name: "brave",
@@ -50,8 +50,8 @@ export const httpProviders: ProviderMeta[] = [
   {
     name: "brave-llm",
     tier: 1,
-    monthlyQuota: 2000,
     requiresKey: true,
+    usageCost: () => 0.005,
     create: (key, providerConfig) => ({
       search: createHttpSearchProvider(key!, {
         name: "brave-llm",
@@ -75,7 +75,6 @@ export const httpProviders: ProviderMeta[] = [
   {
     name: "fastcrw",
     tier: 2,
-    monthlyQuota: 500,
     requiresKey: true,
     create: (key, providerConfig) => ({
       search: createHttpSearchProvider(key!, {
@@ -95,7 +94,6 @@ export const httpProviders: ProviderMeta[] = [
   {
     name: "langsearch",
     tier: 2,
-    monthlyQuota: null,
     requiresKey: true,
     create: (key) => ({
       search: createHttpSearchProvider(key!, {
@@ -115,8 +113,8 @@ export const httpProviders: ProviderMeta[] = [
   {
     name: "linkup",
     tier: 2,
-    monthlyQuota: null,
     requiresKey: true,
+    usageCost: (_operation, config) => (config.depth === "deep" ? 0.05 : 0.005),
     create: (key, providerConfig) => ({
       search: createHttpSearchProvider(key!, {
         name: "linkup",
@@ -136,7 +134,6 @@ export const httpProviders: ProviderMeta[] = [
   {
     name: "marginalia",
     tier: 3,
-    monthlyQuota: null,
     requiresKey: false,
     create: (key) => ({
       search: createHttpSearchProvider(key ?? "public", {
@@ -161,7 +158,6 @@ export const httpProviders: ProviderMeta[] = [
   {
     name: "perplexity",
     tier: 2,
-    monthlyQuota: null,
     requiresKey: true,
     create: (key, providerConfig) => ({
       search: createHttpSearchProvider(key!, {
@@ -181,7 +177,6 @@ export const httpProviders: ProviderMeta[] = [
   {
     name: "websearchapi",
     tier: 1,
-    monthlyQuota: null,
     requiresKey: true,
     create: (key) => ({
       search: createHttpSearchProvider(key!, {
@@ -198,8 +193,8 @@ export const httpProviders: ProviderMeta[] = [
   {
     name: "youcom",
     tier: 2,
-    monthlyQuota: null,
     requiresKey: true,
+    usageCost: () => 0.005,
     create: (key) => ({
       search: createHttpSearchProvider(key!, {
         name: "youcom",

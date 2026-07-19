@@ -10,10 +10,52 @@ describe("allProviders barrel", () => {
     for (const meta of allProviders) {
       expect(meta.name).toBeTypeOf("string");
       expect([1, 2, 3]).toContain(meta.tier);
-      expect(meta.monthlyQuota === null || typeof meta.monthlyQuota === "number").toBe(true);
+      expect(meta).not.toHaveProperty("monthlyQuota");
       expect(meta.requiresKey).toBeTypeOf("boolean");
       expect(meta.create).toBeTypeOf("function");
     }
+  });
+
+  it("defines callbacks only for non-unit operation costs", () => {
+    expect(
+      allProviders
+        .filter((meta) => meta.usageCost)
+        .map((meta) => meta.name)
+        .sort(),
+    ).toEqual(["brave", "brave-llm", "exa", "firecrawl", "linkup", "youcom"]);
+  });
+
+  it("calculates Exa search, content, and deep-search costs", () => {
+    const usageCost = allProviders.find((meta) => meta.name === "exa")!.usageCost!;
+    const config = { enabled: true, budget: { mode: "managed" as const } };
+
+    expect(usageCost({ capability: "search", maxResults: 10 }, config)).toBe(0.007);
+    expect(usageCost({ capability: "search", maxResults: 11 }, config)).toBe(0.008);
+    expect(usageCost({ capability: "code-search", maxResults: 25 }, config)).toBe(0.022);
+    expect(usageCost({ capability: "fetch" }, config)).toBe(0.001);
+    expect(
+      usageCost(
+        { capability: "research", type: "deep-lite", maxResults: 10, contentTypes: 2 },
+        config,
+      ),
+    ).toBe(0.032);
+    expect(
+      usageCost(
+        { capability: "research", type: "deep-reasoning", maxResults: 12, contentTypes: 3 },
+        config,
+      ),
+    ).toBeCloseTo(0.053, 6);
+  });
+
+  it("calculates Firecrawl search and fetch credits", () => {
+    const usageCost = allProviders.find((meta) => meta.name === "firecrawl")!.usageCost!;
+    const config = { enabled: true, budget: { mode: "managed" as const } };
+
+    expect(usageCost({ capability: "search", maxResults: 1 }, config)).toBe(2);
+    expect(usageCost({ capability: "search", maxResults: 0 }, config)).toBe(2);
+    expect(usageCost({ capability: "search", maxResults: 10 }, config)).toBe(2);
+    expect(usageCost({ capability: "search", maxResults: 11 }, config)).toBe(4);
+    expect(usageCost({ capability: "fetch" }, config)).toBe(1);
   });
 
   it("has no duplicate names", () => {

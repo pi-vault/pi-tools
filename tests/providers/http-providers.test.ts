@@ -5,15 +5,15 @@ import { stubFetch } from "../helpers.ts";
 
 describe("httpProviders metadata", () => {
   const expectedMeta = [
-    { name: "brave", tier: 1, monthlyQuota: 2000, requiresKey: true },
-    { name: "brave-llm", tier: 1, monthlyQuota: 2000, requiresKey: true },
-    { name: "fastcrw", tier: 2, monthlyQuota: 500, requiresKey: true },
-    { name: "langsearch", tier: 2, monthlyQuota: null, requiresKey: true },
-    { name: "linkup", tier: 2, monthlyQuota: null, requiresKey: true },
-    { name: "marginalia", tier: 3, monthlyQuota: null, requiresKey: false },
-    { name: "perplexity", tier: 2, monthlyQuota: null, requiresKey: true },
-    { name: "websearchapi", tier: 1, monthlyQuota: null, requiresKey: true },
-    { name: "youcom", tier: 2, monthlyQuota: null, requiresKey: true },
+    { name: "brave", tier: 1, requiresKey: true },
+    { name: "brave-llm", tier: 1, requiresKey: true },
+    { name: "fastcrw", tier: 2, requiresKey: true },
+    { name: "langsearch", tier: 2, requiresKey: true },
+    { name: "linkup", tier: 2, requiresKey: true },
+    { name: "marginalia", tier: 3, requiresKey: false },
+    { name: "perplexity", tier: 2, requiresKey: true },
+    { name: "websearchapi", tier: 1, requiresKey: true },
+    { name: "youcom", tier: 2, requiresKey: true },
   ];
 
   it("exports exactly 9 providers with correct metadata and working create()", () => {
@@ -22,13 +22,29 @@ describe("httpProviders metadata", () => {
       const provider = httpProviders.find((p) => p.name === meta.name);
       expect(provider).toBeDefined();
       expect(provider!.tier).toBe(meta.tier);
-      expect(provider!.monthlyQuota).toBe(meta.monthlyQuota);
+      expect(provider).not.toHaveProperty("monthlyQuota");
       expect(provider!.requiresKey).toBe(meta.requiresKey);
       const key = provider!.requiresKey ? "test-key" : undefined;
       const result = provider!.create(key);
       expect(result.search).toBeDefined();
       expect(result.search!.name).toBe(meta.name);
     }
+  });
+
+  it("calculates exact HTTP-provider costs", () => {
+    const operation = { capability: "search" as const, maxResults: 10 };
+    const config = { enabled: true, budget: { mode: "managed" as const } };
+    const cost = (name: string, providerConfig = config) =>
+      httpProviders.find((provider) => provider.name === name)!.usageCost!(
+        operation,
+        providerConfig,
+      );
+
+    expect(cost("brave")).toBe(0.005);
+    expect(cost("brave-llm")).toBe(0.005);
+    expect(cost("linkup")).toBe(0.005);
+    expect(cost("linkup", { ...config, depth: "deep" as const })).toBe(0.05);
+    expect(cost("youcom")).toBe(0.005);
   });
 });
 
@@ -196,7 +212,11 @@ describe("brave-llm provider", () => {
       body: {
         grounding: {
           generic: [
-            { url: "https://brave.com", title: "Brave Search", snippets: ["Privacy-first search engine"] },
+            {
+              url: "https://brave.com",
+              title: "Brave Search",
+              snippets: ["Privacy-first search engine"],
+            },
           ],
         },
       },
@@ -267,9 +287,7 @@ describe("fastcrw provider", () => {
     fetchStub.addResponse("api.fastcrw.com", {
       body: {
         success: true,
-        data: [
-          { title: "Fast Result", url: "https://example.com", description: "A fast snippet" },
-        ],
+        data: [{ title: "Fast Result", url: "https://example.com", description: "A fast snippet" }],
       },
     });
     const results = await fastcrw.create("key").search!.search("test query", 10);
@@ -334,9 +352,7 @@ describe("langsearch provider", () => {
       body: {
         data: {
           webPages: {
-            value: [
-              { name: "Result 1", url: "https://example.com/1", snippet: "First result" },
-            ],
+            value: [{ name: "Result 1", url: "https://example.com/1", snippet: "First result" }],
           },
         },
       },
@@ -383,9 +399,7 @@ describe("linkup provider", () => {
 
   it("respects depth config option", async () => {
     fetchStub.addResponse("api.linkup.so", { body: { searchResults: [] } });
-    await linkup
-      .create("key", { enabled: true, depth: "deep" })
-      .search!.search("test", 5);
+    await linkup.create("key", { enabled: true, depth: "deep" }).search!.search("test", 5);
     const body = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     expect(body.depth).toBe("deep");
   });
@@ -410,9 +424,7 @@ describe("linkup provider", () => {
   it("handles fallback response shapes (results array)", async () => {
     fetchStub.addResponse("api.linkup.so", {
       body: {
-        results: [
-          { title: "Fallback", url: "https://fb.com", content: "fb snippet" },
-        ],
+        results: [{ title: "Fallback", url: "https://fb.com", content: "fb snippet" }],
       },
     });
     const results = await linkup.create("key").search!.search("test", 5);
@@ -505,7 +517,10 @@ describe("marginalia provider", () => {
   });
 
   it("throws on non-2xx response", async () => {
-    fetchStub.addResponse("api2.marginalia-search.com", { status: 503, body: "Service Unavailable" });
+    fetchStub.addResponse("api2.marginalia-search.com", {
+      status: 503,
+      body: "Service Unavailable",
+    });
     await expect(marginalia.create().search!.search("test", 5)).rejects.toThrow(
       /Marginalia Search API error: 503/,
     );
@@ -623,7 +638,11 @@ describe("websearchapi provider", () => {
     fetchStub.addResponse("api.websearchapi.ai", {
       body: {
         organic: [
-          { title: "WS Result", url: "https://example.com/page", description: "A WebSearchAPI snippet" },
+          {
+            title: "WS Result",
+            url: "https://example.com/page",
+            description: "A WebSearchAPI snippet",
+          },
         ],
         responseTime: 1.2,
       },
@@ -689,7 +708,12 @@ describe("youcom provider", () => {
     fetchStub.addResponse("api.you.com", {
       body: {
         hits: [
-          { title: "You Result", url: "https://example.com", description: "A you.com snippet", snippets: [] },
+          {
+            title: "You Result",
+            url: "https://example.com",
+            description: "A you.com snippet",
+            snippets: [],
+          },
         ],
       },
     });

@@ -124,7 +124,6 @@ function parseOllamaSearchResults(data: unknown): SearchResult[] {
 export const providerMeta: ProviderMeta = {
   name: "ollama",
   tier: 3,
-  monthlyQuota: null,
   requiresKey: false,
   create: (key?: string, providerConfig?: ProviderConfigEntry) => {
     const baseUrl =

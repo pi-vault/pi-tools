@@ -83,7 +83,6 @@ class SofyaProvider implements SearchProvider, FetchProvider {
 export const providerMeta: ProviderMeta = {
   name: "sofya",
   tier: 2,
-  monthlyQuota: null,
   requiresKey: true,
   create: (key, providerConfig) => {
     const p = new SofyaProvider(key!, providerConfig?.searchDepth, providerConfig?.topic);

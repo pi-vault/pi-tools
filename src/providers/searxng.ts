@@ -54,7 +54,6 @@ export class SearXNGProvider implements SearchProvider {
 export const providerMeta: ProviderMeta = {
   name: "searxng",
   tier: 2,
-  monthlyQuota: null,
   requiresKey: false,
   create: (_key, providerConfig) => ({
     search: new SearXNGProvider({

@@ -72,7 +72,6 @@ export class TavilyProvider implements SearchProvider, FetchProvider {
 export const providerMeta: ProviderMeta = {
   name: "tavily",
   tier: 1,
-  monthlyQuota: 1000,
   requiresKey: true,
   create: (key) => {
     const p = new TavilyProvider(key!);

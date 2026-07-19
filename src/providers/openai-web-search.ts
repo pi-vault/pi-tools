@@ -66,7 +66,6 @@ export function createOpenAiWebSearchProvider(
 export const providerMeta: ProviderMeta = {
   name: "openai-web-search",
   tier: 1,
-  monthlyQuota: null,
   requiresKey: true,
   create: (key?: string, providerConfig?: ProviderConfigEntry) => {
     if (!key) return {};

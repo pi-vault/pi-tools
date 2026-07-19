@@ -3,12 +3,33 @@ import type {
   CodeSearchResult,
   FetchResult,
   ProviderMeta,
+  ProviderOperation,
   SearchFilters,
   SearchProvider,
   SearchResult,
 } from "../../src/providers/types.ts";
 
 describe("provider types", () => {
+  it("represents every metered operation", () => {
+    const operations: ProviderOperation[] = [
+      { capability: "search", maxResults: 10 },
+      { capability: "fetch" },
+      { capability: "code-search", maxResults: 10 },
+      { capability: "docs-search" },
+      { capability: "docs-fetch" },
+      { capability: "research", type: "deep-reasoning", maxResults: 10, contentTypes: 2 },
+    ];
+
+    expect(operations.map((operation) => operation.capability)).toEqual([
+      "search",
+      "fetch",
+      "code-search",
+      "docs-search",
+      "docs-fetch",
+      "research",
+    ]);
+  });
+
   it("SearchResult satisfies the interface shape", () => {
     const result: SearchResult = {
       title: "Example",
@@ -53,13 +74,19 @@ describe("provider types", () => {
     const meta: ProviderMeta = {
       name: "brave",
       tier: 1,
-      monthlyQuota: 2000,
       requiresKey: true,
+      usageCost: () => 0.005,
       create: (_key) => ({ search: mockSearch }),
     };
     expect(meta.tier).toBe(1);
     expect(meta.requiresKey).toBe(true);
-    expect(meta.monthlyQuota).toBe(2000);
+    expect(meta).not.toHaveProperty("monthlyQuota");
+    expect(
+      meta.usageCost?.(
+        { capability: "search", maxResults: 10 },
+        { enabled: true, budget: { mode: "managed" } },
+      ),
+    ).toBe(0.005);
     const instances = meta.create("key");
     expect(instances.search).toBe(mockSearch);
     expect(instances.fetch).toBeUndefined();

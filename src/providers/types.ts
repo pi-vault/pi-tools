@@ -1,5 +1,6 @@
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { ProviderConfigEntry } from "../config.ts";
+import type { ExaDeepType } from "../research/types.ts";
 
 export interface SearchResult {
   title: string;
@@ -49,11 +50,26 @@ export interface CodeSearchProvider {
 
 export type ProviderTier = 1 | 2 | 3;
 
+export type ProviderOperation =
+  | { capability: "search"; maxResults: number }
+  | { capability: "fetch" }
+  | { capability: "code-search"; maxResults: number }
+  | { capability: "docs-search" }
+  | { capability: "docs-fetch" }
+  | {
+      capability: "research";
+      type: ExaDeepType;
+      maxResults: number;
+      contentTypes: number;
+    };
+
+export type UsageCost = (operation: ProviderOperation, config: ProviderConfigEntry) => number;
+
 export interface ProviderMeta {
   name: string;
   tier: ProviderTier;
-  monthlyQuota: number | null;
   requiresKey: boolean;
+  usageCost?: UsageCost;
   create: (
     key?: string,
     providerConfig?: ProviderConfigEntry,
