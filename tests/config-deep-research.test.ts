@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { loadConfig, loadMergedConfig } from "../src/config.ts";
+import { getConfigPath, loadConfig, loadMergedConfig } from "../src/config.ts";
 
 vi.mock("node:fs");
 
@@ -104,7 +104,7 @@ describe("DeepResearchConfig — loadMergedConfig", () => {
   it("deep-merges deepResearch overrides from global config", () => {
     vi.mocked(fs.readFileSync).mockImplementation((p) => {
       const filePath = typeof p === "string" ? p : p.toString();
-      if (filePath.includes(path.join(".pi", "agent"))) {
+      if (filePath === getConfigPath()) {
         return JSON.stringify({
           deepResearch: {
             enabled: true,
@@ -124,7 +124,7 @@ describe("DeepResearchConfig — loadMergedConfig", () => {
   it("project config overrides global deepResearch settings", () => {
     vi.mocked(fs.readFileSync).mockImplementation((p) => {
       const filePath = typeof p === "string" ? p : p.toString();
-      if (filePath.includes(path.join(".pi", "agent"))) {
+      if (filePath === getConfigPath()) {
         return JSON.stringify({
           deepResearch: { enabled: true },
         });
