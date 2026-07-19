@@ -278,21 +278,17 @@ function parseConfigFile(raw: string): PiToolsConfig {
 }
 
 export function loadConfig(configPath?: string): PiToolsConfig {
-  const paths = configPath ? [configPath] : [getConfigPath()];
-  for (const p of paths) {
-    let raw: string;
-    try {
-      raw = fs.readFileSync(p, "utf-8");
-    } catch {
-      continue;
-    }
-    try {
-      return parseConfigFile(raw);
-    } catch (e) {
-      // JSON syntax errors → fall through to defaults; validation errors → propagate
-      if (e instanceof SyntaxError) continue;
-      throw e;
-    }
+  let raw: string;
+  try {
+    raw = fs.readFileSync(configPath || getConfigPath(), "utf-8");
+  } catch {
+    return { ...DEFAULT_CONFIG };
+  }
+  try {
+    return parseConfigFile(raw);
+  } catch (e) {
+    // JSON syntax errors → fall through to defaults; validation errors → propagate
+    if (!(e instanceof SyntaxError)) throw e;
   }
   return { ...DEFAULT_CONFIG };
 }
