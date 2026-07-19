@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { executeWithFallback } from "../../src/providers/execute.ts";
+import { BudgetExceededError } from "../../src/providers/registry.ts";
 
 describe("executeWithFallback", () => {
   it("returns result from first successful candidate", async () => {
@@ -100,6 +101,33 @@ describe("executeWithFallback", () => {
     });
     expect(onFailure).toHaveBeenCalledWith("bad");
     expect(onFailure).not.toHaveBeenCalledWith("good");
+  });
+
+  it("falls back after budget rejection without recording a performance failure", async () => {
+    const onFailure = vi.fn();
+    const result = await executeWithFallback({
+      candidates: [
+        {
+          name: "exhausted",
+          execute: async () => {
+            throw new BudgetExceededError("exhausted", 1, {
+              mode: "hard",
+              used: 1,
+              limit: 1,
+              unit: "request",
+              period: "month",
+              periodKey: "2026-07",
+            });
+          },
+        },
+        { name: "available", execute: async () => "ok" },
+      ],
+      operation: "search",
+      onFailure,
+    });
+
+    expect(result.providerName).toBe("available");
+    expect(onFailure).not.toHaveBeenCalledWith("exhausted");
   });
 
   it("throws when candidates array is empty", async () => {

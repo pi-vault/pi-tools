@@ -1,5 +1,6 @@
 import { AggregateProviderError } from "../utils/errors.ts";
 import { activityMonitor } from "../monitor/activity-monitor.ts";
+import { BudgetExceededError } from "./registry.ts";
 
 interface FallbackCandidate<T> {
   name: string;
@@ -42,7 +43,7 @@ export async function executeWithFallback<T>(
     } catch (error) {
       activityMonitor.logError(entryId, error instanceof Error ? error.message : String(error));
       signal?.throwIfAborted();
-      onFailure?.(candidate.name);
+      if (!(error instanceof BudgetExceededError)) onFailure?.(candidate.name);
       errors.push({
         provider: candidate.name,
         error: error instanceof Error ? error.message : String(error),

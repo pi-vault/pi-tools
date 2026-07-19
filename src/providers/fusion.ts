@@ -1,6 +1,7 @@
 import type { SearchResult } from "./types.ts";
 import { AggregateProviderError } from "../utils/errors.ts";
 import { activityMonitor } from "../monitor/activity-monitor.ts";
+import { BudgetExceededError } from "./registry.ts";
 
 export interface ProviderResults {
   providerName: string;
@@ -126,7 +127,10 @@ async function executeTargeted(
 
     const batchSettled = await Promise.all(
       batch.map(async (candidate) => {
-        const entryId = activityMonitor.logStart({ type: "api", query: `fusion:${candidate.name}` });
+        const entryId = activityMonitor.logStart({
+          type: "api",
+          query: `fusion:${candidate.name}`,
+        });
         const startMs = Date.now();
         try {
           const results = await candidate.execute(perProvider);
@@ -135,11 +139,13 @@ async function executeTargeted(
           activityMonitor.logComplete(entryId, 200);
           return { name: candidate.name, results, success: true as const };
         } catch (err) {
-          onFailure?.(candidate.name);
+          const budgetRejected = err instanceof BudgetExceededError;
+          if (!budgetRejected) onFailure?.(candidate.name);
           activityMonitor.logError(entryId, err instanceof Error ? err.message : String(err));
           return {
             name: candidate.name,
             error: err instanceof Error ? err.message : String(err),
+            budgetRejected,
             success: false as const,
           };
         }
@@ -154,8 +160,10 @@ async function executeTargeted(
         }
         // empty results → not usable, not a failure, not counted as "used"
       } else {
-        providersFailed.push(entry.name);
-        errors.push({ provider: entry.name, error: entry.error });
+        if (!entry.budgetRejected) {
+          providersFailed.push(entry.name);
+          errors.push({ provider: entry.name, error: entry.error });
+        }
       }
     }
   }

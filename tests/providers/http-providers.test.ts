@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { httpProviders } from "../../src/providers/http-providers.ts";
 import { stubFetch } from "../helpers.ts";
+import type { ProviderConfigEntry } from "../../src/config.ts";
 
 describe("httpProviders metadata", () => {
   const expectedMeta = [
@@ -33,8 +34,8 @@ describe("httpProviders metadata", () => {
 
   it("calculates exact HTTP-provider costs", () => {
     const operation = { capability: "search" as const, maxResults: 10 };
-    const config = { enabled: true, budget: { mode: "managed" as const } };
-    const cost = (name: string, providerConfig = config) =>
+    const config: ProviderConfigEntry = { enabled: true, budget: { mode: "managed" } };
+    const cost = (name: string, providerConfig: ProviderConfigEntry = config) =>
       httpProviders.find((provider) => provider.name === name)!.usageCost!(
         operation,
         providerConfig,
@@ -184,7 +185,9 @@ describe("brave-llm provider", () => {
     fetchStub.addResponse("api.search.brave.com", {
       body: { grounding: { generic: [] } },
     });
-    await braveLlm.create("key", { enabled: true, tokenBudget: 4096 }).search!.search("test", 5);
+    await braveLlm
+      .create("key", { enabled: true, budget: { mode: "managed" }, tokenBudget: 4096 })
+      .search!.search("test", 5);
     const body = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     expect(body.maximum_number_of_tokens).toBe(4096);
   });
@@ -193,7 +196,9 @@ describe("brave-llm provider", () => {
     fetchStub.addResponse("api.search.brave.com", {
       body: { grounding: { generic: [] } },
     });
-    await braveLlm.create("key", { enabled: true, tokenBudget: 0 }).search!.search("test", 5);
+    await braveLlm
+      .create("key", { enabled: true, budget: { mode: "managed" }, tokenBudget: 0 })
+      .search!.search("test", 5);
     const body = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     expect(body.maximum_number_of_tokens).toBe(0);
   });
@@ -202,7 +207,9 @@ describe("brave-llm provider", () => {
     fetchStub.addResponse("api.search.brave.com", {
       body: { grounding: { generic: [] } },
     });
-    await braveLlm.create("key", { enabled: true }).search!.search("test", 5);
+    await braveLlm
+      .create("key", { enabled: true, budget: { mode: "managed" } })
+      .search!.search("test", 5);
     const body = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     expect(body.maximum_number_of_tokens).toBeUndefined();
   });
@@ -277,7 +284,11 @@ describe("fastcrw provider", () => {
       body: { success: true, data: [] },
     });
     await fastcrw
-      .create("key", { enabled: true, baseUrl: "https://custom.host.com" })
+      .create("key", {
+        enabled: true,
+        budget: { mode: "managed" },
+        baseUrl: "https://custom.host.com",
+      })
       .search!.search("test", 5);
     const url = (globalThis.fetch as any).mock.calls[0][0] as string;
     expect(url).toContain("custom.host.com/v1/search");
@@ -399,7 +410,9 @@ describe("linkup provider", () => {
 
   it("respects depth config option", async () => {
     fetchStub.addResponse("api.linkup.so", { body: { searchResults: [] } });
-    await linkup.create("key", { enabled: true, depth: "deep" }).search!.search("test", 5);
+    await linkup
+      .create("key", { enabled: true, budget: { mode: "managed" }, depth: "deep" })
+      .search!.search("test", 5);
     const body = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     expect(body.depth).toBe("deep");
   });
@@ -561,7 +574,11 @@ describe("perplexity provider", () => {
       body: { choices: [{ message: { content: "answer" } }], citations: [] },
     });
     await perplexity
-      .create("pplx-key", { enabled: true, model: "sonar-pro" })
+      .create("pplx-key", {
+        enabled: true,
+        budget: { mode: "managed" },
+        model: "sonar-pro",
+      })
       .search!.search("test", 5);
     const body = JSON.parse((globalThis.fetch as any).mock.calls[0][1].body);
     expect(body.model).toBe("sonar-pro");

@@ -192,9 +192,7 @@ describe("OpenAI Web Search Provider", () => {
   it("returns empty results for output without message type", async () => {
     fetchStub.addResponse("api.openai.com", {
       body: {
-        output: [
-          { type: "web_search_call", id: "ws_123", status: "completed" },
-        ],
+        output: [{ type: "web_search_call", id: "ws_123", status: "completed" }],
       },
     });
 
@@ -208,7 +206,7 @@ describe("providerMeta", () => {
   it("has correct metadata", () => {
     expect(providerMeta.name).toBe("openai-web-search");
     expect(providerMeta.tier).toBe(1);
-    expect(providerMeta.monthlyQuota).toBeNull();
+    expect(providerMeta).not.toHaveProperty("monthlyQuota");
     expect(providerMeta.requiresKey).toBe(true);
   });
 
@@ -223,7 +221,10 @@ describe("providerMeta", () => {
   });
 
   it("does not create search provider when enabled is false", () => {
-    const instance = providerMeta.create("sk-key", { enabled: false });
+    const instance = providerMeta.create("sk-key", {
+      enabled: false,
+      budget: { mode: "managed" },
+    });
     expect(instance.search).toBeUndefined();
   });
 });
