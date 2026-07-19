@@ -169,6 +169,7 @@ describe("ConfigManager", () => {
     manager.refresh();
 
     expect(manager.current.providers.brave.budget).toEqual(hard);
+    expect(loadMergedConfig).toHaveBeenLastCalledWith("/cwd", true);
   });
 
   it("skips disabled, unkeyed, and failing providers without affecting siblings", () => {

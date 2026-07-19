@@ -94,7 +94,7 @@ export class ConfigManager {
 
     let nextConfig: PiToolsConfig;
     try {
-      nextConfig = loadMergedConfig(this.cwd);
+      nextConfig = loadMergedConfig(this.cwd, true);
     } catch {
       // Malformed config — keep previous, reset TTL to retry next cycle
       this.cacheTime = now;

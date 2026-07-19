@@ -574,6 +574,21 @@ export function findProjectConfigPath(startDir: string): string | undefined {
   return undefined;
 }
 
+function readOptionalConfig(
+  filePath: string,
+  strict: boolean,
+): Record<string, unknown> | undefined {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+  } catch (error) {
+    const missing =
+      (error as NodeJS.ErrnoException).code === "ENOENT" ||
+      (error instanceof Error && error.message.includes("ENOENT"));
+    if (missing || !strict) return undefined;
+    throw error;
+  }
+}
+
 /**
  * Load config with three-layer resolution:
  *   1. Project `.pi/tools.json` (highest priority)
@@ -583,25 +598,19 @@ export function findProjectConfigPath(startDir: string): string | undefined {
  * Layers are deep-merged: nested objects merge recursively,
  * scalars and arrays from higher-priority sources replace lower-priority values.
  */
-export function loadMergedConfig(cwd?: string): PiToolsConfig {
+export function loadMergedConfig(cwd?: string, strict = false): PiToolsConfig {
   let merged = deepMerge(DEFAULT_CONFIG as unknown as Record<string, unknown>, {});
 
   // Layer 2: global config
-  try {
-    merged = mergeConfigLayer(
-      merged,
-      JSON.parse(fs.readFileSync(getConfigPath(), "utf-8")) as Record<string, unknown>,
-    );
-  } catch {
-    // Missing or malformed global config — keep defaults.
-  }
+  const globalConfig = readOptionalConfig(getConfigPath(), strict);
+  if (globalConfig) merged = mergeConfigLayer(merged, globalConfig);
 
   // Layer 1: project config (highest priority)
   if (cwd) {
     const projectPath = findProjectConfigPath(cwd);
     if (projectPath) {
-      try {
-        const raw = JSON.parse(fs.readFileSync(projectPath, "utf-8")) as Record<string, unknown>;
+      const raw = readOptionalConfig(projectPath, strict);
+      if (raw) {
         const trusted = isProjectTrustedCached(cwd);
         const sanitized = trusted ? raw : stripSensitiveFields(raw);
         if (!trusted && JSON.stringify(sanitized) !== JSON.stringify(raw)) {
@@ -610,8 +619,6 @@ export function loadMergedConfig(cwd?: string): PiToolsConfig {
           );
         }
         merged = mergeConfigLayer(merged, sanitized);
-      } catch {
-        // Malformed project config — skip
       }
     }
   }

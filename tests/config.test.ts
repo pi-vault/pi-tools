@@ -404,6 +404,29 @@ describe("loadMergedConfig", () => {
     expect(config.defaultProvider).toBe("brave");
   });
 
+  it("ignores malformed global config during initial loading", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue("not json");
+
+    expect(loadMergedConfig().defaultProvider).toBe("auto");
+  });
+
+  it("surfaces malformed global config during reload", () => {
+    vi.mocked(fs.readFileSync).mockReturnValue("not json");
+
+    expect(() => loadMergedConfig(undefined, true)).toThrow(SyntaxError);
+  });
+
+  it("surfaces malformed project config during reload", () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
+      const resolved = typeof filePath === "string" ? filePath : filePath.toString();
+      if (resolved.includes(path.join(".pi", "tools.json"))) return "not json";
+      throw new Error("ENOENT");
+    });
+
+    expect(() => loadMergedConfig("/projects/my-app", true)).toThrow(SyntaxError);
+  });
+
   it("deep-merges project config over global config", () => {
     vi.mocked(fs.readFileSync).mockImplementation((p) => {
       const filePath = typeof p === "string" ? p : p.toString();
