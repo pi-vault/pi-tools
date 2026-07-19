@@ -1,6 +1,11 @@
 import { readdir, readFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
-import { researchModeDefaults, type ResearchMode, type ResearchModeDefaults } from "./types.ts";
+import {
+  researchModeDefaults,
+  type ExaDeepType,
+  type ResearchMode,
+  type ResearchModeDefaults,
+} from "./types.ts";
 
 export const MAX_CONTEXT_FILES = 25;
 
@@ -115,7 +120,7 @@ export function applyResearchMode(
 
   return {
     researchMode,
-    type,
+    type: type as ExaDeepType,
     numResults,
     textMaxCharacters:
       input.textMaxCharacters ?? profile.textMaxCharacters ?? defaults.textMaxCharacters,

@@ -12,30 +12,44 @@ import { handleEnhancedSetup } from "./tools-setup.ts";
 import { activityMonitor } from "../monitor/activity-monitor.ts";
 import { renderWidgetLines } from "../monitor/widget.ts";
 
-function formatNumber(n: number): string {
-  if (!Number.isFinite(n)) return "unlimited";
-  return n.toLocaleString("en-US");
+function formatAmount(value: number, unit: string): string {
+  return unit === "usd" ? value.toFixed(6) : value.toLocaleString("en-US");
 }
 
 export function buildStatusTable(
   registry: ProviderRegistry,
   tierMap: ReadonlyMap<string, ProviderTier>,
 ): string {
-  const names = registry.getSearchProviderNames();
+  const names = registry.getProviderNames();
   if (names.length === 0) return "No providers registered.";
 
   const rows: Array<{
     name: string;
     tier: string;
-    remaining: string;
+    used: string;
+    limit: string;
+    unit: string;
+    period: string;
     session: string;
     latency: string;
   }> = [];
 
   for (const name of names) {
     const tier = tierMap.get(name) ?? 3;
-    const remaining = registry.getRemaining(name);
+    const budget = registry.getBudgetStatus(name);
     const metrics = registry.getMetrics(name);
+    let used = "--";
+    let limit = "--";
+    let unit = "--";
+    let period = "--";
+    if (budget?.mode === "hard") {
+      used = formatAmount(budget.used, budget.unit);
+      limit = formatAmount(budget.limit, budget.unit);
+      unit = budget.unit;
+      period = budget.pool ? `${budget.period} (pool: ${budget.pool})` : budget.period;
+    } else if (budget) {
+      used = budget.mode;
+    }
 
     const successes = metrics?.successes ?? 0;
     const failures = metrics?.failures ?? 0;
@@ -50,7 +64,10 @@ export function buildStatusTable(
     rows.push({
       name,
       tier: String(tier),
-      remaining: formatNumber(remaining),
+      used,
+      limit,
+      unit,
+      period,
       session: sessionStr,
       latency: latencyStr,
     });
@@ -59,7 +76,10 @@ export function buildStatusTable(
   const headers = {
     name: "Provider",
     tier: "Tier",
-    remaining: "Remaining",
+    used: "Used",
+    limit: "Limit",
+    unit: "Unit",
+    period: "Period",
     session: "Session (ok/fail)",
     latency: "Avg Latency",
   };
@@ -67,7 +87,10 @@ export function buildStatusTable(
   const colWidths = {
     name: Math.max(headers.name.length, ...rows.map((r) => r.name.length)),
     tier: Math.max(headers.tier.length, ...rows.map((r) => r.tier.length)),
-    remaining: Math.max(headers.remaining.length, ...rows.map((r) => r.remaining.length)),
+    used: Math.max(headers.used.length, ...rows.map((r) => r.used.length)),
+    limit: Math.max(headers.limit.length, ...rows.map((r) => r.limit.length)),
+    unit: Math.max(headers.unit.length, ...rows.map((r) => r.unit.length)),
+    period: Math.max(headers.period.length, ...rows.map((r) => r.period.length)),
     session: Math.max(headers.session.length, ...rows.map((r) => r.session.length)),
     latency: Math.max(headers.latency.length, ...rows.map((r) => r.latency.length)),
   };
@@ -76,7 +99,10 @@ export function buildStatusTable(
   const headerLine = [
     headers.name.padEnd(colWidths.name),
     headers.tier.padEnd(colWidths.tier),
-    headers.remaining.padStart(colWidths.remaining),
+    headers.used.padStart(colWidths.used),
+    headers.limit.padStart(colWidths.limit),
+    headers.unit.padEnd(colWidths.unit),
+    headers.period.padEnd(colWidths.period),
     headers.session.padStart(colWidths.session),
     headers.latency.padStart(colWidths.latency),
   ].join(sep);
@@ -87,7 +113,10 @@ export function buildStatusTable(
     [
       r.name.padEnd(colWidths.name),
       r.tier.padEnd(colWidths.tier),
-      r.remaining.padStart(colWidths.remaining),
+      r.used.padStart(colWidths.used),
+      r.limit.padStart(colWidths.limit),
+      r.unit.padEnd(colWidths.unit),
+      r.period.padEnd(colWidths.period),
       r.session.padStart(colWidths.session),
       r.latency.padStart(colWidths.latency),
     ].join(sep),
@@ -200,9 +229,7 @@ export function createToolsCommand(
         }
 
         default:
-          ctx.ui.notify(
-            `Unknown subcommand "${subcommand}".\n\n${USAGE}`,
-          );
+          ctx.ui.notify(`Unknown subcommand "${subcommand}".\n\n${USAGE}`);
       }
     },
 

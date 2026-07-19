@@ -473,6 +473,10 @@ export class ProviderRegistry {
     return [...this.searchProviders.keys()];
   }
 
+  getProviderNames(): string[] {
+    return [...this.policies.keys()];
+  }
+
   getMetrics(providerName: string): ProviderMetrics | undefined {
     return this.metrics.get(providerName);
   }

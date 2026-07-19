@@ -577,7 +577,7 @@ export function findProjectConfigPath(startDir: string): string | undefined {
 /**
  * Load config with three-layer resolution:
  *   1. Project `.pi/tools.json` (highest priority)
- *   2. Global `~/.pi/agent/extensions/tools.json`
+ *   2. Global `<Pi agent dir>/extensions/tools.json`
  *   3. Built-in defaults (lowest priority)
  *
  * Layers are deep-merged: nested objects merge recursively,

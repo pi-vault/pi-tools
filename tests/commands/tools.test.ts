@@ -2,14 +2,15 @@ import * as fs from "node:fs";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createToolsCommand } from "../../src/commands/tools.ts";
-import { getConfigPath } from "../../src/config.ts";
+import { getConfigPath, type ProviderBudget } from "../../src/config.ts";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
 import type { ProviderTier, SearchProvider } from "../../src/providers/types.ts";
 import { makeCtx } from "../helpers.ts";
 
 vi.mock("node:fs");
 
-const mem = () => new ProviderRegistry({ load: () => ({}), save: () => {} });
+const mem = () =>
+  new ProviderRegistry({ load: () => ({ version: 2, counters: {} }), save: () => {} });
 
 function mockProvider(name: string, label: string): SearchProvider {
   return {
@@ -17,6 +18,25 @@ function mockProvider(name: string, label: string): SearchProvider {
     label,
     search: vi.fn().mockResolvedValue([]),
   };
+}
+
+function registerSearch(
+  registry: ProviderRegistry,
+  name: string,
+  budget: ProviderBudget,
+  tier: ProviderTier,
+  usageCost?: () => number,
+): void {
+  registry.registerProvider(
+    { search: mockProvider(name, name) },
+    {
+      name,
+      tier,
+      budget,
+      config: { enabled: true, budget },
+      usageCost,
+    },
+  );
 }
 
 describe("tools status subcommand", () => {
@@ -29,15 +49,41 @@ describe("tools status subcommand", () => {
     vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
   });
 
-  it("displays provider status table with metrics", async () => {
+  it("displays hard, managed, unlimited, and docs-only budgets with metrics", async () => {
     const registry = mem();
-    const brave = mockProvider("brave", "Brave");
-    const exa = mockProvider("exa", "Exa");
-    const ddg = mockProvider("duckduckgo", "DuckDuckGo");
+    registerSearch(
+      registry,
+      "brave",
+      { mode: "hard", limit: 5, period: "month", unit: "usd", pool: "brave" },
+      1,
+      () => 0.005,
+    );
+    registerSearch(registry, "exa", { mode: "managed" }, 1);
+    registerSearch(registry, "duckduckgo", { mode: "unlimited" }, 3);
+    const docsBudget: ProviderBudget = {
+      mode: "hard",
+      limit: 1000,
+      period: "month",
+      unit: "request",
+    };
+    registry.registerProvider(
+      {
+        docs: {
+          name: "context7",
+          label: "Context7",
+          searchLibrary: vi.fn(),
+          getContext: vi.fn(),
+        },
+      },
+      {
+        name: "context7",
+        tier: 1,
+        budget: docsBudget,
+        config: { enabled: true, budget: docsBudget },
+      },
+    );
 
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
-    registry.registerSearch(exa, { tier: 1, monthlyQuota: 1000 });
-    registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+    registry.consume("brave", { capability: "search", maxResults: 10 });
 
     registry.recordOutcome("brave", { success: true, latencyMs: 340 });
     registry.recordOutcome("brave", { success: true, latencyMs: 340 });
@@ -48,6 +94,7 @@ describe("tools status subcommand", () => {
       ["brave", 1],
       ["exa", 1],
       ["duckduckgo", 3],
+      ["context7", 1],
     ]);
 
     const command = createToolsCommand(registry, tierMap);
@@ -61,17 +108,49 @@ describe("tools status subcommand", () => {
     expect(output).toContain("brave");
     expect(output).toContain("exa");
     expect(output).toContain("duckduckgo");
+    expect(output).toContain("context7");
     expect(output).toContain("1");
     expect(output).toContain("3");
     expect(output).toContain("2/1");
-    expect(output).toContain("1,997");
+    expect(output).toContain("0.005000");
+    expect(output).toContain("5.000000");
+    expect(output).toContain("managed");
     expect(output).toMatch(/unlimited/i);
+    expect(output).toContain("request");
+    expect(output).toContain("month");
+    expect(output).toContain("pool: brave");
+  });
+
+  it("shows one shared-pool counter for both providers", async () => {
+    const registry = mem();
+    const budget: ProviderBudget = {
+      mode: "hard",
+      limit: 5,
+      period: "month",
+      unit: "usd",
+      pool: "brave",
+    };
+    registerSearch(registry, "brave", budget, 1, () => 0.005);
+    registerSearch(registry, "brave-llm", budget, 1, () => 0.005);
+    registry.consume("brave", { capability: "search", maxResults: 10 });
+
+    const command = createToolsCommand(
+      registry,
+      new Map<string, ProviderTier>([
+        ["brave", 1],
+        ["brave-llm", 1],
+      ]),
+    );
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+    await command.handler("status", ctx);
+
+    const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
+    expect(output.match(/0\.005000/g)).toHaveLength(2);
   });
 
   it("shows -- for avg latency when no successful calls", async () => {
     const registry = mem();
-    const ddg = mockProvider("duckduckgo", "DuckDuckGo");
-    registry.registerSearch(ddg, { tier: 3, monthlyQuota: null });
+    registerSearch(registry, "duckduckgo", { mode: "unlimited" }, 3);
 
     const tierMap = new Map<string, ProviderTier>([["duckduckgo", 3]]);
     const command = createToolsCommand(registry, tierMap);
@@ -99,8 +178,7 @@ describe("tools status subcommand", () => {
 
   it("also accepts legacy --status flag", async () => {
     const registry = mem();
-    const brave = mockProvider("brave", "Brave");
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+    registerSearch(registry, "brave", { mode: "managed" }, 1);
 
     const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
     const command = createToolsCommand(registry, tierMap);
@@ -121,8 +199,7 @@ describe("tools reload subcommand", () => {
 
   it("calls onReload callback when reload is passed", async () => {
     const registry = mem();
-    const brave = mockProvider("brave", "Brave");
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+    registerSearch(registry, "brave", { mode: "managed" }, 1);
 
     const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
     const onReload = vi.fn();
@@ -139,8 +216,7 @@ describe("tools reload subcommand", () => {
 
   it("also accepts legacy --reload flag", async () => {
     const registry = mem();
-    const brave = mockProvider("brave", "Brave");
-    registry.registerSearch(brave, { tier: 1, monthlyQuota: 2000 });
+    registerSearch(registry, "brave", { mode: "managed" }, 1);
 
     const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
     const onReload = vi.fn();
