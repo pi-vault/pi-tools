@@ -149,7 +149,7 @@ OpenAI Codex uses the active Pi OAuth session. Run `/login` and select `openai-c
 
 ## Configure files and credentials
 
-The global config is `~/.pi/agent/extensions/tools.json`. A project `.pi/tools.json` overrides it. Pi Tools deep-merges project settings, global settings, and built-in defaults in that order. The old `pi-tools.json` filename remains a fallback.
+The global config is ~/.pi/agent/extensions/tools.json. A project .pi/tools.json overrides it. Pi Tools deep-merges project settings, global settings, and built-in defaults in that order.
 
 A provider `apiKey` can be:
 
