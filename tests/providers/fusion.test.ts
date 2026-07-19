@@ -292,6 +292,32 @@ describe("executeWithFusion", () => {
     expect(onFailure).not.toHaveBeenCalledWith("exhausted");
   });
 
+  it("reports the budget rejection when every candidate is rejected", async () => {
+    await expect(
+      executeWithFusion({
+        candidates: [
+          {
+            name: "exhausted",
+            execute: async () => {
+              throw new BudgetExceededError("exhausted", 1, {
+                mode: "hard",
+                used: 1,
+                limit: 1,
+                unit: "request",
+                period: "month",
+                periodKey: "2026-07",
+              });
+            },
+          },
+        ],
+        maxResults: 1,
+        mode: "targeted",
+        targetBackends: 1,
+        k: 60,
+      }),
+    ).rejects.toThrow("budget exceeded");
+  });
+
   describe("all mode", () => {
     it("runs all candidates in parallel and fuses results", async () => {
       const candidates = [

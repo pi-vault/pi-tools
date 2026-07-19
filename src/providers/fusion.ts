@@ -160,9 +160,9 @@ async function executeTargeted(
         }
         // empty results → not usable, not a failure, not counted as "used"
       } else {
+        errors.push({ provider: entry.name, error: entry.error });
         if (!entry.budgetRejected) {
           providersFailed.push(entry.name);
-          errors.push({ provider: entry.name, error: entry.error });
         }
       }
     }
