@@ -31,7 +31,7 @@ describe("createWebResearchTool", () => {
 
   function makeTool(beforeResearch = vi.fn()) {
     return createWebResearchTool(
-      "test-exa-key",
+      () => "test-exa-key",
       { enabled: true },
       appendEntry,
       undefined,
@@ -273,7 +273,7 @@ describe("createWebResearchTool", () => {
   });
 
   it("throws when deepResearch is disabled", async () => {
-    const tool = createWebResearchTool("key", { enabled: false }, appendEntry);
+    const tool = createWebResearchTool(() => "key", { enabled: false }, appendEntry);
     await expect(
       tool.execute("call-6", { query: "test" }, undefined, vi.fn(), makeCtx()),
     ).rejects.toThrow(/disabled/);

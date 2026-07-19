@@ -115,7 +115,7 @@ function displayPath(cwd: string | undefined, filePath: string): string {
 }
 
 export function createWebResearchTool(
-  exaApiKey: string,
+  resolveExaApiKey: () => string | undefined,
   deepResearchConfig: DeepResearchConfig,
   appendEntry: AppendEntryFn,
   guidance?: GuidanceOverride,
@@ -136,6 +136,9 @@ export function createWebResearchTool(
     ],
     parameters: WebResearchParams,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+      const currentExaApiKey = resolveExaApiKey();
+      if (!currentExaApiKey) throw new Error("web_research is disabled or unavailable.");
+
       // Defense-in-depth: config is captured at registration time
       if (!deepResearchConfig.enabled) {
         throw new Error("web_research is disabled via deepResearch.enabled config.");
@@ -145,7 +148,7 @@ export function createWebResearchTool(
       const prepared = await prepareResearchInput(cwd, params);
       const mode = applyResearchMode(prepared, deepResearchConfig.modeDefaults);
 
-      const client = new ExaDeepResearchClient(exaApiKey);
+      const client = new ExaDeepResearchClient(currentExaApiKey);
 
       // Full mode runs multiple queries with deduplication
       const queryList =

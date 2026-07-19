@@ -1,12 +1,19 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import createExtension from "../src/index.ts";
 import { ProviderRegistry } from "../src/providers/registry.ts";
 import { _resetTrustRegistry } from "../src/utils/trust.ts";
 import { createMockPi, makeCtx, type MockPi } from "./helpers.ts";
 
 vi.mock("node:fs");
+
+beforeEach(() => {
+  vi.mocked(fs.readFileSync).mockImplementation(() => {
+    throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+  });
+  vi.mocked(fs.existsSync).mockReturnValue(false);
+});
 
 function startSession(pi: MockPi, ctx = makeCtx()): void {
   const handler = pi.events.get("session_start")?.[0];

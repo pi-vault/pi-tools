@@ -90,7 +90,7 @@ export default function createExtension(pi: ExtensionAPI): void {
     if (docsProvider) {
       const selectDocs = () => {
         configManager.refresh();
-        return registry.selectDocs() ?? docsProvider;
+        return registry.selectDocs();
       };
       pi.registerTool(
         createWebDocsSearchTool(selectDocs, configManager.current.guidance?.web_docs_search),
@@ -110,7 +110,16 @@ export default function createExtension(pi: ExtensionAPI): void {
     ) {
       pi.registerTool(
         createWebResearchTool(
-          resolvedExaKey,
+          () => {
+            configManager.refresh();
+            const currentExa = configManager.current.providers.exa;
+            if (
+              currentExa?.enabled === false ||
+              configManager.current.deepResearch.enabled === false
+            )
+              return undefined;
+            return resolveApiKey(currentExa?.apiKey);
+          },
           configManager.current.deepResearch,
           (customType, data) => pi.appendEntry(customType, data),
           configManager.current.deepResearch?.guidance,
