@@ -1,27 +1,71 @@
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { SelectionStrategy } from "../config.ts";
+import type {
+  BudgetPeriod,
+  BudgetUnit,
+  ProviderBudget,
+  ProviderConfigEntry,
+  SelectionStrategy,
+} from "../config.ts";
 import type {
   CodeSearchProvider,
   DocsProvider,
   FetchProvider,
+  ProviderOperation,
   ProviderTier,
   SearchProvider,
+  UsageCost,
 } from "./types.ts";
+
+export interface UsageCounter {
+  used: number;
+  unit: BudgetUnit;
+  period: BudgetPeriod;
+  periodKey: string;
+}
+
+export interface UsageFileV2 {
+  version: 2;
+  counters: Record<string, UsageCounter>;
+}
+
+interface LegacyUsageRecord {
+  count: number;
+  month: string;
+}
+
+type LegacyUsage = Record<string, LegacyUsageRecord>;
+
+export interface PersistenceAdapter {
+  load(): UsageFileV2 | LegacyUsage;
+  save(data: UsageFileV2): void;
+}
+
+export type BudgetStatus =
+  | { mode: "managed" }
+  | { mode: "unlimited" }
+  | {
+      mode: "hard";
+      used: number;
+      limit: number;
+      unit: BudgetUnit;
+      period: BudgetPeriod;
+      periodKey: string;
+      pool?: string;
+    };
+
+interface RegisteredPolicy {
+  name: string;
+  tier: ProviderTier;
+  budget: ProviderBudget;
+  config: ProviderConfigEntry;
+  usageCost?: UsageCost;
+}
 
 interface RegisteredSearch {
   provider: SearchProvider;
   tier: ProviderTier;
-  monthlyQuota: number | null;
-}
-
-interface RegisteredFetch {
-  provider: FetchProvider;
-}
-
-interface RegisteredCodeSearch {
-  provider: CodeSearchProvider;
 }
 
 export interface ProviderMetrics {
@@ -35,44 +79,299 @@ export interface ProviderMetrics {
 }
 
 const METRICS_WINDOW_MS = 60_000;
+const EMPTY_USAGE: UsageFileV2 = { version: 2, counters: {} };
 
-interface UsageRecord {
-  count: number;
-  month: string;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export interface PersistenceAdapter {
-  load(): Record<string, UsageRecord>;
-  save(data: Record<string, UsageRecord>): void;
+function isCounter(value: unknown): value is UsageCounter {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.used === "number" &&
+    Number.isFinite(value.used) &&
+    value.used >= 0 &&
+    (value.unit === "request" || value.unit === "credit" || value.unit === "usd") &&
+    (value.period === "day" || value.period === "month" || value.period === "lifetime") &&
+    typeof value.periodKey === "string"
+  );
 }
 
-function getCurrentMonth(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+function isUsageFileV2(value: unknown): value is UsageFileV2 {
+  return (
+    isRecord(value) &&
+    value.version === 2 &&
+    isRecord(value.counters) &&
+    Object.values(value.counters).every(isCounter)
+  );
+}
+
+function isLegacyUsage(value: unknown): value is LegacyUsage {
+  return (
+    isRecord(value) &&
+    !("version" in value) &&
+    Object.values(value).every(
+      (record) =>
+        isRecord(record) &&
+        typeof record.count === "number" &&
+        Number.isFinite(record.count) &&
+        record.count >= 0 &&
+        typeof record.month === "string",
+    )
+  );
+}
+
+function periodKey(period: BudgetPeriod, now = new Date()): string {
+  if (period === "lifetime") return "lifetime";
+  const iso = now.toISOString();
+  return period === "day" ? iso.slice(0, 10) : iso.slice(0, 7);
+}
+
+function round6(value: number): number {
+  return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
+}
+
+export class BudgetExceededError extends Error {
+  constructor(
+    readonly providerName: string,
+    readonly cost: number,
+    readonly status: Extract<BudgetStatus, { mode: "hard" }>,
+  ) {
+    super(
+      `${providerName} budget exceeded: ${status.used}/${status.limit} ${status.unit} used; operation costs ${cost}`,
+    );
+    this.name = "BudgetExceededError";
+  }
 }
 
 export class ProviderRegistry {
   private searchProviders = new Map<string, RegisteredSearch>();
-  private fetchProviders = new Map<string, RegisteredFetch>();
-  private codeSearchProviders = new Map<string, RegisteredCodeSearch>();
-  private docsProvider: DocsProvider | undefined;
+  private fetchProviders = new Map<string, FetchProvider>();
+  private codeSearchProviders = new Map<string, CodeSearchProvider>();
+  private docsProviders = new Map<string, DocsProvider>();
+  private policies = new Map<string, RegisteredPolicy>();
   private metrics = new Map<string, ProviderMetrics>();
-  private counts: Record<string, number> = {};
-  private currentMonth: string;
-  private persistence: PersistenceAdapter;
+  private counters: Record<string, UsageCounter> = {};
+  private legacy: LegacyUsage = {};
+  private warned = new Set<string>();
 
-  constructor(persistence: PersistenceAdapter) {
-    this.persistence = persistence;
-    this.currentMonth = getCurrentMonth();
-    this.loadUsage();
+  constructor(private readonly persistence: PersistenceAdapter) {
+    const loaded = persistence.load();
+    if (isUsageFileV2(loaded)) this.counters = { ...loaded.counters };
+    else if (isLegacyUsage(loaded)) this.legacy = loaded;
+  }
+
+  registerProvider(
+    instances: {
+      search?: SearchProvider;
+      fetch?: FetchProvider;
+      codeSearch?: CodeSearchProvider;
+      docs?: DocsProvider;
+    },
+    options: {
+      name: string;
+      tier: ProviderTier;
+      budget: ProviderBudget;
+      config: ProviderConfigEntry;
+      usageCost?: UsageCost;
+    },
+  ): void {
+    const policy: RegisteredPolicy = { ...options };
+    this.policies.set(options.name, policy);
+    this.migrateLegacy(policy);
+
+    if (instances.search) {
+      const provider = instances.search;
+      this.searchProviders.set(options.name, {
+        tier: options.tier,
+        provider: {
+          name: provider.name,
+          label: provider.label,
+          search: async (query, maxResults, signal, filters) => {
+            this.consume(options.name, { capability: "search", maxResults });
+            return provider.search(query, maxResults, signal, filters);
+          },
+        },
+      });
+    }
+    if (instances.fetch) {
+      const provider = instances.fetch;
+      this.fetchProviders.set(options.name, {
+        name: provider.name,
+        fetch: async (url, signal) => {
+          this.consume(options.name, { capability: "fetch" });
+          return provider.fetch(url, signal);
+        },
+      });
+    }
+    if (instances.codeSearch) {
+      const provider = instances.codeSearch;
+      this.codeSearchProviders.set(options.name, {
+        name: provider.name,
+        codeSearch: async (query, maxResults, signal) => {
+          this.consume(options.name, { capability: "code-search", maxResults });
+          return provider.codeSearch(query, maxResults, signal);
+        },
+      });
+    }
+    if (instances.docs) {
+      const provider = instances.docs;
+      this.docsProviders.set(options.name, {
+        name: provider.name,
+        label: provider.label,
+        searchLibrary: async (libraryName, query, signal) => {
+          this.consume(options.name, { capability: "docs-search" });
+          return provider.searchLibrary(libraryName, query, signal);
+        },
+        getContext: async (libraryId, query, signal) => {
+          this.consume(options.name, { capability: "docs-fetch" });
+          return provider.getContext(libraryId, query, signal);
+        },
+      });
+    }
+  }
+
+  private migrateLegacy(policy: RegisteredPolicy): void {
+    const record = this.legacy[policy.name];
+    const budget = policy.budget;
+    if (
+      !record ||
+      budget.mode !== "hard" ||
+      budget.pool ||
+      budget.period !== "month" ||
+      budget.unit !== "request" ||
+      record.month !== periodKey("month")
+    )
+      return;
+
+    if (!this.counters[policy.name]) {
+      this.counters[policy.name] = {
+        used: record.count,
+        unit: budget.unit,
+        period: budget.period,
+        periodKey: record.month,
+      };
+    }
+    delete this.legacy[policy.name];
+  }
+
+  private counterFor(
+    name: string,
+    budget: Extract<ProviderBudget, { mode: "hard" }>,
+  ): UsageCounter {
+    const key = budget.pool ?? name;
+    const currentKey = periodKey(budget.period);
+    const existing = this.counters[key];
+    if (
+      existing &&
+      existing.unit === budget.unit &&
+      existing.period === budget.period &&
+      existing.periodKey === currentKey
+    )
+      return existing;
+
+    const fresh = { used: 0, unit: budget.unit, period: budget.period, periodKey: currentKey };
+    this.counters[key] = fresh;
+    return fresh;
+  }
+
+  consume(providerName: string, operation: ProviderOperation): void {
+    const policy = this.policies.get(providerName);
+    if (!policy || policy.budget.mode !== "hard") return;
+
+    const cost = policy.usageCost?.(operation, policy.config) ?? 1;
+    if (!Number.isFinite(cost) || cost <= 0) {
+      throw new Error(`${providerName} usage cost must be finite positive`);
+    }
+
+    const counter = this.counterFor(providerName, policy.budget);
+    const next = round6(counter.used + cost);
+    const status = this.getBudgetStatus(providerName) as Extract<BudgetStatus, { mode: "hard" }>;
+    if (next > policy.budget.limit) throw new BudgetExceededError(providerName, cost, status);
+
+    const previous = counter.used;
+    counter.used = next;
+    this.persistence.save({ version: 2, counters: this.counters });
+    this.warnIfNeeded(providerName, policy.budget, previous, next);
+  }
+
+  private warnIfNeeded(
+    providerName: string,
+    budget: Extract<ProviderBudget, { mode: "hard" }>,
+    previous: number,
+    used: number,
+  ): void {
+    const key = `${budget.pool ?? providerName}:${periodKey(budget.period)}`;
+    if (
+      previous < budget.limit * 0.8 &&
+      used >= budget.limit * 0.8 &&
+      !this.warned.has(`${key}:80`)
+    ) {
+      this.warned.add(`${key}:80`);
+      console.warn(
+        `[pi-tools] ${budget.pool ?? providerName} budget reached 80% (${used}/${budget.limit} ${budget.unit}).`,
+      );
+    }
+    if (previous < budget.limit && used >= budget.limit && !this.warned.has(`${key}:100`)) {
+      this.warned.add(`${key}:100`);
+      console.warn(
+        `[pi-tools] ${budget.pool ?? providerName} budget exhausted (${used}/${budget.limit} ${budget.unit}).`,
+      );
+    }
+  }
+
+  getBudgetStatus(name: string): BudgetStatus | undefined {
+    const budget = this.policies.get(name)?.budget;
+    if (!budget || budget.mode !== "hard") return budget;
+    const counter = this.counterFor(name, budget);
+    return {
+      mode: "hard",
+      used: counter.used,
+      limit: budget.limit,
+      unit: budget.unit,
+      period: budget.period,
+      periodKey: counter.periodKey,
+      ...(budget.pool ? { pool: budget.pool } : {}),
+    };
+  }
+
+  private isEligible(name: string): boolean {
+    const status = this.getBudgetStatus(name);
+    return status?.mode !== "hard" || status.used < status.limit;
+  }
+
+  unregisterAll(name: string): void {
+    this.searchProviders.delete(name);
+    this.fetchProviders.delete(name);
+    this.codeSearchProviders.delete(name);
+    this.docsProviders.delete(name);
+    this.policies.delete(name);
+  }
+
+  recordOutcome(providerName: string, result: { success: boolean; latencyMs?: number }): void {
+    const metrics = this.getOrCreateMetrics(providerName);
+    if (result.success) {
+      metrics.successes += 1;
+      if (result.latencyMs !== undefined) {
+        metrics.latencySamples += 1;
+        metrics.avgLatency += (result.latencyMs - metrics.avgLatency) / metrics.latencySamples;
+      }
+    } else {
+      metrics.failures += 1;
+    }
+  }
+
+  recordResultQuality(providerName: string, resultCount: number, requestedCount: number): void {
+    if (requestedCount <= 0 || resultCount < 0) return;
+    const metrics = this.getOrCreateMetrics(providerName);
+    metrics.resultSamples += 1;
+    const ratio = Math.min(1, resultCount / requestedCount);
+    metrics.avgResultRatio += (ratio - metrics.avgResultRatio) / metrics.resultSamples;
   }
 
   private getOrCreateMetrics(providerName: string): ProviderMetrics {
-    const now = Date.now();
-    const existing = this.metrics.get(providerName);
-    if (existing && now - existing.windowStart <= METRICS_WINDOW_MS) {
-      return existing;
-    }
+    const existing = this.getActiveMetrics(providerName);
+    if (existing) return existing;
     const fresh: ProviderMetrics = {
       successes: 0,
       failures: 0,
@@ -80,165 +379,45 @@ export class ProviderRegistry {
       latencySamples: 0,
       avgResultRatio: 0,
       resultSamples: 0,
-      windowStart: now,
+      windowStart: Date.now(),
     };
     this.metrics.set(providerName, fresh);
     return fresh;
   }
 
-  /** Returns metrics only if within the active window, undefined otherwise. */
   private getActiveMetrics(providerName: string): ProviderMetrics | undefined {
-    const m = this.metrics.get(providerName);
-    if (!m) return undefined;
-    if (Date.now() - m.windowStart > METRICS_WINDOW_MS) return undefined;
-    return m;
+    const metrics = this.metrics.get(providerName);
+    return metrics && Date.now() - metrics.windowStart <= METRICS_WINDOW_MS ? metrics : undefined;
   }
 
-  /**
-   * Score all eligible (non-exhausted) providers by composite metric.
-   *
-   * Score = (success_rate * 0.5) + (speed_score * 0.3) + (quality_score * 0.2)
-   *
-   * Providers with no active metrics get a neutral score of 0.5.
-   * Returns the full sorted array (descending by score).
-   */
   private scoreEligibleProviders(): Array<{ provider: SearchProvider; score: number }> {
-    const eligible = [...this.searchProviders.values()].filter((r) => {
-      if (r.monthlyQuota === null) return true;
-      return (this.counts[r.provider.name] ?? 0) < r.monthlyQuota;
+    const eligible = [...this.searchProviders.entries()].filter(([name]) => this.isEligible(name));
+    const measured = eligible.flatMap(([name, registration]) => {
+      const metrics = this.getActiveMetrics(name);
+      if (!metrics || metrics.successes + metrics.failures === 0) return [];
+      return [
+        {
+          provider: registration.provider,
+          successRate: metrics.successes / (metrics.successes + metrics.failures),
+          latency: metrics.latencySamples ? metrics.avgLatency : Infinity,
+          quality: metrics.resultSamples ? metrics.avgResultRatio : 0.5,
+        },
+      ];
     });
+    const finite = measured.map((entry) => entry.latency).filter(Number.isFinite);
+    const maxLatency = finite.length ? Math.max(...finite) : 1;
 
-    if (eligible.length === 0) return [];
-
-    const metricsEntries: Array<{
-      provider: SearchProvider;
-      successRate: number;
-      avgLatency: number;
-      qualityScore: number;
-    }> = [];
-    const neutralEntries: Array<{ provider: SearchProvider; score: number }> = [];
-
-    for (const r of eligible) {
-      const m = this.getActiveMetrics(r.provider.name);
-      if (!m || m.successes + m.failures === 0) {
-        neutralEntries.push({ provider: r.provider, score: 0.5 });
-      } else {
-        const total = m.successes + m.failures;
-        metricsEntries.push({
-          provider: r.provider,
-          successRate: m.successes / total,
-          avgLatency: m.latencySamples > 0 ? m.avgLatency : Infinity,
-          qualityScore: m.resultSamples > 0 ? m.avgResultRatio : 0.5,
-        });
-      }
-    }
-
-    const finiteLatencies = metricsEntries.map((e) => e.avgLatency).filter((l) => l !== Infinity);
-    const maxLatency = finiteLatencies.length > 0 ? Math.max(...finiteLatencies) : 1;
-
-    const scoredEntries = metricsEntries.map((e) => {
-      const speedScore =
-        e.avgLatency === Infinity ? 0 : Math.max(0, 1 - e.avgLatency / (maxLatency || 1));
-      return {
-        provider: e.provider,
-        score: e.successRate * 0.5 + speedScore * 0.3 + e.qualityScore * 0.2,
-      };
-    });
-
-    return [...scoredEntries, ...neutralEntries].sort((a, b) => b.score - a.score);
-  }
-
-  private loadUsage(): void {
-    const data = this.persistence.load();
-    for (const [name, record] of Object.entries(data)) {
-      if (record.month === this.currentMonth) {
-        this.counts[name] = record.count;
-      }
-      // Different month — counts reset to 0 (already initialized)
-    }
-  }
-
-  private saveUsage(): void {
-    const data: Record<string, UsageRecord> = {};
-    for (const [name, count] of Object.entries(this.counts)) {
-      data[name] = { count, month: this.currentMonth };
-    }
-    this.persistence.save(data);
-  }
-
-  registerSearch(
-    provider: SearchProvider,
-    options: { tier: ProviderTier; monthlyQuota: number | null },
-  ): void {
-    this.searchProviders.set(provider.name, {
-      provider,
-      tier: options.tier,
-      monthlyQuota: options.monthlyQuota,
-    });
-  }
-
-  registerFetch(provider: FetchProvider): void {
-    this.fetchProviders.set(provider.name, { provider });
-  }
-
-  registerCodeSearch(provider: CodeSearchProvider): void {
-    this.codeSearchProviders.set(provider.name, { provider });
-  }
-
-  unregisterAll(name: string): void {
-    this.searchProviders.delete(name);
-    this.fetchProviders.delete(name);
-    this.codeSearchProviders.delete(name);
-    if (this.docsProvider?.name === name) {
-      this.docsProvider = undefined;
-    }
-  }
-
-  recordOutcome(providerName: string, result: { success: boolean; latencyMs?: number }): void {
-    // Increment usage count (both success and failure count as a "use")
-    const prevCount = this.counts[providerName] ?? 0;
-    this.counts[providerName] = prevCount + 1;
-    this.saveUsage();
-
-    // Emit quota warning when crossing the 80% threshold or exhaustion point
-    const reg = this.searchProviders.get(providerName);
-    if (reg?.monthlyQuota !== null && reg?.monthlyQuota !== undefined) {
-      const threshold = Math.floor(reg.monthlyQuota * ProviderRegistry.QUOTA_WARN_RATIO);
-      if (
-        (prevCount < threshold && this.counts[providerName] >= threshold) ||
-        (prevCount < reg.monthlyQuota && this.counts[providerName] >= reg.monthlyQuota)
-      ) {
-        const warning = this.getQuotaWarning(providerName);
-        if (warning) console.warn(warning);
-      }
-    }
-
-    // Update performance metrics (with rolling window)
-    const m = this.getOrCreateMetrics(providerName);
-    if (result.success) {
-      m.successes += 1;
-      if (result.latencyMs !== undefined) {
-        m.latencySamples += 1;
-        m.avgLatency += (result.latencyMs - m.avgLatency) / m.latencySamples;
-      }
-    } else {
-      m.failures += 1;
-    }
-  }
-
-  recordResultQuality(providerName: string, resultCount: number, requestedCount: number): void {
-    if (requestedCount <= 0 || resultCount < 0) return;
-    const m = this.getOrCreateMetrics(providerName);
-    m.resultSamples += 1;
-    const ratio = Math.min(1.0, resultCount / requestedCount);
-    m.avgResultRatio += (ratio - m.avgResultRatio) / m.resultSamples;
-  }
-
-  getRemaining(providerName: string): number {
-    const reg = this.searchProviders.get(providerName);
-    if (!reg) return 0;
-    if (reg.monthlyQuota === null) return Infinity;
-    return Math.max(0, reg.monthlyQuota - (this.counts[providerName] ?? 0));
+    return eligible
+      .map(([name, registration]) => {
+        const entry = measured.find((candidate) => candidate.provider.name === name);
+        if (!entry) return { provider: registration.provider, score: 0.5 };
+        const speed = entry.latency === Infinity ? 0 : Math.max(0, 1 - entry.latency / maxLatency);
+        return {
+          provider: registration.provider,
+          score: entry.successRate * 0.5 + speed * 0.3 + entry.quality * 0.2,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
   }
 
   selectSearchCandidates(name?: string): SearchProvider[] {
@@ -246,128 +425,79 @@ export class ProviderRegistry {
       const provider = this.searchProviders.get(name)?.provider;
       return provider ? [provider] : [];
     }
-
     const candidates: SearchProvider[] = [];
-    for (const tier of [1, 2, 3] as ProviderTier[]) {
-      const tierCandidates = [...this.searchProviders.values()]
-        .filter((r) => r.tier === tier)
-        .filter((r) => {
-          if (r.monthlyQuota === null) return true;
-          return (this.counts[r.provider.name] ?? 0) < r.monthlyQuota;
-        })
-        .sort((a, b) => this.getRemaining(b.provider.name) - this.getRemaining(a.provider.name));
-      candidates.push(...tierCandidates.map((c) => c.provider));
+    for (const tier of [1, 2, 3] as const) {
+      for (const [providerName, registration] of this.searchProviders) {
+        if (registration.tier === tier && this.isEligible(providerName)) {
+          candidates.push(registration.provider);
+        }
+      }
     }
     return candidates;
   }
 
-  /**
-   * Select the best search provider based on session performance metrics.
-   *
-   * Score = (success_rate * 0.5) + (speed_score * 0.3) + (quality_score * 0.2)
-   *
-   * Where:
-   *   success_rate  = successes / (successes + failures)  (within rolling window)
-   *   speed_score   = max(0, 1 - avg_latency / max_avg_latency)
-   *   quality_score = avg_result_ratio  (results received / results requested)
-   *
-   * Providers with no active metrics get a neutral score of 0.5.
-   */
   selectSearchByPerformance(name?: string): SearchProvider | undefined {
-    if (name && name !== "auto") {
-      return this.searchProviders.get(name)?.provider;
-    }
+    if (name && name !== "auto") return this.searchProviders.get(name)?.provider;
     return this.scoreEligibleProviders()[0]?.provider;
   }
 
   selectSearchByPerformanceAll(): SearchProvider[] {
-    return this.scoreEligibleProviders().map((s) => s.provider);
+    return this.scoreEligibleProviders().map(({ provider }) => provider);
   }
 
   selectSearchForFusion(strategy: SelectionStrategy, name?: string): SearchProvider[] {
-    if (name && name !== "auto") {
-      const provider = this.searchProviders.get(name)?.provider;
-      return provider ? [provider] : [];
-    }
-    if (strategy === "best-performing") {
-      return this.selectSearchByPerformanceAll();
-    }
-    return this.selectSearchCandidates();
+    if (name && name !== "auto") return this.selectSearchCandidates(name);
+    return strategy === "best-performing"
+      ? this.selectSearchByPerformanceAll()
+      : this.selectSearchCandidates();
   }
 
   selectFetchCandidates(): FetchProvider[] {
-    return [...this.fetchProviders.values()].map((r) => r.provider);
+    return [...this.fetchProviders.entries()]
+      .filter(([name]) => this.isEligible(name))
+      .map(([, provider]) => provider);
   }
 
   selectCodeSearch(): CodeSearchProvider | undefined {
-    const first = this.codeSearchProviders.values().next();
-    return first.done ? undefined : first.value.provider;
+    return [...this.codeSearchProviders.entries()].find(([name]) => this.isEligible(name))?.[1];
   }
 
-  registerDocs(provider: DocsProvider): void {
-    this.docsProvider = provider;
-  }
-
-  selectDocs(): DocsProvider | undefined {
-    return this.docsProvider;
+  selectDocs(name?: string): DocsProvider | undefined {
+    if (name) return this.docsProviders.get(name);
+    return [...this.docsProviders.entries()].find(([providerName]) =>
+      this.isEligible(providerName),
+    )?.[1];
   }
 
   getSearchProviderNames(): string[] {
     return [...this.searchProviders.keys()];
   }
 
-  private static readonly QUOTA_WARN_RATIO = 0.8;
-
-  /**
-   * Returns a warning string if a provider's usage is approaching its monthly quota.
-   * Returns null if no warning is needed (no quota, below threshold, or unknown provider).
-   */
-  getQuotaWarning(providerName: string): string | null {
-    const reg = this.searchProviders.get(providerName);
-    if (!reg || reg.monthlyQuota === null) return null;
-
-    const used = this.counts[providerName] ?? 0;
-    const threshold = Math.floor(reg.monthlyQuota * ProviderRegistry.QUOTA_WARN_RATIO);
-
-    if (used < threshold) return null;
-
-    const remaining = reg.monthlyQuota - used;
-    if (remaining <= 0) {
-      return `[pi-tools] ${providerName}: monthly quota exhausted (${used}/${reg.monthlyQuota}).`;
-    }
-    return `[pi-tools] ${providerName}: monthly usage at ${used}/${reg.monthlyQuota} (${remaining} remaining).`;
-  }
-
   getMetrics(providerName: string): ProviderMetrics | undefined {
     return this.metrics.get(providerName);
   }
 
-  /** @internal Exposed for tests to simulate window expiry without time mocking. */
   expireMetricsWindow(providerName: string): void {
-    const m = this.metrics.get(providerName);
-    if (m) {
-      m.windowStart = 0;
-    }
+    const metrics = this.metrics.get(providerName);
+    if (metrics) metrics.windowStart = 0;
   }
 }
 
 export function createFilePersistence(filePath?: string): PersistenceAdapter {
   const usagePath = filePath ?? path.join(getAgentDir(), "cache", "pi-tools", "usage.json");
-
   return {
-    load(): Record<string, UsageRecord> {
+    load(): UsageFileV2 | LegacyUsage {
       try {
-        return JSON.parse(fs.readFileSync(usagePath, "utf-8")) as Record<string, UsageRecord>;
+        const parsed: unknown = JSON.parse(fs.readFileSync(usagePath, "utf-8"));
+        if (isUsageFileV2(parsed) || isLegacyUsage(parsed)) return parsed;
       } catch {}
-      return {};
+      return { version: 2, counters: {} };
     },
-    save(data: Record<string, UsageRecord>): void {
+    save(data: UsageFileV2): void {
       try {
         fs.mkdirSync(path.dirname(usagePath), { recursive: true });
         fs.writeFileSync(usagePath, JSON.stringify(data, null, 2));
-      } catch {
-        // Non-fatal: usage tracking is best-effort
-      }
+      } catch {}
     },
   };
 }

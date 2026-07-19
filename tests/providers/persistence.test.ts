@@ -1,84 +1,69 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createFilePersistence } from "../../src/providers/registry.ts";
 import * as fs from "node:fs";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createFilePersistence } from "../../src/providers/registry.ts";
 
 vi.mock("node:fs");
+
+const empty = { version: 2 as const, counters: {} };
 
 describe("createFilePersistence", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-15"));
-    vi.mocked(fs.writeFileSync).mockImplementation(() => {});
     vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
+    vi.mocked(fs.writeFileSync).mockImplementation(() => {});
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.unstubAllEnvs();
+  it("loads v2 counters", () => {
+    const data = {
+      version: 2,
+      counters: {
+        brave: { used: 1.25, unit: "usd", period: "month", periodKey: "2026-07" },
+      },
+    };
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(data));
+
+    expect(createFilePersistence("/tmp/usage.json").load()).toEqual(data);
   });
 
-  describe("load", () => {
-    it("loads current month data in new format", () => {
-      vi.mocked(fs.readFileSync).mockReturnValue(
-        JSON.stringify({ brave: { count: 42, month: "2026-07" } }),
-      );
-      const adapter = createFilePersistence("/tmp/test-usage.json");
-      const data = adapter.load();
-      expect(data).toEqual({ brave: { count: 42, month: "2026-07" } });
-    });
-
-    it("returns empty object when file is missing", () => {
-      vi.mocked(fs.readFileSync).mockImplementation(() => {
-        throw new Error("ENOENT");
-      });
-      const adapter = createFilePersistence("/tmp/test-usage.json");
-      const data = adapter.load();
-      expect(data).toEqual({});
-    });
-
-    it("returns empty object on malformed JSON", () => {
-      vi.mocked(fs.readFileSync).mockReturnValue("not json at all");
-      const adapter = createFilePersistence("/tmp/test-usage.json");
-      const data = adapter.load();
-      expect(data).toEqual({});
-    });
+  it.each([
+    "not json",
+    JSON.stringify({ version: 3, counters: {} }),
+    JSON.stringify({ version: 2, counters: [] }),
+    JSON.stringify({ version: 2, counters: { brave: { used: "one" } } }),
+  ])("loads malformed or unknown data as empty v2 state", (raw) => {
+    vi.mocked(fs.readFileSync).mockReturnValue(raw);
+    expect(createFilePersistence("/tmp/usage.json").load()).toEqual(empty);
   });
 
-  describe("save", () => {
-    it("uses Pi's agent cache directory by default", () => {
-      vi.stubEnv("PI_CODING_AGENT_DIR", "/tmp/pi-agent");
-      const adapter = createFilePersistence();
+  it("retains legacy records for registry migration", () => {
+    const legacy = { brave: { count: 42, month: "2026-07" } };
+    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(legacy));
+    expect(createFilePersistence("/tmp/usage.json").load()).toEqual(legacy);
+  });
 
-      adapter.save({ brave: { count: 10, month: "2026-07" } });
+  it("uses Pi's agent cache directory and writes synchronously", () => {
+    vi.stubEnv("PI_CODING_AGENT_DIR", "/tmp/pi-agent");
+    createFilePersistence().save(empty);
 
-      expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/pi-agent/cache/pi-tools", {
-        recursive: true,
-      });
-      expect(fs.writeFileSync).toHaveBeenCalledWith(
-        "/tmp/pi-agent/cache/pi-tools/usage.json",
-        JSON.stringify({ brave: { count: 10, month: "2026-07" } }, null, 2),
-      );
+    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/pi-agent/cache/pi-tools", {
+      recursive: true,
     });
+    expect(fs.writeFileSync).toHaveBeenCalledWith(
+      "/tmp/pi-agent/cache/pi-tools/usage.json",
+      JSON.stringify(empty, null, 2),
+    );
+  });
 
-    it("writes data as JSON to the primary path", () => {
-      const adapter = createFilePersistence("/tmp/test-usage.json");
-      adapter.save({ brave: { count: 10, month: "2026-07" } });
-
-      expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp", { recursive: true });
-      expect(fs.writeFileSync).toHaveBeenCalledWith(
-        "/tmp/test-usage.json",
-        JSON.stringify({ brave: { count: 10, month: "2026-07" } }, null, 2),
-      );
+  it("treats missing files and write failures as non-fatal", () => {
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error("ENOENT");
     });
+    const adapter = createFilePersistence("/tmp/usage.json");
+    expect(adapter.load()).toEqual(empty);
 
-    it("is silent on write failure", () => {
-      vi.mocked(fs.writeFileSync).mockImplementation(() => {
-        throw new Error("EACCES");
-      });
-      const adapter = createFilePersistence("/tmp/test-usage.json");
-      // Should not throw
-      expect(() => adapter.save({ brave: { count: 1, month: "2026-07" } })).not.toThrow();
+    vi.mocked(fs.writeFileSync).mockImplementation(() => {
+      throw new Error("EACCES");
     });
+    expect(() => adapter.save(empty)).not.toThrow();
   });
 });
