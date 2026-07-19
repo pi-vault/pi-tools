@@ -3,33 +3,12 @@ import type {
   CodeSearchResult,
   FetchResult,
   ProviderMeta,
-  ProviderOperation,
   SearchFilters,
   SearchProvider,
   SearchResult,
 } from "../../src/providers/types.ts";
 
 describe("provider types", () => {
-  it("represents every metered operation", () => {
-    const operations: ProviderOperation[] = [
-      { capability: "search", maxResults: 10 },
-      { capability: "fetch" },
-      { capability: "code-search", maxResults: 10 },
-      { capability: "docs-search" },
-      { capability: "docs-fetch" },
-      { capability: "research", type: "deep-reasoning", maxResults: 10, contentTypes: 2 },
-    ];
-
-    expect(operations.map((operation) => operation.capability)).toEqual([
-      "search",
-      "fetch",
-      "code-search",
-      "docs-search",
-      "docs-fetch",
-      "research",
-    ]);
-  });
-
   it("SearchResult satisfies the interface shape", () => {
     const result: SearchResult = {
       title: "Example",

@@ -23,16 +23,7 @@ export function buildStatusTable(
   const names = registry.getProviderNames();
   if (names.length === 0) return "No providers registered.";
 
-  const rows: Array<{
-    name: string;
-    tier: string;
-    used: string;
-    limit: string;
-    unit: string;
-    period: string;
-    session: string;
-    latency: string;
-  }> = [];
+  const rows: string[][] = [];
 
   for (const name of names) {
     const tier = tierMap.get(name) ?? 3;
@@ -61,68 +52,31 @@ export function buildStatusTable(
       latencyStr = `${avgMs}ms`;
     }
 
-    rows.push({
-      name,
-      tier: String(tier),
-      used,
-      limit,
-      unit,
-      period,
-      session: sessionStr,
-      latency: latencyStr,
-    });
+    rows.push([name, String(tier), used, limit, unit, period, sessionStr, latencyStr]);
   }
 
-  const headers = {
-    name: "Provider",
-    tier: "Tier",
-    used: "Used",
-    limit: "Limit",
-    unit: "Unit",
-    period: "Period",
-    session: "Session (ok/fail)",
-    latency: "Avg Latency",
-  };
-
-  const colWidths = {
-    name: Math.max(headers.name.length, ...rows.map((r) => r.name.length)),
-    tier: Math.max(headers.tier.length, ...rows.map((r) => r.tier.length)),
-    used: Math.max(headers.used.length, ...rows.map((r) => r.used.length)),
-    limit: Math.max(headers.limit.length, ...rows.map((r) => r.limit.length)),
-    unit: Math.max(headers.unit.length, ...rows.map((r) => r.unit.length)),
-    period: Math.max(headers.period.length, ...rows.map((r) => r.period.length)),
-    session: Math.max(headers.session.length, ...rows.map((r) => r.session.length)),
-    latency: Math.max(headers.latency.length, ...rows.map((r) => r.latency.length)),
-  };
-
-  const sep = "  ";
-  const headerLine = [
-    headers.name.padEnd(colWidths.name),
-    headers.tier.padEnd(colWidths.tier),
-    headers.used.padStart(colWidths.used),
-    headers.limit.padStart(colWidths.limit),
-    headers.unit.padEnd(colWidths.unit),
-    headers.period.padEnd(colWidths.period),
-    headers.session.padStart(colWidths.session),
-    headers.latency.padStart(colWidths.latency),
-  ].join(sep);
-
-  const divider = "-".repeat(headerLine.length);
-
-  const dataLines = rows.map((r) =>
-    [
-      r.name.padEnd(colWidths.name),
-      r.tier.padEnd(colWidths.tier),
-      r.used.padStart(colWidths.used),
-      r.limit.padStart(colWidths.limit),
-      r.unit.padEnd(colWidths.unit),
-      r.period.padEnd(colWidths.period),
-      r.session.padStart(colWidths.session),
-      r.latency.padStart(colWidths.latency),
-    ].join(sep),
+  const headers = [
+    "Provider",
+    "Tier",
+    "Used",
+    "Limit",
+    "Unit",
+    "Period",
+    "Session (ok/fail)",
+    "Avg Latency",
+  ];
+  const widths = headers.map((header, column) =>
+    Math.max(header.length, ...rows.map((row) => row[column].length)),
   );
-
-  return [headerLine, divider, ...dataLines].join("\n");
+  const rightAligned = new Set([2, 3, 6, 7]);
+  const render = (row: string[]) =>
+    row
+      .map((cell, column) =>
+        rightAligned.has(column) ? cell.padStart(widths[column]) : cell.padEnd(widths[column]),
+      )
+      .join("  ");
+  const header = render(headers);
+  return [header, "-".repeat(header.length), ...rows.map(render)].join("\n");
 }
 
 const USAGE = `Usage: /tools [subcommand]
