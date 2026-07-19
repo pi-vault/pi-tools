@@ -79,7 +79,7 @@ export default function createExtension(pi: ExtensionAPI): void {
           configManager.refresh();
           return registry.selectCodeSearch();
         },
-        // Usage tick only — code-search has no failure callback
+        // Success outcome only — code-search has no failure callback
         (providerName) => registry.recordOutcome(providerName, { success: true }),
         configManager.current.guidance?.code_search,
       ),

@@ -51,7 +51,7 @@ export function createCodeSearchTool(
           content: [
             {
               type: "text" as const,
-              text: "code_search requires an Exa API key. Set the EXA_API_KEY environment variable or configure it in ~/.pi/agent/extensions/tools.json.",
+              text: "code_search requires an Exa API key. Set the EXA_API_KEY environment variable or configure it in $PI_CODING_AGENT_DIR/extensions/tools.json.",
             },
           ],
           details: { provider: "none", resultCount: 0 },

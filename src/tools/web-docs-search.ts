@@ -116,7 +116,7 @@ export function createWebDocsSearchTool(
           content: [
             {
               type: "text" as const,
-              text: "web_docs_search requires a Context7 API key. Set the CONTEXT7_API_KEY environment variable or configure it in ~/.pi/agent/extensions/tools.json under providers.context7.apiKey.",
+              text: "web_docs_search requires a Context7 API key. Set the CONTEXT7_API_KEY environment variable or configure it in $PI_CODING_AGENT_DIR/extensions/tools.json under providers.context7.apiKey.",
             },
           ],
           details: { provider: "none", resultCount: 0, libraryName },
