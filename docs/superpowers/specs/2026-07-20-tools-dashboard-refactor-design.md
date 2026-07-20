@@ -1,134 +1,197 @@
 # /tools Dashboard Refactor — Design Spec
 
-> **Status:** Approved
+> **Status:** Revised for implementation
 > **Date:** 2026-07-20
-> **Drivers:** Replace typed subcommand UX with an interactive overlay dashboard
 
-## Rationale
+## Goal
 
-The current `/tools` command exposes 9+ subcommands (status, enable, disable, key, test, default, reload, monitor, setup) plus legacy flags (`--status`, `--reload`). This is hard to discover, forces users to remember exact syntax, and provides no visual feedback for complex operations like provider configuration.
+Replace the typed `/tools` command interface with a four-tab overlay dashboard that matches the `/usage` shell while preserving safe, scope-aware provider configuration.
 
-The new design replaces all typed subcommands with a tabbed overlay dashboard — the same interaction model used by `/usage` — making provider management visual, discoverable, and keyboard-driven.
+## Scope
+
+`/tools` becomes a tabs-only command:
+
+- `/tools` opens the dashboard.
+- `/tools <anything>` shows a migration hint and performs no action.
+- The old subcommands and setup wizard are removed.
+
+The four tabs are **Providers**, **Status**, **Test**, and **Activity**. No new package or runtime dependency on `pi-usage` is introduced.
 
 ## Architecture
 
+```text
+/tools
+  └─ tools.ts
+       └─ ctx.ui.custom(..., { overlay: true })
+            └─ tools-dashboard.ts (Component)
+                 ├─ Providers
+                 ├─ Status
+                 ├─ Test
+                 └─ Activity
 ```
-/tools (no args)   →   tools-dashboard.ts (overlay Component)
-                            ├── Providers tab  (provider list, toggle, keys, scope)
-                            ├── Status tab     (budget/metrics table w/ reload)
-                            ├── Test tab       (run single/all, inline results, abort)
-                            └── Activity tab   (latest 10 entries, widget toggle)
-/tools <anything>   →   ctx.ui.notify() with migration hint
+
+The frame, tab pills, ANSI-safe padding, and theme adapter are copied into `src/tui/` from `pi-usage`:
+
+- `src/tui/dashboard-theme.ts`
+- `src/tui/overlay-render.ts`
+
+They import only `@earendil-works/pi-tui`, `@earendil-works/pi-coding-agent`, and local modules. `pi-tools` never imports from the `pi-usage` package or repository at runtime.
+
+Responsibilities:
+
+- `tools-actions.ts`: pure key classification, project-path resolution, safe document reads/writes, scoped provider/default updates, and provider test execution.
+- `tools-dashboard.ts`: rendering, tab state, keyboard handling, and action results. It receives current effective config and callbacks; it does not read or write files directly.
+- `tools.ts`: command entry point, dashboard loop, action orchestration, and activity-widget ownership.
+- `ConfigManager`: remains the source of effective runtime configuration and is refreshed after writes.
+
+## Overlay Shell
+
+Use the same `ctx.ui.custom()` factory and overlay options as `/usage`:
+
+```ts
+await ctx.ui.custom<void>(
+  (tui, theme, keybindings, done) =>
+    new ToolsDashboardComponent({
+      tui,
+      theme: fromPiTheme(theme),
+      keybindings,
+      done,
+      // state and action callbacks
+    }),
+  {
+    overlay: true,
+    overlayOptions: { anchor: "center", maxHeight: "85%", width: "92%" },
+  },
+);
 ```
 
-### New files
+Use `matchesKey(data, Key.*)` from `@earendil-works/pi-tui`; do not hand-roll terminal escape-sequence maps. Call `tui.requestRender()` after navigation, state changes, and async test/activity updates. Every rendered line must be ANSI-safely truncated to the supplied width.
 
-- `src/commands/dashboard-theme.ts` — ported from pi-usage; theme adapter + ANSI-safe layout utils
-- `src/commands/overlay-render.ts` — ported from pi-usage; frame, tab bar, padding helpers
-- `src/commands/tools-dashboard.ts` — overlay Component with 4 tabs
-- `src/commands/tools-actions.ts` — scoped config writes (global/project) + test execution logic
+The component implements `render(width)`, `handleInput(data)`, `invalidate()`, and `dispose()`. `dispose()` aborts an active test and unsubscribes component-owned listeners.
 
-### Deleted files
+## Providers Tab
 
-- `src/commands/tools-setup.ts` — replaced by Providers tab
-- `src/commands/tools-subcommands.ts` — subcommand logic deleted, no typed subcommands
+Display every provider from `allProviders`, including providers that are currently disabled or missing credentials. Each row contains:
 
-### Modified files
+- provider name
+- tier
+- effective enabled state from the loaded config, not `registry.getMetrics()`
+- key state: `set`, `unset`, or `env: NAME`; never display a secret value
+- budget mode/unit
+- default marker for the effective `defaultProvider`
 
-- `src/commands/tools.ts` — thin dispatch: no args → dashboard, args → migration error
-- `src/index.ts` — wire dashboard reset on session_shutdown (already wired for monitor)
-- `tests/commands/tools.test.ts` — point at dashboard dispatch + migration
-- `tests/commands/tools-subcommands.test.ts` — delete
-- `tests/commands/tools-setup.test.ts` — delete
+Navigation:
 
-## Tab Design
+- Up/Down selects a provider.
+- Left/Right switches between Global and Project scope.
+- Enter returns a `toggle` action.
+- `k` returns a `set-key` action; the command handler owns the input prompt.
+- `d` returns a `set-default` action.
 
-### 1. Providers Tab
+The component returns actions through `done()` or an action callback so the command handler can perform file I/O and reopen/render fresh state. No key is ever placed in the dashboard render output.
 
-- Lists all providers with: name, tier badge, enabled/disabled status, key status (set/unset/env), budget mode
-- Navigate with Up/Down, Enter to toggle enable/disable
-- 'k' key: set API key for selected provider (triggers ctx.ui.input modal)
-- 'd' key: set as default provider
-- L/R: toggle config scope (Global / Project)
-  - Global scope: writes to `<agentDir>/extensions/tools.json`
-  - Project scope: writes to `.pi/tools.json`; env-ref keys only; literal keys rejected; key editing blocked in untrusted projects
+## Config Scope and Security
 
-### 2. Status Tab
+### Paths
 
-- Reuses `buildStatusTable()` from current tools.ts
-- Renders full provider status table inside the overlay
-- 'r' key: trigger config reload, refresh display
-- Budget pools and consumption visible inline
+- Global: `getConfigPath()` (`<agentDir>/extensions/tools.json`).
+- Project: `findProjectConfigPath(ctx.cwd)` for the nearest existing `.pi/tools.json`; if none exists, use `<ctx.cwd>/.pi/tools.json`.
 
-### 3. Test Tab
+Project scope is selectable when the project is trusted or a project config exists. The dashboard displays the selected target path. Global is the default.
 
-- Shows provider names as selectable items
-- Navigate with Up/Down, Enter or 't' to test single provider
-- 'a' key: test all providers
-- Results appear inline below each provider (pass/fail, latency, result count)
-- Running indicator for in-progress tests
-- Any active test is automatically aborted when overlay closes (via AbortController)
+### Writes
 
-### 4. Activity Tab
+Use a read-modify-write operation that preserves unknown JSON fields and all untouched provider fields:
 
-- Shows latest 10 activity entries (reuses ActivityMonitor)
-- 'w' key: toggle widget on/off
-- Widget state persists after overlay close — only session_shutdown resets it
-- Inline display mimics current widget format
+1. Read the target file.
+2. If it does not exist (`ENOENT`), start with `{}`.
+3. If it exists but contains malformed JSON, return an error and do not call `writeFileSync`.
+4. If another read error occurs, return an error and do not write.
+5. Apply a narrow updater.
+6. Write formatted JSON only after successful parsing/updating.
 
-## Keyboard Conventions (matching /usage)
+Project writes require `ctx.isProjectTrusted() === true`. Project credential values must match the environment-variable-name pattern `^[A-Z][A-Z0-9_]+$`. Literal secrets and values beginning with `!` (shell commands) are rejected. This restriction applies to new or edited `providers.<name>.apiKey` values. Global scope accepts the existing literal/env/shell formats.
 
-| Key             | Action                                   |
-| --------------- | ---------------------------------------- |
-| Tab / Shift+Tab | Next / previous tab                      |
-| Up / Down       | Navigate items within tab                |
-| Left / Right    | Tab-contextual (scope, period, provider) |
-| Enter           | Primary action (toggle, select)          |
-| q / Esc         | Close overlay                            |
-| r               | Reload (Status tab)                      |
-| t               | Test selected (Test tab)                 |
-| a               | Test all (Test tab)                      |
-| w               | Toggle widget (Activity tab)             |
-| k               | Set API key (Providers tab)              |
-| d               | Set default provider (Providers tab)     |
+A rejected or failed action leaves the file unchanged and reports a warning through `ctx.ui.notify()`.
 
-## Config Scope Model
+### Actions
 
-| Aspect                        | Global                             | Project                       |
-| ----------------------------- | ---------------------------------- | ----------------------------- |
-| Target file                   | `<agentDir>/extensions/tools.json` | `.pi/tools.json`              |
-| Literal API keys              | OK                                 | Blocked                       |
-| Env-ref keys (!cmd / ENV_VAR) | OK                                 | OK                            |
-| Key editing (overlay)         | Full                               | Blocked in untrusted projects |
-| Provider toggling             | OK                                 | OK                            |
+- Toggle updates only `providers.<name>.enabled`.
+- Set key updates only `providers.<name>.apiKey`, after scope/trust validation.
+- Set default updates only `defaultProvider`; permitted values are `auto` or a known provider name.
+- Reload refreshes `ConfigManager` and the dashboard reads the new effective config.
 
-Detection: if `.pi/tools.json` exists or `cwd` is trusted, Project scope is available. Defaults to Global.
+## Status Tab
 
-## Migration Path
+Reuse the existing `buildStatusTable(registry, tierMap)` output. Render it through the ANSI-safe frame, truncating/wrapping long rows for narrow overlays. `r` refreshes `ConfigManager`, invalidates the component, and requests a render.
 
-Old users who type `/tools status`, `/tools enable brave`, etc. see:
+## Test Tab
 
+Show enabled search providers available in the registry. Up/Down selects; Enter or `t` tests one; `a` tests all. Provider calls use the actual signature:
+
+```ts
+provider.search("test", 1, signal);
 ```
+
+Tests report pass/fail, latency, and result count inline. Each run owns an `AbortController`; `dispose()` aborts it. A rejected provider call becomes a failed result rather than an unhandled promise rejection. Completion updates the component and calls `tui.requestRender()`.
+
+## Activity Tab and Widget
+
+Render the existing `activityMonitor.getEntries()` using `formatEntryLine()` and the latest ten entries. `w` toggles the persistent `pi-tools-activity` widget through `ctx.ui.setWidget()`.
+
+Widget ownership remains in the `tools.ts` command closure, not in individual dashboard instances:
+
+- one subscription at most
+- toggling off unsubscribes and clears the widget
+- closing/reopening the dashboard preserves the enabled state
+- `session_shutdown` unsubscribes, clears the widget, and clears monitor entries
+
+The active dashboard receives an update callback that calls `tui.requestRender()` when activity changes.
+
+## Migration and Non-UI Behavior
+
+The migration message is:
+
+```text
 /tools no longer supports typed subcommands.
 Use /tools (no arguments) to open the interactive dashboard.
-The dashboard provides all previous functionality (status, enable/disable, keys, test, etc.) through tabs.
+The dashboard provides the previous status, provider, key, test, default, reload, and monitor actions through tabs.
 ```
 
-No deprecation period — all functionality exists in the dashboard. No old subcommand code retained.
+If `ctx.hasUI` is false, `/tools` reports that the dashboard requires interactive UI instead of calling `ctx.ui.custom()`.
 
-## Dependencies
+## Files
 
-- **No new npm packages.** `@earendil-works/pi-tui` already a transitive dependency of pi-coding-agent (imported by pi-usage pattern).
-- `dashboard-theme.ts` and `overlay-render.ts` ported from pi-usage without importing pi-usage modules.
-- ActivityMonitor, ProviderRegistry, config.ts — all existing pi-tools modules.
+Create:
+
+- `src/tui/dashboard-theme.ts`
+- `src/tui/overlay-render.ts`
+- `src/commands/tools-actions.ts`
+- `src/commands/tools-dashboard.ts`
+- `tests/commands/tools-actions.test.ts`
+- `tests/commands/tools-dashboard.test.ts`
+
+Modify:
+
+- `src/commands/tools.ts`
+- `src/index.ts` only if required to pass widget/session lifecycle callbacks
+- `tests/commands/tools.test.ts`
+
+Delete:
+
+- `src/commands/tools-setup.ts`
+- `src/commands/tools-subcommands.ts`
+- their obsolete tests
 
 ## Acceptance Criteria
 
-1. `/tools` opens overlay with 4 tabs, no typed subcommands accepted
-2. Global scope provider toggling and key setting works (writes to tools.json)
-3. Project scope blocks literal keys, shows env-refs only
-4. Status tab shows budget/metrics table, 'r' reloads
-5. Test tab runs single/all with inline results, aborts on close
-6. Activity tab shows entries, widget toggle persists after close, resets on shutdown
-7. All old tests obsolete or migrated; no new dependencies
-8. No imports from pi-usage
+1. `/tools` opens a centered four-tab overlay; arguments are rejected with the migration hint.
+2. Providers shows all provider rows with effective enabled/key/default/budget state.
+3. Global toggle, key, and default actions persist changes while preserving unknown fields.
+4. Project writes use the nearest/fallback project path, reject malformed overwrites, require trust, and accept only environment-variable names for credentials.
+5. Status renders budget/metrics and reloads with `r`.
+6. Test runs one/all providers with inline results, correct abort propagation, and repainting.
+7. Activity renders the latest ten entries; widget state persists across overlay reopen and is cleaned up at shutdown.
+8. All dashboard output respects width and uses the `/usage` frame/tab conventions.
+9. Tests cover every acceptance criterion; `pnpm check` passes.
+10. No `pi-usage` imports and no package dependency changes.
