@@ -1,6 +1,10 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { ProviderRegistry } from "../providers/registry.ts";
 import type { ProviderTier } from "../providers/types.ts";
+import { fromPiTheme } from "../tui/dashboard-theme.ts";
+import { activityMonitor } from "../monitor/activity-monitor.ts";
+import { renderWidgetLines } from "../monitor/widget.ts";
+import { type DashboardAction, ToolsDashboardComponent } from "./tools-dashboard.ts";
 import {
   parseArgs,
   handleToggle,
@@ -8,9 +12,6 @@ import {
   handleDefault,
   handleTest,
 } from "./tools-subcommands.ts";
-import { handleEnhancedSetup } from "./tools-setup.ts";
-import { activityMonitor } from "../monitor/activity-monitor.ts";
-import { renderWidgetLines } from "../monitor/widget.ts";
 
 function formatAmount(value: number, unit: string): string {
   return unit === "usd" ? value.toFixed(6) : value.toLocaleString("en-US");
@@ -82,7 +83,7 @@ export function buildStatusTable(
 const USAGE = `Usage: /tools [subcommand]
 
 Subcommands:
-  (no args)          Interactive setup wizard
+  (no args)          Open the Status dashboard
   status             Show provider status table
   reload             Refresh config from disk
   enable <name>      Enable a provider
@@ -103,9 +104,33 @@ export function createToolsCommand(
   return {
     name: "tools",
     description:
-      "Manage search/fetch providers. Run with no args for setup wizard, or use subcommands (status, enable, disable, key, test, default, reload, monitor).",
+      "Manage search/fetch providers. Run with no args for the Status dashboard, or use subcommands (status, enable, disable, key, test, default, reload, monitor).",
 
     async handler(args: string, ctx: ExtensionCommandContext) {
+      if (args.trim() === "") {
+        if (ctx.mode !== "tui") {
+          ctx.ui.notify("/tools requires an interactive TUI", "warning");
+          return;
+        }
+        while (true) {
+          const action = await ctx.ui.custom<DashboardAction>(
+            (tui, theme, _keybindings, done) =>
+              new ToolsDashboardComponent({
+                tui,
+                theme: fromPiTheme(theme),
+                renderStatusTable: () => buildStatusTable(registry, tierMap),
+                done,
+              }),
+            {
+              overlay: true,
+              overlayOptions: { anchor: "center", maxHeight: "85%", width: "92%" },
+            },
+          );
+          if (!action || action.type === "close") return;
+          onReload?.();
+        }
+      }
+
       const providers = allProviderNames ?? [];
       const { subcommand, rest } = parseArgs(args);
 
@@ -121,10 +146,6 @@ export function createToolsCommand(
       }
 
       switch (subcommand) {
-        case "":
-          await handleEnhancedSetup(ctx, providers, tierMap);
-          break;
-
         case "status":
           ctx.ui.notify(buildStatusTable(registry, tierMap));
           break;
