@@ -18,7 +18,6 @@ function dashboard(
   return {
     done,
     tui,
-    subscribeActivity,
     component: new ToolsDashboardComponent({
       tui: tui as never,
       theme: noTheme,

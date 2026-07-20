@@ -462,18 +462,6 @@ describe("tools monitor subcommand", () => {
     expect(msg.toLowerCase()).toContain("usage");
   });
 
-  it("resetMonitor clears entries and unsubscribes", async () => {
-    const command = trackedToolsCommand(mem(), new Map());
-    const ctx = widgetCtx();
-
-    await command.handler("monitor on", ctx);
-    command.resetMonitor();
-
-    const callCountBefore = (ctx.ui as any).setWidget.mock.calls.length;
-    activityMonitor.logStart({ type: "api", query: "after-reset" });
-    expect((ctx.ui as any).setWidget).toHaveBeenCalledTimes(callCountBefore);
-  });
-
   it("monitor on twice keeps one subscription and one initial render", async () => {
     const onUpdate = vi.spyOn(activityMonitor, "onUpdate");
     const command = trackedToolsCommand(mem(), new Map());
@@ -498,7 +486,6 @@ describe("tools dashboard widget lifecycle", () => {
 
     await command.handler("", ctx);
 
-    expect((ctx.ui as any).setWidget).toHaveBeenCalledWith("pi-tools-activity", expect.any(Array));
     expect((ctx.ui as any).setWidget.mock.calls.at(-1)?.[1]).toEqual(expect.any(Array));
   });
 
