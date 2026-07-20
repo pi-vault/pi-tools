@@ -31,6 +31,7 @@
 ### Task 1: Implement safe scoped configuration actions
 
 **Files:**
+
 - Create: `src/commands/tools-actions.ts`
 - Create: `tests/commands/tools-actions.test.ts`
 - Modify: `src/config.ts`
@@ -66,7 +67,7 @@ describe("project credential policy", () => {
     expect(classifyCredential("lower_case").kind).toBe("literal");
   });
 
-  it.each(["literal-secret", "!op read op://vault/key", "lower_case"]) (
+  it.each(["literal-secret", "!op read op://vault/key", "lower_case"])(
     "rejects project credential %s before reading or writing",
     (value) => {
       expect(() =>
@@ -103,10 +104,12 @@ describe("project config target", () => {
 
 describe("safe read-modify-write", () => {
   it("preserves unknown root and provider fields", () => {
-    vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({
-      extra: { keep: true },
-      providers: { brave: { enabled: false, custom: 7 } },
-    }));
+    vi.mocked(fs.readFileSync).mockReturnValue(
+      JSON.stringify({
+        extra: { keep: true },
+        providers: { brave: { enabled: false, custom: 7 } },
+      }),
+    );
     vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
     vi.mocked(fs.writeFileSync).mockImplementation(() => undefined);
 
@@ -116,13 +119,15 @@ describe("safe read-modify-write", () => {
       true,
     );
 
-    const written = JSON.parse(String(vi.mocked(fs.writeFileSync).mock.calls[0][1]));
+    const written = JSON.parse(
+      String(vi.mocked(fs.writeFileSync).mock.calls[0][1]),
+    );
     expect(written.extra.keep).toBe(true);
     expect(written.providers.brave.custom).toBe(7);
     expect(written.providers.brave.enabled).toBe(true);
   });
 
-  it.each(["{ malformed", "null", "[]"]) (
+  it.each(["{ malformed", "null", "[]"])(
     "does not overwrite invalid document %s",
     (raw) => {
       vi.mocked(fs.readFileSync).mockReturnValue(raw);
@@ -231,7 +236,7 @@ Import `CONFIG_DIR_NAME` alongside `getAgentDir` in `src/config.ts`, replace `pa
 Use `const ENV_NAME = /^[A-Z][A-Z0-9_]+$/`. Classify `!` first, then env names, then literals. Import `CONFIG_DIR_NAME` in `tools-actions.ts` and resolve project targets with:
 
 ```ts
-findProjectConfigPath(cwd) ?? path.join(cwd, CONFIG_DIR_NAME, "tools.json")
+findProjectConfigPath(cwd) ?? path.join(cwd, CONFIG_DIR_NAME, "tools.json");
 ```
 
 Reject untrusted project writes in target selection before any read. Reject non-env project keys in `setProviderKey` before calling `updateScopedConfig`.
@@ -246,7 +251,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function readDocument(filePath: string): Record<string, unknown> {
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(filePath, "utf8"));
-    if (!isRecord(parsed)) throw new Error("Tools config root must be a JSON object");
+    if (!isRecord(parsed))
+      throw new Error("Tools config root must be a JSON object");
     return parsed;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
@@ -281,6 +287,7 @@ Expected: all action tests pass.
 ### Task 2: Add the Providers tab
 
 **Files:**
+
 - Modify: `src/commands/tools-dashboard.ts`
 - Modify: `tests/commands/tools-dashboard.test.ts`
 
@@ -408,6 +415,7 @@ git commit -m "feat: add tools provider configuration tab"
 ### Task 3: Orchestrate provider actions and refresh effective config
 
 **Files:**
+
 - Modify: `src/commands/tools.ts`
 - Modify: `src/index.ts`
 - Modify: `tests/commands/tools.test.ts`
@@ -481,13 +489,14 @@ let resumeState: DashboardResumeState = { activeTab: "providers" };
 Before each `custom()` call, derive:
 
 ```ts
-const scope: DashboardScope = selectedScope === "global"
-  ? { kind: "global", path: getConfigPath(), canEditKeys: true }
-  : {
-      kind: "project",
-      path: findWritableProjectPath(ctx.cwd),
-      canEditKeys: ctx.isProjectTrusted(),
-    };
+const scope: DashboardScope =
+  selectedScope === "global"
+    ? { kind: "global", path: getConfigPath(), canEditKeys: true }
+    : {
+        kind: "project",
+        path: findWritableProjectPath(ctx.cwd),
+        canEditKeys: ctx.isProjectTrusted(),
+      };
 ```
 
 Pass current `deps.getConfig()`, scope, provider names, tiers, `initialTab: resumeState.activeTab`, and `initialProvider: resumeState.selectedProvider` to the component. Preserve Phase 2 Activity/widget options.
