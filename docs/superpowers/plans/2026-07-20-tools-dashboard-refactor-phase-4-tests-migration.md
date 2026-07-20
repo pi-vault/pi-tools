@@ -242,12 +242,13 @@ it("tests the selected provider and repaints before and after", async () => {
   });
   component.handleInput("\t");
   component.handleInput("\t");
+  const beforeTest = tui.requestRender.mock.calls.length;
   component.handleInput("\r");
   await vi.waitFor(() => {
     expect(component.render(140).join("\n")).toContain("OK");
   });
   expect(search).toHaveBeenCalledWith("test", 1, expect.any(AbortSignal));
-  expect(tui.requestRender).toHaveBeenCalledTimes(2);
+  expect(tui.requestRender.mock.calls.length - beforeTest).toBe(2);
 });
 
 it("tests all providers with a", async () => {
@@ -258,6 +259,40 @@ it("tests all providers with a", async () => {
   await vi.waitFor(() => {
     expect(registry.selectSearchCandidates).toHaveBeenCalled();
   });
+});
+
+it("ignores a stale provider test that finishes after its replacement", async () => {
+  let resolveFirst!: (value: { url: string }[]) => void;
+  let resolveSecond!: (value: { url: string }[]) => void;
+  const first = new Promise<{ url: string }[]>((resolve) => {
+    resolveFirst = resolve;
+  });
+  const second = new Promise<{ url: string }[]>((resolve) => {
+    resolveSecond = resolve;
+  });
+  const search = vi
+    .fn()
+    .mockImplementationOnce(() => first)
+    .mockImplementationOnce(() => second);
+  const { component, tui } = dashboard(vi.fn(), {
+    searchProvider: { name: "brave", label: "Brave", search },
+  });
+  component.handleInput("\t");
+  component.handleInput("\t");
+  component.handleInput("t");
+  component.handleInput("t");
+
+  resolveSecond([{ url: "second-1" }, { url: "second-2" }]);
+  await vi.waitFor(() => {
+    expect(component.render(140).join("\n")).toContain("2 results");
+  });
+  const rendersAfterCurrent = tui.requestRender.mock.calls.length;
+
+  resolveFirst([]);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(component.render(140).join("\n")).toContain("2 results");
+  expect(tui.requestRender).toHaveBeenCalledTimes(rendersAfterCurrent);
 });
 
 it("aborts a running provider test on dispose", async () => {
@@ -276,6 +311,19 @@ it("aborts a running provider test on dispose", async () => {
   component.dispose();
   expect(receivedSignal?.aborted).toBe(true);
 });
+
+it("keeps the selected test visible in a ten-row window", () => {
+  const names = Array.from({ length: 12 }, (_, index) => `provider-${index}`);
+  const { component } = dashboard(vi.fn(), { searchProviderNames: names });
+  component.handleInput("\t");
+  component.handleInput("\t");
+  for (let index = 0; index < 11; index += 1) component.handleInput("\u001b[B");
+
+  const output = component.render(80).join("\n");
+  expect(output).toContain("provider-11");
+  expect(output).not.toContain("provider-0");
+  expect(output).toContain("Showing 3–12 of 12");
+});
 ```
 
 The fixture extension must be a normal constructor option/registry double, not a production-only test setter.
@@ -290,9 +338,11 @@ Expected: Test tab cases fail.
 
 - [ ] **Step 3: Extend the component with async test state**
 
-Add `registry: ProviderRegistry` to `DashboardOptions`. Use the final tab order:
+Add `registry: ProviderRegistry` to `DashboardOptions`, extend `DashboardTabId` to include `"test"`, and use the final tab order:
 
 ```ts
+export type DashboardTabId = "providers" | "status" | "test" | "activity";
+
 const TABS = [
   { id: "providers", label: "Providers" },
   { id: "status", label: "Status" },
@@ -329,7 +379,7 @@ private async testSelected(): Promise<void> {
 
 Implement `testAll()` the same way with `runProviderTests()`. `handleInput()` starts them with `void this.testSelected()`/`void this.testAll()` so it still satisfies `Component`.
 
-Render provider selection plus inline result rows containing provider, `OK`/`FAIL`, latency, result count, and message. Truncate every line with `truncateVisible`. `dispose()` aborts and clears the controller before unsubscribing Activity and marking the component disposed.
+Render provider selection plus inline result rows containing provider, `OK`/`FAIL`, latency, `${resultCount} results`, and message. Reuse the Phase 3 ten-row follow-selection calculation for Test providers and render the same `Showing X–Y of N` indicator. Truncate every line with `truncateVisible`. `dispose()` aborts and clears the controller before unsubscribing Activity and marking the component disposed.
 
 - [ ] **Step 4: Run focused tests and commit**
 
@@ -393,7 +443,52 @@ it.each([
 });
 ```
 
-Retain and update tests for empty-argument overlay, non-UI warning, provider actions, scope switching, Activity widget persistence, and `resetMonitor()`.
+Retain and update tests for empty-argument overlay, non-TUI warning, provider actions, scope switching, Activity widget persistence, and `resetMonitor()`. Add these mode regressions:
+
+```ts
+it("does not open an empty dashboard outside TUI mode", async () => {
+  const ctx = makeCtx({
+    mode: "rpc",
+    hasUI: true,
+  }) as unknown as ExtensionCommandContext;
+  (ctx.ui as any).custom = vi.fn();
+  const command = createToolsCommand(mem(), new Map(), [], {
+    getConfig: () => ({ providers: {}, defaultProvider: "auto" }),
+    reload: vi.fn(),
+  });
+
+  await command.handler("", ctx);
+
+  expect((ctx.ui as any).custom).not.toHaveBeenCalled();
+  expect(ctx.ui.notify).toHaveBeenCalledWith(
+    expect.stringContaining("interactive TUI"),
+    "warning",
+  );
+});
+
+it("shows migration before the mode warning", async () => {
+  const ctx = makeCtx({
+    mode: "rpc",
+    hasUI: true,
+  }) as unknown as ExtensionCommandContext;
+  (ctx.ui as any).custom = vi.fn();
+  const command = createToolsCommand(mem(), new Map(), [], {
+    getConfig: () => ({ providers: {}, defaultProvider: "auto" }),
+    reload: vi.fn(),
+  });
+
+  await command.handler("status", ctx);
+
+  expect(ctx.ui.notify).toHaveBeenCalledWith(
+    expect.stringContaining("no longer supports typed subcommands"),
+    "warning",
+  );
+  expect(ctx.ui.notify).not.toHaveBeenCalledWith(
+    expect.stringContaining("interactive TUI"),
+    "warning",
+  );
+});
+```
 
 - [ ] **Step 2: Run command tests and verify the migration case fails**
 
@@ -416,15 +511,17 @@ The dashboard provides the previous status, provider, key, test, default, reload
 At the top of `handler`, use the final guard order:
 
 ```ts
-if (!ctx.hasUI) {
-  ctx.ui.notify("/tools requires interactive UI", "warning");
-  return;
-}
 if (args.trim() !== "") {
   ctx.ui.notify(MIGRATION_HINT, "warning");
   return;
 }
+if (ctx.mode !== "tui") {
+  ctx.ui.notify("/tools requires an interactive TUI", "warning");
+  return;
+}
 ```
+
+Do not use `ctx.hasUI`: RPC reports `hasUI: true`, but its `ctx.ui.custom()` implementation cannot display a component.
 
 After these guards, retain only the dashboard action loop from Phases 1–3. Remove `parseArgs`, every legacy switch branch, setup imports, subcommand imports, and `USAGE`. Update the command description to `Manage providers in an interactive dashboard.`
 
@@ -477,7 +574,7 @@ Global missing file            -> create
 Global malformed/non-object    -> no write
 Global EACCES read              -> no write
 Project nearest existing file  -> write nearest path
-Project no existing file       -> write cwd/.pi/tools.json
+Project no existing file       -> write cwd/<CONFIG_DIR_NAME>/tools.json
 Project untrusted              -> no write for toggle/key/default
 Project trusted env-name key   -> write
 Project literal/shell key      -> no read and no write
@@ -495,20 +592,22 @@ Up / Down select provider or test row in the active tab
 Left / Right return scope switch only on Providers
 Enter returns toggle on Providers and starts one test on Test
 k blocked when canEditKeys=false
-d returns set-default
+d sets the selected provider as default on Providers
 r returns reload only on Status
-a starts all tests only on Test
+a sets default to auto on Providers
+a starts all tests on Test
 w returns toggle-widget only on Activity
+reopening actions preserve activeTab and selectedProvider
 q / Esc dispose and close from every tab
 ```
 
 - [ ] **Step 3: Confirm rendering and secret safety**
 
-For widths 40, 80, and 140, assert every rendered line satisfies `visibleWidth(line) <= width`. At width 140, assert `┏`, `┛`, and all four labels. At width 40, assert tab overflow remains bounded. Assert literal and shell credential values never appear in output.
+For widths 40, 80, and 140, assert every rendered line satisfies `visibleWidth(line) <= width`. At width 140, assert `┏`, `┛`, and all four labels. At width 40, assert tab overflow remains bounded. With twelve Providers and twelve Test entries, move to the final row and assert each view shows rows 3–12, omits row 1, and renders `Showing 3–12 of 12`. Assert literal and shell credential values never appear in output.
 
 - [ ] **Step 4: Confirm async and lifecycle behavior**
 
-Assert requestRender before/after test completion, provider errors become inline failures, a replaced/stale run cannot replace current results, dispose aborts the active signal, Activity subscriptions are removed on dispose, one widget subscription exists at most, overlay close preserves the widget, and `resetMonitor()` clears widget/subscription/entries.
+Assert the requestRender count increases by two from the count captured immediately before a test starts, provider errors become inline failures, the concrete deferred-promise stale-run test from Task 2 cannot replace current results or repaint, dispose aborts the active signal, Activity subscriptions are removed on dispose, one widget subscription exists at most, overlay close preserves the widget, and `resetMonitor()` clears widget/subscription/entries.
 
 - [ ] **Step 5: Run focused acceptance tests and commit**
 
@@ -524,25 +623,26 @@ Expected: all focused tests pass.
 
 ### Task 5: Final verification
 
-- [ ] **Step 1: Run formatter, lint, typecheck, and full suite**
+- [ ] **Step 1: Run changed-file formatting, lint, typecheck, and full suite**
 
 ```bash
-pnpm exec biome format --check src tests
+pnpm exec biome format src/commands/tools-actions.ts src/commands/tools-dashboard.ts src/commands/tools.ts tests/commands/tools-actions.test.ts tests/commands/tools-dashboard.test.ts tests/commands/tools.test.ts
 pnpm exec biome lint src tests
 pnpm exec tsc --noEmit
 pnpm check
 ```
 
-Expected: every command exits successfully.
+Expected: every command exits successfully. Formatting is intentionally scoped to Phase 4 files because the repository has unrelated baseline formatting debt; `biome format --check` is not a valid Biome 2.5.4 command.
 
 - [ ] **Step 2: Verify import/dependency constraints**
 
 ```bash
 grep -RIn --include='*.ts' 'pi-usage' src || true
+grep -RIn --include='*.ts' 'ctx.hasUI\|path.join(".pi"' src/commands src/config.ts || true
 git diff -- package.json pnpm-lock.yaml
 ```
 
-Expected: no `pi-usage` imports and no package/lockfile changes.
+Expected: no `pi-usage` imports, no obsolete `ctx.hasUI` overlay guard or hardcoded project config directory, and no package/lockfile changes.
 
 - [ ] **Step 3: Verify old behavior is absent and final files exist**
 

@@ -308,20 +308,75 @@ describe("tools subcommand dispatch", () => {
     expect(msg.toLowerCase()).toContain("unknown");
   });
 
-  it("runs enhanced wizard when no args", async () => {
+  it("opens the Status overlay for an empty argument string", async () => {
     const registry = mem();
-    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
-    const command = createToolsCommand(registry, tierMap, ["brave"]);
+    const command = createToolsCommand(registry, new Map());
     const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    // User cancels setup mode selection
-    vi.mocked(ctx.ui.select).mockResolvedValueOnce(undefined);
+    const custom = vi.fn().mockResolvedValue({ type: "close" });
+    (ctx.ui as any).custom = custom;
 
     await command.handler("", ctx);
 
-    // Should have shown preamble via notify and prompted via select
-    expect(ctx.ui.notify).toHaveBeenCalled();
-    expect(ctx.ui.select).toHaveBeenCalled();
+    expect(custom).toHaveBeenCalledWith(expect.any(Function), {
+      overlay: true,
+      overlayOptions: { anchor: "center", maxHeight: "85%", width: "92%" },
+    });
+    expect(ctx.ui.select).not.toHaveBeenCalled();
+  });
+
+  it("reloads and reopens the Status overlay", async () => {
+    const reload = vi.fn();
+    const command = createToolsCommand(mem(), new Map(), [], reload);
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+    const custom = vi
+      .fn()
+      .mockResolvedValueOnce({ type: "reload" })
+      .mockResolvedValueOnce({ type: "close" });
+    (ctx.ui as any).custom = custom;
+
+    await command.handler("", ctx);
+
+    expect(reload).toHaveBeenCalledOnce();
+    expect(custom).toHaveBeenCalledTimes(2);
+  });
+
+  it("warns instead of opening the overlay outside TUI mode", async () => {
+    const command = createToolsCommand(mem(), new Map());
+    const ctx = makeCtx({
+      mode: "rpc",
+      hasUI: true,
+    }) as unknown as ExtensionCommandContext;
+    (ctx.ui as any).custom = vi.fn();
+
+    await command.handler("", ctx);
+
+    expect((ctx.ui as any).custom).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("interactive TUI"),
+      "warning",
+    );
+  });
+
+  it("keeps typed provider tests available outside TUI mode", async () => {
+    const registry = mem();
+    const provider = mockProvider("brave", "Brave");
+    registry.registerProvider(
+      { search: provider },
+      {
+        name: "brave",
+        tier: 1,
+        budget: { mode: "managed" },
+        config: { enabled: true, budget: { mode: "managed" } },
+      },
+    );
+    const command = createToolsCommand(registry, new Map(), ["brave"]);
+    const ctx = makeCtx({ mode: "rpc" }) as unknown as ExtensionCommandContext;
+    (ctx.ui as any).custom = vi.fn();
+
+    await command.handler("test brave", ctx);
+
+    expect(vi.mocked(provider.search).mock.calls[0]?.slice(0, 2)).toEqual(["test", 1]);
+    expect((ctx.ui as any).custom).not.toHaveBeenCalled();
   });
 
   it("calls onReload after config-modifying subcommands", async () => {

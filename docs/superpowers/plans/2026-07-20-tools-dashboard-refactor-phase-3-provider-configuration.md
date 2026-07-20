@@ -18,7 +18,9 @@
 
 - Create `src/commands/tools-actions.ts`: credential classification, target path selection, safe document mutation, and provider/default actions.
 - Create `tests/commands/tools-actions.test.ts`: path, malformed JSON, preservation, trust, and credential policy.
-- Modify `src/commands/tools-dashboard.ts`: Providers tab, provider selection, scope selection, safe key-state rendering, and action results.
+- Modify `src/config.ts`: derive project config paths from Pi's exported `CONFIG_DIR_NAME`.
+- Modify `tests/config.test.ts`: keep project path regressions aligned with `CONFIG_DIR_NAME`.
+- Modify `src/commands/tools-dashboard.ts`: Providers tab, bounded provider selection, scope selection, resume state, safe key-state rendering, and action results.
 - Modify `tests/commands/tools-dashboard.test.ts`: provider rendering/navigation/action/security behavior.
 - Modify `src/commands/tools.ts`: current-config dependency, provider action orchestration, prompt handling, and scope loop.
 - Modify `src/index.ts`: pass current effective config and forced reload callbacks.
@@ -31,7 +33,8 @@
 **Files:**
 - Create: `src/commands/tools-actions.ts`
 - Create: `tests/commands/tools-actions.test.ts`
-- Reference: `src/config.ts:getConfigPath`, `src/config.ts:findProjectConfigPath`
+- Modify: `src/config.ts`
+- Modify: `tests/config.test.ts`
 
 - [ ] **Step 1: Write filesystem and security tests first**
 
@@ -40,6 +43,7 @@ Create `tests/commands/tools-actions.test.ts` using `vi.mock("node:fs")`, `vi.re
 ```ts
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   classifyCredential,
@@ -81,17 +85,18 @@ describe("project credential policy", () => {
 describe("project config target", () => {
   it("uses the nearest existing project file", () => {
     vi.mocked(fs.existsSync).mockImplementation(
-      (candidate) => candidate === path.join("/repo", ".pi", "tools.json"),
+      (candidate) =>
+        candidate === path.join("/repo", CONFIG_DIR_NAME, "tools.json"),
     );
     expect(findWritableProjectPath("/repo/packages/app")).toBe(
-      path.join("/repo", ".pi", "tools.json"),
+      path.join("/repo", CONFIG_DIR_NAME, "tools.json"),
     );
   });
 
   it("falls back to cwd when no project file exists", () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
     expect(findWritableProjectPath("/repo/packages/app")).toBe(
-      path.join("/repo/packages/app", ".pi", "tools.json"),
+      path.join("/repo/packages/app", CONFIG_DIR_NAME, "tools.json"),
     );
   });
 });
@@ -171,7 +176,9 @@ describe("safe read-modify-write", () => {
 });
 ```
 
-Also add positive tests proving project `BRAVE_API_KEY` and global literal/shell values are written, `setDefaultProvider` rejects unknown providers, and the exact nearest/fallback write path is passed to `writeFileSync`.
+Also add positive tests proving project `BRAVE_API_KEY` and global literal/shell values are written, `setDefaultProvider` accepts `auto` but rejects unknown providers, and the exact nearest/fallback write path is passed to `writeFileSync`.
+
+In `tests/config.test.ts`, import `CONFIG_DIR_NAME` and replace the hardcoded `.pi` segments in `findProjectConfigPath` expectations with `CONFIG_DIR_NAME`. This keeps the shared reader and the new writer on the same Pi-defined project directory.
 
 - [ ] **Step 2: Run the test and verify failure**
 
@@ -219,10 +226,12 @@ export function setDefaultProvider(
 ): string;
 ```
 
-Use `const ENV_NAME = /^[A-Z][A-Z0-9_]+$/`. Classify `!` first, then env names, then literals. Resolve project targets with:
+Import `CONFIG_DIR_NAME` alongside `getAgentDir` in `src/config.ts`, replace `path.join(".pi", "tools.json")` with `path.join(CONFIG_DIR_NAME, "tools.json")`, and update the adjacent comment.
+
+Use `const ENV_NAME = /^[A-Z][A-Z0-9_]+$/`. Classify `!` first, then env names, then literals. Import `CONFIG_DIR_NAME` in `tools-actions.ts` and resolve project targets with:
 
 ```ts
-findProjectConfigPath(cwd) ?? path.join(cwd, ".pi", "tools.json")
+findProjectConfigPath(cwd) ?? path.join(cwd, CONFIG_DIR_NAME, "tools.json")
 ```
 
 Reject untrusted project writes in target selection before any read. Reject non-env project keys in `setProviderKey` before calling `updateScopedConfig`.
@@ -246,6 +255,8 @@ function readDocument(filePath: string): Record<string, unknown> {
 }
 ```
 
+`setDefaultProvider` accepts `"auto"` without requiring it in `known`; every other value must satisfy `known.has(provider)` before reading or writing.
+
 Each updater must create a new `providers` object and a new selected provider object while spreading existing fields. Write only after reading and updating succeeds:
 
 ```ts
@@ -258,8 +269,8 @@ Do not catch parse, validation, mkdir, or write errors.
 - [ ] **Step 4: Run action tests and commit**
 
 ```bash
-pnpm exec vitest run tests/commands/tools-actions.test.ts
-git add src/commands/tools-actions.ts tests/commands/tools-actions.test.ts
+pnpm exec vitest run tests/config.test.ts tests/commands/tools-actions.test.ts
+git add src/config.ts src/commands/tools-actions.ts tests/config.test.ts tests/commands/tools-actions.test.ts
 git commit -m "feat: add safe scoped tools config actions"
 ```
 
@@ -305,12 +316,17 @@ Add tests for all of these public behaviors:
 
 - Providers is now the initial tab and all four provider fields render.
 - Output contains `env: BRAVE_API_KEY`, `set` for the literal key, and never `literal-secret`.
-- Enter returns `{ type: "toggle", provider: "brave" }`.
-- Down then `d` returns `{ type: "set-default", provider: "duckduckgo" }`.
+- Enter returns a `toggle` action for `brave` with Providers resume state.
+- Down then `d` returns `set-default` for `duckduckgo` and preserves that selection.
+- `a` on Providers returns `set-default` for `auto`; it does not toggle or run tests.
 - `k` returns `set-key` in editable scope and returns nothing when `canEditKeys` is false.
-- Left and Right return `{ type: "switch-scope" }`.
+- Left and Right return `switch-scope` with Providers resume state.
+- `initialTab: "activity"` opens Activity, and an external action carries that tab plus the selected provider.
+- Existing Status reload and Activity widget tests now expect `activeTab` and `selectedProvider` resume metadata.
 - Tab order is Providers → Status → Activity and Shift-Tab wraps back.
 - At widths 40, 80, and 140 every rendered line stays within width.
+
+Add a 12-provider case that presses Down eleven times and asserts the output contains the selected final row and `Showing 3–12 of 12`, omits the first row, and keeps every line within the supplied visible width.
 
 - [ ] **Step 2: Run dashboard tests and verify failure**
 
@@ -322,18 +338,28 @@ Expected: provider tests fail because only Status/Activity exist.
 
 - [ ] **Step 3: Extend dashboard contracts**
 
-Add actions:
+Replace the Phase 2 action contracts with explicit resume state:
 
 ```ts
-| { type: "toggle"; provider: string }
-| { type: "set-key"; provider: string }
-| { type: "set-default"; provider: string }
-| { type: "switch-scope" }
-```
+export type DashboardTabId = "providers" | "status" | "activity";
 
-Add:
+export interface DashboardResumeState {
+  activeTab: DashboardTabId;
+  selectedProvider?: string;
+}
 
-```ts
+type ReopenDashboardAction =
+  | { type: "reload" }
+  | { type: "toggle-widget" }
+  | { type: "toggle"; provider: string }
+  | { type: "set-key"; provider: string }
+  | { type: "set-default"; provider: string }
+  | { type: "switch-scope" };
+
+export type DashboardAction =
+  | (ReopenDashboardAction & DashboardResumeState)
+  | { type: "close" };
+
 export interface DashboardScope {
   kind: "global" | "project";
   path: string;
@@ -341,7 +367,7 @@ export interface DashboardScope {
 }
 ```
 
-Extend `DashboardOptions` with `providerNames`, `tierMap`, `config: Pick<PiToolsConfig, "providers" | "defaultProvider">`, and `scope`. Use final tabs `[Providers, Status, Activity]` for this phase and make Providers active initially.
+Extend `DashboardOptions` with `providerNames`, `tierMap`, `config: Pick<PiToolsConfig, "providers" | "defaultProvider">`, `scope`, `initialTab?: DashboardTabId`, and `initialProvider?: string`. Use tabs `[Providers, Status, Activity]`; default `initialTab` to Providers and initialize the selected row from `initialProvider` when it still exists.
 
 Provider rows must derive enabled/key/budget/default from `options.config`, never from registry metrics. Key display rules are exact:
 
@@ -351,7 +377,23 @@ env credential -> `env: ${value}`
 literal or shell credential -> "set"
 ```
 
-Use `padVisible`/`truncateVisible` for columns. Display `options.scope.path`. Up/Down clamp selection to existing provider rows and request render. Enter, `k`, `d`, Left, and Right return the actions above through `finish()`.
+Use `padVisible`/`truncateVisible` for columns. Display `options.scope.path`. Up/Down clamp selection to existing provider rows and request render. Render at most ten providers with:
+
+```ts
+const visibleCount = Math.min(10, providerNames.length);
+const start = Math.max(
+  0,
+  Math.min(
+    providerIndex - Math.floor(visibleCount / 2),
+    providerNames.length - visibleCount,
+  ),
+);
+const end = start + visibleCount;
+```
+
+Render `providerNames.slice(start, end)` and add `Showing ${start + 1}–${end} of ${providerNames.length}` when rows exist. This makes the selected row visible despite Pi's clipping-only overlay height.
+
+Create a small `resume()` method that returns the active tab and selected provider. Enter, `k`, `d`, `a`, Left, Right, reload, and widget toggle merge `resume()` into the action passed to `finish()`. On Providers, `a` returns `{ type: "set-default", provider: "auto", ...resume }`; on other tabs it does nothing in this phase.
 
 - [ ] **Step 4: Run tests and commit**
 
@@ -384,13 +426,15 @@ const commandDeps = {
 Mock `ctx.ui.custom()` to return one action and then close. Add cases proving:
 
 - toggle writes the opposite effective `enabled` value, calls `reload`, and reopens;
-- set-default writes and reloads;
+- set-default writes the selected provider and reloads;
+- set-default `auto` writes `defaultProvider: "auto"` over a prior explicit default and reloads;
 - set-key prompts, trims the result, writes and reloads;
 - cancelled key input writes nothing;
 - project literal key produces a warning and no write;
 - malformed JSON produces a warning and no write;
-- switch-scope reopens with a project `DashboardScope` using the nearest/fallback path;
-- an untrusted project with an existing `.pi/tools.json` can select Project scope but has `canEditKeys: false` and cannot write;
+- switch-scope reopens with a project `DashboardScope` using the nearest/fallback `CONFIG_DIR_NAME` path;
+- actions that reopen preserve `activeTab` and `selectedProvider` in the next component options;
+- an untrusted project with an existing `<CONFIG_DIR_NAME>/tools.json` can select Project scope but has `canEditKeys: false` and cannot write;
 - an untrusted project without an existing project config cannot select Project scope and receives a warning;
 - Status/Activity/widget behavior from Phases 1–2 still passes.
 
@@ -427,7 +471,14 @@ Legacy reload/config subcommands call `deps.reload()` until their Phase 4 remova
 
 - [ ] **Step 4: Implement the scoped dashboard loop**
 
-Set `let selectedScope: ConfigScope = "global"` for each command invocation. Before each `custom()` call, derive:
+For each command invocation, initialize:
+
+```ts
+let selectedScope: ConfigScope = "global";
+let resumeState: DashboardResumeState = { activeTab: "providers" };
+```
+
+Before each `custom()` call, derive:
 
 ```ts
 const scope: DashboardScope = selectedScope === "global"
@@ -439,7 +490,17 @@ const scope: DashboardScope = selectedScope === "global"
     };
 ```
 
-Pass current `deps.getConfig()`, scope, provider names, and tiers to the component. Preserve Phase 2 Activity/widget options.
+Pass current `deps.getConfig()`, scope, provider names, tiers, `initialTab: resumeState.activeTab`, and `initialProvider: resumeState.selectedProvider` to the component. Preserve Phase 2 Activity/widget options.
+
+Immediately after the close guard, retain context for every reopening action:
+
+```ts
+if (!action || action.type === "close") return;
+resumeState = {
+  activeTab: action.activeTab,
+  selectedProvider: action.selectedProvider,
+};
+```
 
 Handle `switch-scope` and `toggle-widget` in the loop. On a Global → Project switch, allow the change only when `ctx.isProjectTrusted()` is true or `findProjectConfigPath(ctx.cwd)` returns an existing file; otherwise notify that Project scope requires trust or an existing project config and remain in Global scope. Switching Project → Global is always allowed. Send toggle, set-key, set-default, and reload to a private `applyDashboardAction()` that:
 
@@ -456,13 +517,14 @@ After every non-close action, reopen the component so it receives fresh effectiv
 - [ ] **Step 5: Run all checks and commit**
 
 ```bash
-pnpm exec vitest run tests/commands/tools-actions.test.ts tests/commands/tools-dashboard.test.ts tests/commands/tools.test.ts
+pnpm exec vitest run tests/config.test.ts tests/commands/tools-actions.test.ts tests/commands/tools-dashboard.test.ts tests/commands/tools.test.ts
+pnpm exec biome format src/config.ts src/commands/tools-actions.ts src/commands/tools-dashboard.ts src/commands/tools.ts src/index.ts tests/config.test.ts tests/commands/tools-actions.test.ts tests/commands/tools-dashboard.test.ts tests/commands/tools.test.ts
 pnpm check
 git add src/commands/tools.ts src/index.ts tests/commands/tools.test.ts
 git commit -m "feat: connect scoped provider actions to tools dashboard"
 ```
 
-Expected: all checks pass and typed subcommands still exist.
+Expected: focused tests, the explicit changed-file format check, and full checks pass; typed subcommands still exist.
 
 ---
 
@@ -471,18 +533,20 @@ Expected: all checks pass and typed subcommands still exist.
 - [ ] **Step 1: Verify data-safety requirements**
 
 ```bash
-pnpm exec vitest run tests/commands/tools-actions.test.ts
+pnpm exec vitest run tests/config.test.ts tests/commands/tools-actions.test.ts
+grep -RIn --include='*.ts' 'path.join(".pi"' src || true
 grep -RIn --include='*.ts' 'pi-usage' src || true
 git diff -- package.json pnpm-lock.yaml
 ```
 
-Expected: safety tests pass, no runtime cross-repo import, and no dependency change.
+Expected: safety tests pass, the hardcoded project-path grep and runtime cross-repo import grep return no matches, and there is no dependency change.
 
 - [ ] **Step 2: Verify the releasable checkpoint**
 
 ```bash
 test -f src/commands/tools-subcommands.ts
 test -f src/commands/tools-setup.ts
+pnpm exec biome format src/config.ts src/commands/tools-actions.ts src/commands/tools-dashboard.ts src/commands/tools.ts src/index.ts tests/config.test.ts tests/commands/tools-actions.test.ts tests/commands/tools-dashboard.test.ts tests/commands/tools.test.ts
 pnpm check
 git status --short
 ```

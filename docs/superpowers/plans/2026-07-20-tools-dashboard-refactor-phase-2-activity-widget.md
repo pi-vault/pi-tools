@@ -36,12 +36,14 @@
 Extend the dashboard fixture with:
 
 ```ts
+import type { DashboardTabId } from "../../src/commands/tools-dashboard.ts";
 import type { ActivityEntry } from "../../src/monitor/activity-monitor.ts";
 
 function dashboard(
   done = vi.fn(),
   activity: readonly ActivityEntry[] = [],
   subscribeActivity = vi.fn(() => vi.fn()),
+  initialTab: DashboardTabId = "status",
 ) {
   const tui = { requestRender: vi.fn() } as never;
   return {
@@ -55,6 +57,7 @@ function dashboard(
       getActivity: () => activity,
       subscribeActivity,
       widgetEnabled: false,
+      initialTab,
       done,
     }),
   };
@@ -89,11 +92,24 @@ it("renders only the latest ten activity entries", () => {
   expect(output).toContain("query-10");
 });
 
-it("returns toggle-widget for w on Activity", () => {
-  const { component, done } = dashboard();
-  component.handleInput("\t");
+it("returns Activity resume state when toggling the widget", () => {
+  const { component, done } = dashboard(
+    vi.fn(),
+    [],
+    vi.fn(() => vi.fn()),
+    "activity",
+  );
   component.handleInput("w");
-  expect(done).toHaveBeenCalledWith({ type: "toggle-widget" });
+  expect(done).toHaveBeenCalledWith({
+    type: "toggle-widget",
+    activeTab: "activity",
+  });
+});
+
+it("returns Status resume state when reloading", () => {
+  const { component, done } = dashboard();
+  component.handleInput("r");
+  expect(done).toHaveBeenCalledWith({ type: "reload", activeTab: "status" });
 });
 
 it("repaints on activity and unsubscribes on disposal", () => {
@@ -137,10 +153,15 @@ Remove the now-unused `ThemeColor` import. This lets both Pi's live theme and `D
 
 - [ ] **Step 4: Extend the dashboard contracts and behavior**
 
-Add to `DashboardAction`:
+Export the tab identifier and replace `DashboardAction` with:
 
 ```ts
-| { type: "toggle-widget" }
+export type DashboardTabId = "status" | "activity";
+
+export type DashboardAction =
+  | { type: "reload"; activeTab: DashboardTabId }
+  | { type: "toggle-widget"; activeTab: DashboardTabId }
+  | { type: "close" };
 ```
 
 Add to `DashboardOptions`:
@@ -149,12 +170,12 @@ Add to `DashboardOptions`:
 getActivity: () => readonly ActivityEntry[];
 subscribeActivity: (listener: () => void) => () => void;
 widgetEnabled: boolean;
+initialTab?: DashboardTabId;
 ```
 
 Use these tabs:
 
 ```ts
-type DashboardTabId = "status" | "activity";
 const TABS = [
   { id: "status", label: "Status" },
   { id: "activity", label: "Activity" },
@@ -162,7 +183,7 @@ const TABS = [
 const SHIFT_TAB_KEY: "shift+tab" = "shift+tab";
 ```
 
-Add `activeTab`, `activityUnsubscribe`, and this constructor subscription:
+Add `activeTab`, initialized from `options.initialTab ?? "status"`, plus `activityUnsubscribe` and this constructor subscription:
 
 ```ts
 this.activityUnsubscribe = options.subscribeActivity(() => {
@@ -170,7 +191,7 @@ this.activityUnsubscribe = options.subscribeActivity(() => {
 });
 ```
 
-Implement tab navigation with `matchesKey(data, Key.tab)` and `matchesKey(data, SHIFT_TAB_KEY)`, wrapping in both directions and calling `tui.requestRender()` after the index changes. On Activity, `w` calls the existing `finish()` helper with `{ type: "toggle-widget" }`.
+Implement tab navigation with `matchesKey(data, Key.tab)` and `matchesKey(data, SHIFT_TAB_KEY)`, wrapping in both directions and calling `tui.requestRender()` after the index changes. On Status, `r` finishes with `{ type: "reload", activeTab: this.activeTab }`. On Activity, `w` finishes with `{ type: "toggle-widget", activeTab: this.activeTab }`.
 
 Render Activity with:
 
@@ -229,7 +250,7 @@ Add tests that drive the dashboard through the values returned by `custom`:
 it("keeps a dashboard-enabled widget after overlay close", async () => {
   const ctx = widgetCtx();
   (ctx.ui as any).custom
-    .mockResolvedValueOnce({ type: "toggle-widget" })
+    .mockResolvedValueOnce({ type: "toggle-widget", activeTab: "activity" })
     .mockResolvedValueOnce({ type: "close" });
   const command = createToolsCommand(mem(), new Map());
 
@@ -245,7 +266,7 @@ it("keeps a dashboard-enabled widget after overlay close", async () => {
 it("uses one widget subscription across overlay reopen", async () => {
   const ctx = widgetCtx();
   (ctx.ui as any).custom
-    .mockResolvedValueOnce({ type: "toggle-widget" })
+    .mockResolvedValueOnce({ type: "toggle-widget", activeTab: "activity" })
     .mockResolvedValueOnce({ type: "close" });
   const command = createToolsCommand(mem(), new Map());
   await command.handler("", ctx);
@@ -258,7 +279,7 @@ it("uses one widget subscription across overlay reopen", async () => {
 it("resetMonitor unsubscribes, clears the widget, and clears entries", async () => {
   const ctx = widgetCtx();
   (ctx.ui as any).custom
-    .mockResolvedValueOnce({ type: "toggle-widget" })
+    .mockResolvedValueOnce({ type: "toggle-widget", activeTab: "activity" })
     .mockResolvedValueOnce({ type: "close" });
   const command = createToolsCommand(mem(), new Map());
   await command.handler("", ctx);
@@ -318,22 +339,28 @@ const setWidget = (ctx: ExtensionCommandContext, enabled: boolean): void => {
 };
 ```
 
-Pass these options into every dashboard instance:
+Import `DashboardTabId`, initialize `let initialTab: DashboardTabId = "status"` before the dashboard loop, and pass these options into every dashboard instance:
 
 ```ts
 getActivity: () => activityMonitor.getEntries(),
 subscribeActivity: (listener) => activityMonitor.onUpdate(listener),
 widgetEnabled,
+initialTab,
 ```
 
-In the dashboard loop, handle `{ type: "toggle-widget" }` before reload:
+After the close guard, preserve the returned tab before handling widget or reload actions:
 
 ```ts
+if (!action || action.type === "close") return;
+initialTab = action.activeTab;
 if (action.type === "toggle-widget") {
   setWidget(ctx, !widgetEnabled);
   continue;
 }
+onReload?.();
 ```
+
+This keeps Status reloads on Status and Activity widget toggles on Activity when the component is reopened.
 
 Route the still-supported `monitor on|off` subcommand through `setWidget(ctx, true|false)` instead of maintaining a second subscription implementation. Update the existing “monitor on twice” test to assert that the second call adds neither a subscription nor another initial widget render; `setWidget()` is idempotent while enabled.
 
@@ -352,10 +379,11 @@ Do not clear the widget when the overlay closes.
 
 ```bash
 pnpm exec vitest run tests/commands/tools-dashboard.test.ts tests/commands/tools.test.ts
+pnpm exec biome format src/commands/tools-dashboard.ts src/monitor/widget.ts src/commands/tools.ts tests/commands/tools-dashboard.test.ts tests/commands/tools.test.ts
 pnpm check
 ```
 
-Expected: all tests pass, including the legacy monitor subcommand tests.
+Expected: focused tests, the explicit changed-file format check, and full checks pass, including the legacy monitor subcommand tests.
 
 - [ ] **Step 5: Commit widget ownership**
 
@@ -382,6 +410,7 @@ Expected: one persistent subscription owner in `tools.ts`; the dashboard receive
 ```bash
 test -f src/commands/tools-subcommands.ts
 test -f src/commands/tools-setup.ts
+pnpm exec biome format src/commands/tools-dashboard.ts src/monitor/widget.ts src/commands/tools.ts tests/commands/tools-dashboard.test.ts tests/commands/tools.test.ts
 pnpm check
 git status --short
 ```
