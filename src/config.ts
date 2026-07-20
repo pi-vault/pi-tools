@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { deepMerge } from "./utils/deep-merge.ts";
 import { parseAllowRanges } from "./utils/ssrf.ts";
 import type { ResearchMode, ResearchModeDefaults } from "./research/types.ts";
@@ -554,10 +554,10 @@ export function stripSensitiveFields(
 }
 
 const MAX_WALK_DEPTH = 10;
-const PROJECT_CONFIG_RELATIVE = path.join(".pi", "tools.json");
+const PROJECT_CONFIG_RELATIVE = path.join(CONFIG_DIR_NAME, "tools.json");
 
 /**
- * Walk up from `startDir` looking for `.pi/tools.json`.
+ * Walk up from `startDir` looking for Pi's project tools config.
  * Returns the absolute path if found, or undefined.
  * Stops at the filesystem root or after MAX_WALK_DEPTH levels.
  */
