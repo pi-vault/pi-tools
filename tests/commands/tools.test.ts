@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createToolsCommand } from "../../src/commands/tools.ts";
+import { activityMonitor } from "../../src/monitor/activity-monitor.ts";
 import { getConfigPath, type ProviderBudget } from "../../src/config.ts";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
 import type { ProviderTier, SearchProvider } from "../../src/providers/types.ts";
@@ -11,6 +12,28 @@ vi.mock("node:fs");
 
 const mem = () =>
   new ProviderRegistry({ load: () => ({ version: 2, counters: {} }), save: () => {} });
+
+const trackedCommands = new Set<ReturnType<typeof createToolsCommand>>();
+
+function trackedToolsCommand(...args: Parameters<typeof createToolsCommand>) {
+  const command = createToolsCommand(...args);
+  trackedCommands.add(command);
+  return command;
+}
+
+afterEach(() => {
+  for (const command of trackedCommands) command.resetMonitor();
+  trackedCommands.clear();
+  activityMonitor.clear();
+});
+
+function widgetCtx() {
+  const ctx = makeCtx() as unknown as ExtensionCommandContext;
+  (ctx.ui as any).custom = vi.fn();
+  (ctx.ui as any).setWidget = vi.fn();
+  (ctx.ui as any).theme = { fg: (_color: string, text: string) => text };
+  return ctx;
+}
 
 function mockProvider(name: string, label: string): SearchProvider {
   return {
@@ -330,7 +353,7 @@ describe("tools subcommand dispatch", () => {
     const ctx = makeCtx() as unknown as ExtensionCommandContext;
     const custom = vi
       .fn()
-      .mockResolvedValueOnce({ type: "reload" })
+      .mockResolvedValueOnce({ type: "reload", activeTab: "status" })
       .mockResolvedValueOnce({ type: "close" });
     (ctx.ui as any).custom = custom;
 
@@ -400,13 +423,8 @@ describe("tools monitor subcommand", () => {
   });
 
   it("monitor on subscribes and shows notification", async () => {
-    const registry = mem();
-    const tierMap = new Map<string, ProviderTier>();
-    const command = createToolsCommand(registry, tierMap);
-    // makeCtx() doesn't include setWidget — add it manually
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-    (ctx.ui as any).setWidget = vi.fn();
-    (ctx.ui as any).theme = { fg: (_c: string, t: string) => t };
+    const command = trackedToolsCommand(mem(), new Map());
+    const ctx = widgetCtx();
 
     await command.handler("monitor on", ctx);
 
@@ -419,17 +437,10 @@ describe("tools monitor subcommand", () => {
   });
 
   it("monitor off removes widget and shows notification", async () => {
-    const registry = mem();
-    const tierMap = new Map<string, ProviderTier>();
-    const command = createToolsCommand(registry, tierMap);
-    // makeCtx() doesn't include setWidget — add it manually
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-    (ctx.ui as any).setWidget = vi.fn();
-    (ctx.ui as any).theme = { fg: (_c: string, t: string) => t };
+    const command = trackedToolsCommand(mem(), new Map());
+    const ctx = widgetCtx();
 
-    // First turn on
     await command.handler("monitor on", ctx);
-    // Then turn off
     await command.handler("monitor off", ctx);
 
     const lastCall = (ctx.ui as any).setWidget.mock.calls.at(-1);
@@ -442,9 +453,7 @@ describe("tools monitor subcommand", () => {
   });
 
   it("monitor without on/off shows usage", async () => {
-    const registry = mem();
-    const tierMap = new Map<string, ProviderTier>();
-    const command = createToolsCommand(registry, tierMap);
+    const command = trackedToolsCommand(mem(), new Map());
     const ctx = makeCtx() as unknown as ExtensionCommandContext;
 
     await command.handler("monitor", ctx);
@@ -454,42 +463,77 @@ describe("tools monitor subcommand", () => {
   });
 
   it("resetMonitor clears entries and unsubscribes", async () => {
-    const registry = mem();
-    const tierMap = new Map<string, ProviderTier>();
-    const command = createToolsCommand(registry, tierMap);
-    // makeCtx() doesn't include setWidget — add it manually
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-    (ctx.ui as any).setWidget = vi.fn();
-    (ctx.ui as any).theme = { fg: (_c: string, t: string) => t };
+    const command = trackedToolsCommand(mem(), new Map());
+    const ctx = widgetCtx();
 
-    // Turn on monitor
     await command.handler("monitor on", ctx);
-    // Reset
     command.resetMonitor();
 
-    // Monitor should be disconnected — new events should not trigger setWidget
     const callCountBefore = (ctx.ui as any).setWidget.mock.calls.length;
-    const { activityMonitor } = await import("../../src/monitor/activity-monitor.ts");
     activityMonitor.logStart({ type: "api", query: "after-reset" });
-    const callCountAfter = (ctx.ui as any).setWidget.mock.calls.length;
-    expect(callCountAfter).toBe(callCountBefore);
+    expect((ctx.ui as any).setWidget).toHaveBeenCalledTimes(callCountBefore);
   });
 
-  it("monitor on twice does not double-subscribe", async () => {
-    const registry = mem();
-    const tierMap = new Map<string, ProviderTier>();
-    const command = createToolsCommand(registry, tierMap);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-    (ctx.ui as any).setWidget = vi.fn();
-    (ctx.ui as any).theme = { fg: (_c: string, t: string) => t };
+  it("monitor on twice keeps one subscription and one initial render", async () => {
+    const onUpdate = vi.spyOn(activityMonitor, "onUpdate");
+    const command = trackedToolsCommand(mem(), new Map());
+    const ctx = widgetCtx();
 
     await command.handler("monitor on", ctx);
-    const callCountAfterFirst = (ctx.ui as any).setWidget.mock.calls.length;
-
+    const renders = (ctx.ui as any).setWidget.mock.calls.length;
     await command.handler("monitor on", ctx);
-    const callCountAfterSecond = (ctx.ui as any).setWidget.mock.calls.length;
 
-    // Should only have one more initial-render call, not two subscriptions triggering
-    expect(callCountAfterSecond).toBe(callCountAfterFirst + 1);
+    expect(onUpdate).toHaveBeenCalledOnce();
+    expect((ctx.ui as any).setWidget).toHaveBeenCalledTimes(renders);
+  });
+});
+
+describe("tools dashboard widget lifecycle", () => {
+  it("keeps a dashboard-enabled widget after overlay close", async () => {
+    const ctx = widgetCtx();
+    (ctx.ui as any).custom
+      .mockResolvedValueOnce({ type: "toggle-widget", activeTab: "activity" })
+      .mockResolvedValueOnce({ type: "close" });
+    const command = trackedToolsCommand(mem(), new Map());
+
+    await command.handler("", ctx);
+
+    expect((ctx.ui as any).setWidget).toHaveBeenCalledWith("pi-tools-activity", expect.any(Array));
+    expect((ctx.ui as any).setWidget.mock.calls.at(-1)?.[1]).toEqual(expect.any(Array));
+  });
+
+  it("uses one persistent subscription across overlay reopen", async () => {
+    const onUpdate = vi.spyOn(activityMonitor, "onUpdate");
+    const ctx = widgetCtx();
+    (ctx.ui as any).custom
+      .mockResolvedValueOnce({ type: "toggle-widget", activeTab: "activity" })
+      .mockResolvedValueOnce({ type: "close" });
+    const command = trackedToolsCommand(mem(), new Map());
+
+    await command.handler("", ctx);
+    expect(onUpdate).toHaveBeenCalledOnce();
+
+    const before = (ctx.ui as any).setWidget.mock.calls.length;
+    activityMonitor.logStart({ type: "api", query: "one" });
+    expect((ctx.ui as any).setWidget).toHaveBeenCalledTimes(before + 1);
+  });
+
+  it("resetMonitor unsubscribes, removes the widget, and clears entries", async () => {
+    const ctx = widgetCtx();
+    (ctx.ui as any).custom
+      .mockResolvedValueOnce({ type: "toggle-widget", activeTab: "activity" })
+      .mockResolvedValueOnce({ type: "close" });
+    const command = trackedToolsCommand(mem(), new Map());
+
+    await command.handler("", ctx);
+    activityMonitor.logStart({ type: "api", query: "before-reset" });
+    command.resetMonitor();
+
+    expect((ctx.ui as any).setWidget).toHaveBeenLastCalledWith("pi-tools-activity", undefined);
+    expect(activityMonitor.getEntries()).toEqual([]);
+
+    const callsAfterReset = (ctx.ui as any).setWidget.mock.calls.length;
+    activityMonitor.logStart({ type: "api", query: "after-reset" });
+    expect((ctx.ui as any).setWidget).toHaveBeenCalledTimes(callsAfterReset);
   });
 });
