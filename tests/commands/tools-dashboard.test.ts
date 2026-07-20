@@ -54,11 +54,11 @@ describe("ToolsDashboardComponent", () => {
     const { component, tui } = dashboard();
 
     component.handleInput("\t");
-    expect(component.render(80).join("\n")).toContain("Activity");
+    expect(component.render(80).join("\n")).toContain("w Enable widget");
     expect(tui.requestRender).toHaveBeenCalledTimes(1);
 
     component.handleInput("\u001b[Z");
-    expect(component.render(80).join("\n")).toContain("Status");
+    expect(component.render(80).join("\n")).toContain("r Reload");
     expect(tui.requestRender).toHaveBeenCalledTimes(2);
   });
 
