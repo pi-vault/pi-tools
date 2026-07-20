@@ -1,6 +1,6 @@
 # /tools Dashboard Refactor — Design Spec
 
-> **Status:** Revised for implementation
+> **Status:** Approved for implementation planning
 > **Date:** 2026-07-20
 
 ## Goal
@@ -44,6 +44,17 @@ Responsibilities:
 - `tools.ts`: command entry point, dashboard loop, action orchestration, and activity-widget ownership.
 - `ConfigManager`: remains the source of effective runtime configuration and is refreshed after writes.
 
+## Phased Delivery
+
+The refactor ships as four independently verifiable phases:
+
+1. Port the overlay shell and add a Status-only dashboard. Only empty `/tools` invocations in TUI mode use the overlay; every typed subcommand remains available.
+2. Add Activity and centralize persistent widget ownership.
+3. Add Providers, scoped configuration actions, contextual default controls, and resume state across overlay reopen.
+4. Add Test, remove the setup/subcommand implementation after parity, and make `/tools` tabs-only.
+
+The phased plans are authoritative. The earlier monolithic implementation plan is superseded rather than maintained in parallel.
+
 ## Overlay Shell
 
 Use the same `ctx.ui.custom()` factory and overlay options as `/usage`:
@@ -67,6 +78,8 @@ await ctx.ui.custom<void>(
 
 Use `matchesKey(data, Key.*)` from `@earendil-works/pi-tui`; do not hand-roll terminal escape-sequence maps. Call `tui.requestRender()` after navigation, state changes, and async test/activity updates. Every rendered line must be ANSI-safely truncated to the supplied width.
 
+Pi clips overlay output beyond `maxHeight` and does not scroll it. Providers and Test therefore render a follow-selection window of at most ten rows, centered where possible, with a `Showing X–Y of N` indicator.
+
 The component implements `render(width)`, `handleInput(data)`, `invalidate()`, and `dispose()`. `dispose()` aborts an active test and unsubscribes component-owned listeners.
 
 ## Providers Tab
@@ -86,16 +99,17 @@ Navigation:
 - Left/Right switches between Global and Project scope.
 - Enter returns a `toggle` action.
 - `k` returns a `set-key` action; the command handler owns the input prompt.
-- `d` returns a `set-default` action.
+- `d` returns a `set-default` action for the selected provider.
+- `a` returns a `set-default` action for `auto`. On Test, the same key remains contextual and starts all tests.
 
-The component returns actions through `done()` or an action callback so the command handler can perform file I/O and reopen/render fresh state. No key is ever placed in the dashboard render output.
+The component returns actions through `done()` or an action callback so the command handler can perform file I/O and reopen/render fresh state. Actions that reopen the overlay include the active tab and selected provider; the next component receives these as initial state. Reloads, writes, scope switches, and widget toggles therefore return users to the same context. No key is ever placed in the dashboard render output.
 
 ## Config Scope and Security
 
 ### Paths
 
 - Global: `getConfigPath()` (`<agentDir>/extensions/tools.json`).
-- Project: `findProjectConfigPath(ctx.cwd)` for the nearest existing `.pi/tools.json`; if none exists, use `<ctx.cwd>/.pi/tools.json`.
+- Project: `findProjectConfigPath(ctx.cwd)` for the nearest existing `<CONFIG_DIR_NAME>/tools.json`; if none exists, use `<ctx.cwd>/<CONFIG_DIR_NAME>/tools.json`. `CONFIG_DIR_NAME` is imported from `@earendil-works/pi-coding-agent`, never duplicated as `.pi`.
 
 Project scope is selectable when the project is trusted or a project config exists. The dashboard displays the selected target path. Global is the default.
 
@@ -123,7 +137,7 @@ A rejected or failed action leaves the file unchanged and reports a warning thro
 
 ## Status Tab
 
-Reuse the existing `buildStatusTable(registry, tierMap)` output. Render it through the ANSI-safe frame, truncating/wrapping long rows for narrow overlays. `r` refreshes `ConfigManager`, invalidates the component, and requests a render.
+Reuse the existing `buildStatusTable(registry, tierMap)` output. Render it through the ANSI-safe frame, truncating/wrapping long rows for narrow overlays. `r` returns a reload action carrying Status as the resume tab; the command loop refreshes `ConfigManager` and reopens the dashboard on Status.
 
 ## Test Tab
 
@@ -133,7 +147,7 @@ Show enabled search providers available in the registry. Up/Down selects; Enter 
 provider.search("test", 1, signal);
 ```
 
-Tests report pass/fail, latency, and result count inline. Each run owns an `AbortController`; `dispose()` aborts it. A rejected provider call becomes a failed result rather than an unhandled promise rejection. Completion updates the component and calls `tui.requestRender()`.
+Tests report pass/fail, latency, and result count inline. Each run owns an `AbortController`; starting another run aborts and replaces it, and `dispose()` aborts it. A run identifier/controller check prevents replaced or disposed runs from repainting or replacing current results. A rejected provider call becomes a failed result rather than an unhandled promise rejection. Current-run completion updates the component and calls `tui.requestRender()`.
 
 ## Activity Tab and Widget
 
@@ -146,7 +160,7 @@ Widget ownership remains in the `tools.ts` command closure, not in individual da
 - closing/reopening the dashboard preserves the enabled state
 - `session_shutdown` unsubscribes, clears the widget, and clears monitor entries
 
-The active dashboard receives an update callback that calls `tui.requestRender()` when activity changes.
+The active dashboard receives an update callback that calls `tui.requestRender()` when activity changes. Toggling the widget reopens on Activity rather than resetting to the initial tab.
 
 ## Migration and Non-UI Behavior
 
@@ -158,7 +172,9 @@ Use /tools (no arguments) to open the interactive dashboard.
 The dashboard provides the previous status, provider, key, test, default, reload, and monitor actions through tabs.
 ```
 
-If `ctx.hasUI` is false, `/tools` reports that the dashboard requires interactive UI instead of calling `ctx.ui.custom()`.
+Custom overlays are gated with `ctx.mode === "tui"`, not `ctx.hasUI`: RPC contexts report UI capability but cannot display `ctx.ui.custom()` components.
+
+During Phases 1–3, this mode guard applies only to the empty-argument dashboard branch so typed subcommands keep working outside TUI mode. In Phase 4, non-empty arguments receive the migration hint first; only empty `/tools` outside TUI mode receives the interactive-TUI warning.
 
 ## Files
 
@@ -192,6 +208,8 @@ Delete:
 5. Status renders budget/metrics and reloads with `r`.
 6. Test runs one/all providers with inline results, correct abort propagation, and repainting.
 7. Activity renders the latest ten entries; widget state persists across overlay reopen and is cleaned up at shutdown.
-8. All dashboard output respects width and uses the `/usage` frame/tab conventions.
-9. Tests cover every acceptance criterion; `pnpm check` passes.
-10. No `pi-usage` imports and no package dependency changes.
+8. Providers and Test keep the selected row visible through a ten-row window; overlay reopen preserves the active tab and relevant provider selection.
+9. All dashboard output, including ANSI-styled text, respects visible width and uses the `/usage` frame/tab conventions.
+10. Tests cover mode-aware dispatch, legacy behavior until removal, contextual `a`, resume state, stale async runs, lifecycle cleanup, and every other acceptance criterion.
+11. Each phase verifies formatting only for its explicit changed files, then runs `pnpm check`; unrelated baseline formatting debt is out of scope.
+12. No `pi-usage` imports and no package dependency changes.
