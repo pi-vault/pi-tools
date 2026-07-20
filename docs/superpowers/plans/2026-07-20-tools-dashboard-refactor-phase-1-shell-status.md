@@ -30,6 +30,7 @@
 ### Task 1: Port and verify the overlay shell
 
 **Files:**
+
 - Create: `src/tui/dashboard-theme.ts`
 - Create: `src/tui/overlay-render.ts`
 - Create: `tests/tui/dashboard-theme.test.ts`
@@ -58,6 +59,7 @@ Do not change the algorithms or add a `pi-usage` import. The copied modules must
 Create `tests/tui/dashboard-theme.test.ts`:
 
 ```ts
+import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 import {
   noTheme,
@@ -74,10 +76,15 @@ describe("dashboard theme helpers", () => {
     expect(noTheme.bg("selectedBg", "selected")).toBe("selected");
   });
 
-  it("pads, truncates, and wraps visible text", () => {
-    expect(padVisible("x", 3)).toBe("x  ");
-    expect(truncateVisible("abcdef", 3)).toHaveLength(3);
-    expect(wrapVisible("one two three", 7).every((line) => line.length <= 7)).toBe(true);
+  it("pads, truncates, and wraps ANSI-styled text by visible width", () => {
+    const styled = "\u001b[31mabcdef\u001b[0m";
+    expect(visibleWidth(padVisible(styled, 8))).toBe(8);
+    expect(visibleWidth(truncateVisible(styled, 3))).toBe(3);
+    expect(
+      wrapVisible(`one ${styled} three`, 7).every(
+        (line) => visibleWidth(line) <= 7,
+      ),
+    ).toBe(true);
   });
 });
 ```
@@ -148,6 +155,7 @@ git commit -m "feat: add tools dashboard rendering shell"
 ### Task 2: Add the Status dashboard component
 
 **Files:**
+
 - Create: `src/commands/tools-dashboard.ts`
 - Create: `tests/commands/tools-dashboard.test.ts`
 
@@ -187,7 +195,9 @@ describe("ToolsDashboardComponent status slice", () => {
 
   it.each([40, 80, 140])("keeps every line within width %i", (width) => {
     expect(
-      dashboard().component.render(width).every((line) => visibleWidth(line) <= width),
+      dashboard()
+        .component.render(width)
+        .every((line) => visibleWidth(line) <= width),
     ).toBe(true);
   });
 
@@ -222,10 +232,19 @@ Expected: FAIL because `tools-dashboard.ts` does not exist.
 Create `src/commands/tools-dashboard.ts` with these public contracts:
 
 ```ts
-import { Key, matchesKey, type Component, type TUI } from "@earendil-works/pi-tui";
+import {
+  Key,
+  matchesKey,
+  type Component,
+  type TUI,
+} from "@earendil-works/pi-tui";
 import type { DashboardTheme } from "../tui/dashboard-theme.ts";
 import { wrapVisible } from "../tui/dashboard-theme.ts";
-import { frame, frameContentWidth, renderTabBar } from "../tui/overlay-render.ts";
+import {
+  frame,
+  frameContentWidth,
+  renderTabBar,
+} from "../tui/overlay-render.ts";
 
 export type DashboardAction = { type: "reload" } | { type: "close" };
 
@@ -306,6 +325,7 @@ git commit -m "feat: add tools status dashboard"
 ### Task 3: Route empty `/tools` invocations into the overlay
 
 **Files:**
+
 - Modify: `src/commands/tools.ts`
 - Modify: `tests/commands/tools.test.ts`
 
@@ -346,22 +366,47 @@ it("reloads and reopens the Status overlay", async () => {
   expect(custom).toHaveBeenCalledTimes(2);
 });
 
-it("warns instead of opening the overlay without UI", async () => {
+it("warns instead of opening the overlay outside TUI mode", async () => {
   const command = createToolsCommand(mem(), new Map());
-  const ctx = makeCtx({ hasUI: false }) as unknown as ExtensionCommandContext;
+  const ctx = makeCtx({
+    mode: "rpc",
+    hasUI: true,
+  }) as unknown as ExtensionCommandContext;
   (ctx.ui as any).custom = vi.fn();
 
   await command.handler("", ctx);
 
   expect((ctx.ui as any).custom).not.toHaveBeenCalled();
   expect(ctx.ui.notify).toHaveBeenCalledWith(
-    expect.stringContaining("interactive UI"),
+    expect.stringContaining("interactive TUI"),
     "warning",
   );
 });
+
+it("keeps typed provider tests available outside TUI mode", async () => {
+  const registry = mem();
+  const provider = mockProvider("brave", "Brave");
+  registry.registerProvider(
+    { search: provider },
+    {
+      name: "brave",
+      tier: 1,
+      budget: { mode: "managed" },
+      config: { enabled: true, budget: { mode: "managed" } },
+    },
+  );
+  const command = createToolsCommand(registry, new Map(), ["brave"]);
+  const ctx = makeCtx({ mode: "rpc" }) as unknown as ExtensionCommandContext;
+  (ctx.ui as any).custom = vi.fn();
+
+  await command.handler("test brave", ctx);
+
+  expect(provider.search).toHaveBeenCalledWith("test", 1);
+  expect((ctx.ui as any).custom).not.toHaveBeenCalled();
+});
 ```
 
-Keep the existing `status`, `reload`, provider mutation, test, and monitor subcommand tests unchanged. They prove this phase does not remove behavior early.
+Keep the existing `status`, `reload`, provider mutation, and monitor subcommand tests unchanged. Together with the provider-test regression above, they prove this phase does not remove behavior early.
 
 - [ ] **Step 2: Run the focused command tests and verify failure**
 
@@ -377,8 +422,8 @@ Import `fromPiTheme`, `ToolsDashboardComponent`, and `DashboardAction`. At the s
 
 ```ts
 if (args.trim() === "") {
-  if (!ctx.hasUI) {
-    ctx.ui.notify("/tools requires interactive UI", "warning");
+  if (ctx.mode !== "tui") {
+    ctx.ui.notify("/tools requires an interactive TUI", "warning");
     return;
   }
   while (true) {
@@ -407,10 +452,11 @@ Remove only the now-unreachable `case "": await handleEnhancedSetup(...)` branch
 
 ```bash
 pnpm exec vitest run tests/commands/tools-dashboard.test.ts tests/commands/tools.test.ts
+pnpm exec biome format src/tui/dashboard-theme.ts src/tui/overlay-render.ts src/commands/tools-dashboard.ts src/commands/tools.ts tests/tui/dashboard-theme.test.ts tests/tui/overlay-render.test.ts tests/commands/tools-dashboard.test.ts tests/commands/tools.test.ts
 pnpm check
 ```
 
-Expected: all checks pass, including existing typed-subcommand tests.
+Expected: the focused tests, explicit changed-file format check, and full checks pass, including existing typed-subcommand tests.
 
 - [ ] **Step 5: Commit the command slice**
 
@@ -437,6 +483,7 @@ Expected: no runtime `pi-usage` imports and no dependency changes.
 ```bash
 test -f src/commands/tools-subcommands.ts
 test -f src/commands/tools-setup.ts
+pnpm exec biome format src/tui/dashboard-theme.ts src/tui/overlay-render.ts src/commands/tools-dashboard.ts src/commands/tools.ts tests/tui/dashboard-theme.test.ts tests/tui/overlay-render.test.ts tests/commands/tools-dashboard.test.ts tests/commands/tools.test.ts
 pnpm check
 ```
 
