@@ -4,7 +4,11 @@ import type { ProviderTier } from "../providers/types.ts";
 import { fromPiTheme } from "../tui/dashboard-theme.ts";
 import { activityMonitor } from "../monitor/activity-monitor.ts";
 import { renderWidgetLines } from "../monitor/widget.ts";
-import { type DashboardAction, ToolsDashboardComponent } from "./tools-dashboard.ts";
+import {
+  type DashboardAction,
+  type DashboardTabId,
+  ToolsDashboardComponent,
+} from "./tools-dashboard.ts";
 import {
   parseArgs,
   handleToggle,
@@ -99,7 +103,37 @@ export function createToolsCommand(
   allProviderNames?: string[],
   onReload?: () => void,
 ) {
-  let monitorUnsubscribe: (() => void) | null = null;
+  let widgetUnsubscribe: (() => void) | undefined;
+  let widgetContext: ExtensionCommandContext | undefined;
+
+  const isWidgetEnabled = (): boolean => widgetUnsubscribe !== undefined;
+
+  const clearWidget = (): void => {
+    const unsubscribe = widgetUnsubscribe;
+    const context = widgetContext;
+    widgetUnsubscribe = undefined;
+    widgetContext = undefined;
+    unsubscribe?.();
+    context?.ui.setWidget("pi-tools-activity", undefined);
+  };
+
+  const setWidget = (ctx: ExtensionCommandContext, enabled: boolean): void => {
+    if (!enabled) {
+      clearWidget();
+      return;
+    }
+    if (widgetUnsubscribe) return;
+
+    const repaint = () => {
+      ctx.ui.setWidget(
+        "pi-tools-activity",
+        renderWidgetLines(activityMonitor.getEntries(), ctx.ui.theme),
+      );
+    };
+    widgetContext = ctx;
+    widgetUnsubscribe = activityMonitor.onUpdate(repaint);
+    repaint();
+  };
 
   return {
     name: "tools",
@@ -112,6 +146,7 @@ export function createToolsCommand(
           ctx.ui.notify("/tools requires an interactive TUI", "warning");
           return;
         }
+        let initialTab: DashboardTabId = "status";
         while (true) {
           const action = await ctx.ui.custom<DashboardAction>(
             (tui, theme, _keybindings, done) =>
@@ -119,6 +154,10 @@ export function createToolsCommand(
                 tui,
                 theme: fromPiTheme(theme),
                 renderStatusTable: () => buildStatusTable(registry, tierMap),
+                getActivity: () => activityMonitor.getEntries(),
+                subscribeActivity: (listener) => activityMonitor.onUpdate(listener),
+                widgetEnabled: isWidgetEnabled(),
+                initialTab,
                 done,
               }),
             {
@@ -127,6 +166,11 @@ export function createToolsCommand(
             },
           );
           if (!action || action.type === "close") return;
+          initialTab = action.activeTab;
+          if (action.type === "toggle-widget") {
+            setWidget(ctx, !isWidgetEnabled());
+            continue;
+          }
           onReload?.();
         }
       }
@@ -182,20 +226,10 @@ export function createToolsCommand(
         case "monitor": {
           const action = rest[0];
           if (action === "on") {
-            monitorUnsubscribe?.();
-            // Subscribe: re-render widget on every activity update
-            monitorUnsubscribe = activityMonitor.onUpdate(() => {
-              const lines = renderWidgetLines(activityMonitor.getEntries(), ctx.ui.theme);
-              ctx.ui.setWidget("pi-tools-activity", lines);
-            });
-            // Initial render
-            const lines = renderWidgetLines(activityMonitor.getEntries(), ctx.ui.theme);
-            ctx.ui.setWidget("pi-tools-activity", lines);
+            setWidget(ctx, true);
             ctx.ui.notify("Activity monitor enabled");
           } else if (action === "off") {
-            monitorUnsubscribe?.();
-            monitorUnsubscribe = null;
-            ctx.ui.setWidget("pi-tools-activity", undefined);
+            setWidget(ctx, false);
             ctx.ui.notify("Activity monitor disabled");
           } else {
             ctx.ui.notify("Usage: /tools monitor [on|off]");
@@ -210,8 +244,7 @@ export function createToolsCommand(
 
     /** Called during session lifecycle to clean up monitor state. */
     resetMonitor(): void {
-      monitorUnsubscribe?.();
-      monitorUnsubscribe = null;
+      clearWidget();
       activityMonitor.clear();
     },
   };
