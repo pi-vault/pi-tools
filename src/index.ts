@@ -14,7 +14,7 @@ import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
 import { createWebResearchTool } from "./tools/web-research.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
-import { resolveApiKey } from "./config.ts";
+import { loadMergedConfig, resolveApiKey } from "./config.ts";
 import { buildAugmentedGuidance, detectCapabilities } from "./utils/capabilities.ts";
 import { recordProjectTrust } from "./utils/trust.ts";
 import { handleProviderRequest, handleSessionStart } from "./session.ts";
@@ -146,9 +146,16 @@ export default function createExtension(pi: ExtensionAPI): void {
 
   // Register /tools command
   const allProviderNames = allProviders.map((m) => m.name);
-  const toolsCommand = createToolsCommand(registry, tierMap, allProviderNames, () =>
-    configManager.refresh(true),
-  );
+  const toolsCommand = createToolsCommand(registry, tierMap, allProviderNames, {
+    getConfig: (scope) => {
+      const config = scope === "global" ? loadMergedConfig() : configManager.current;
+      return {
+        providers: config.providers,
+        defaultProvider: config.defaultProvider,
+      };
+    },
+    reload: () => configManager.refresh(true),
+  });
   pi.registerCommand(toolsCommand.name, {
     description: toolsCommand.description,
     handler: toolsCommand.handler,
