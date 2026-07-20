@@ -421,7 +421,7 @@ it.each([
   const ctx = makeCtx() as unknown as ExtensionCommandContext;
   (ctx.ui as any).custom = vi.fn();
   const deps = {
-    getConfig: vi.fn(() => ({ providers: {}, defaultProvider: "auto" })),
+    getConfig: vi.fn((_scope: ConfigScope) => ({ providers: {}, defaultProvider: "auto" })),
     reload: vi.fn(),
   };
   const command = createToolsCommand(
@@ -453,7 +453,7 @@ it("does not open an empty dashboard outside TUI mode", async () => {
   }) as unknown as ExtensionCommandContext;
   (ctx.ui as any).custom = vi.fn();
   const command = createToolsCommand(mem(), new Map(), [], {
-    getConfig: () => ({ providers: {}, defaultProvider: "auto" }),
+    getConfig: (_scope: ConfigScope) => ({ providers: {}, defaultProvider: "auto" }),
     reload: vi.fn(),
   });
 
@@ -473,7 +473,7 @@ it("shows migration before the mode warning", async () => {
   }) as unknown as ExtensionCommandContext;
   (ctx.ui as any).custom = vi.fn();
   const command = createToolsCommand(mem(), new Map(), [], {
-    getConfig: () => ({ providers: {}, defaultProvider: "auto" }),
+    getConfig: (_scope: ConfigScope) => ({ providers: {}, defaultProvider: "auto" }),
     reload: vi.fn(),
   });
 
@@ -591,7 +591,7 @@ Tab / Shift-Tab wrap across Providers, Status, Test, Activity
 Up / Down select provider or test row in the active tab
 Left / Right return scope switch only on Providers
 Enter returns toggle on Providers and starts one test on Test
-k blocked when canEditKeys=false
+Enter, k, d, and a blocked when canWrite=false
 d sets the selected provider as default on Providers
 r returns reload only on Status
 a sets default to auto on Providers
