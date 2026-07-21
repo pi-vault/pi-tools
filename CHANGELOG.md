@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-21
+
 ### Added
 
 - Enforceable per-operation provider budgets with hard, managed, unlimited, and shared-pool policies.
@@ -14,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Replaced typed `/tools` subcommands (status, enable, key, test, default, monitor) with a single interactive `/tools` TUI dashboard.
 - Provider usage persistence now lives at $PI_CODING_AGENT_DIR/cache/pi-tools/usage.json.
 - Provider usage persistence now uses a version 2 UTC-period ledger and migrates only compatible current-month request counts.
 - Global configuration now resolves from Pi's agent directory through `PI_CODING_AGENT_DIR`.

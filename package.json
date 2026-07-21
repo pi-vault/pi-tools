@@ -1,6 +1,6 @@
 {
   "name": "@pi-vault/pi-tools",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "Pi extension for web search, content extraction, documentation lookup, and deep research tools",
   "author": "Lanh Hoang <lanhhoang@users.noreply.github.com>",
