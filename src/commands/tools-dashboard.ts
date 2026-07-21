@@ -23,7 +23,7 @@ import {
   type TestResult,
 } from "./tools-actions.ts";
 
-export type DashboardTabId = "providers" | "status" | "test" | "activity";
+export type DashboardTabId = "providers" | "status" | "activity";
 
 export interface DashboardResumeState {
   activeTab: DashboardTabId;
@@ -66,7 +66,6 @@ export interface DashboardOptions {
 const TABS = [
   { id: "providers", label: "Providers" },
   { id: "status", label: "Status" },
-  { id: "test", label: "Test" },
   { id: "activity", label: "Activity" },
 ] satisfies DashboardTab[];
 const SHIFT_TAB_KEY: "shift+tab" = "shift+tab";
@@ -77,12 +76,23 @@ function visibleRange(index: number, total: number): { start: number; end: numbe
   return { start, end: start + count };
 }
 
+const ROW_INDICATOR = "\u25B8"; // right-pointing small triangle (U+25B8)
+const ROW_PREFIX_WIDTH = 2; // width of the indicator column (incl. trailing space)
+
+function renderRowPrefix(selected: boolean, theme: DashboardTheme): string {
+  // Selected row carries the indicator; unselected rows use spaces to keep
+  // the column width constant so the name column stays aligned with the
+  // header. (Originally the row used `>` only on the selected row with empty
+  // padding elsewhere; this restores that pattern with the new glyph.)
+  if (!selected) return " ".repeat(ROW_PREFIX_WIDTH);
+  return `${theme.fg("accent", ROW_INDICATOR)} `;
+}
+
 export class ToolsDashboardComponent implements Component {
   private activeTab: DashboardTabId;
   private providerIndex: number;
-  private testIndex: number;
   private testController?: AbortController;
-  private testResults: TestResult[] = [];
+  private testResults = new Map<string, TestResult>();
   private activityUnsubscribe?: () => void;
   private disposed = false;
 
@@ -92,11 +102,6 @@ export class ToolsDashboardComponent implements Component {
       ? options.providerNames.indexOf(options.initialProvider)
       : -1;
     this.providerIndex = initialIndex >= 0 ? initialIndex : 0;
-    const searchNames = options.registry.getSearchProviderNames();
-    const initialTestIndex = options.initialProvider
-      ? searchNames.indexOf(options.initialProvider)
-      : -1;
-    this.testIndex = initialTestIndex >= 0 ? initialTestIndex : 0;
     this.activityUnsubscribe = options.subscribeActivity(() => {
       if (!this.disposed) options.tui.requestRender();
     });
@@ -107,11 +112,9 @@ export class ToolsDashboardComponent implements Component {
     const content =
       this.activeTab === "providers"
         ? this.renderProviders(contentWidth)
-        : this.activeTab === "test"
-          ? this.renderTest(contentWidth)
-          : this.activeTab === "status"
-            ? this.renderStatus(contentWidth)
-            : this.renderActivity(contentWidth);
+        : this.activeTab === "status"
+          ? this.renderStatus(contentWidth)
+          : this.renderActivity(contentWidth);
     return frame(
       [
         renderTabBar(TABS, this.activeTab, contentWidth, this.options.theme),
@@ -140,10 +143,6 @@ export class ToolsDashboardComponent implements Component {
     }
     if (this.activeTab === "providers") {
       this.handleProviderInput(data);
-      return;
-    }
-    if (this.activeTab === "test") {
-      this.handleTestInput(data);
       return;
     }
     if (this.activeTab === "status" && data === "r") {
@@ -188,15 +187,60 @@ export class ToolsDashboardComponent implements Component {
       const entry = this.options.config.providers[name];
       const key = entry?.apiKey;
       const keyState =
-        key === undefined ? "unset" : classifyCredential(key) === "env" ? `env: ${key}` : "set";
-      const row = truncateVisible(
-        `${padVisible(index === this.providerIndex ? ">" : "", 2)}${padVisible(truncateVisible(name, 20), 20)} ${padVisible(String(this.options.tierMap.get(name) ?? 3), 4)} ${padVisible(entry?.enabled === false ? "disabled" : "enabled", 8)} ${padVisible(truncateVisible(keyState, 22), 22)} ${padVisible(entry?.budget.mode ?? "--", 12)} ${this.options.config.defaultProvider === name ? "default" : ""}`,
-        contentWidth,
+        key === undefined
+          ? "unset"
+          : classifyCredential(key) === "env"
+            ? `env: ${key}`
+            : "set";
+      const isSelected = index === this.providerIndex;
+      const prefix = renderRowPrefix(isSelected, this.options.theme);
+      const paddedName = padVisible(truncateVisible(name, 20), 20);
+      const nameCell = isSelected
+        ? this.options.theme.fg("accent", this.options.theme.bold(paddedName))
+        : this.options.theme.dim(paddedName);
+      const testCell = this.renderTestCell(name, isSelected);
+      const rest =
+        `${padVisible(String(this.options.tierMap.get(name) ?? 3), 4)} ` +
+        `${padVisible(entry?.enabled === false ? "disabled" : "enabled", 8)} ` +
+        `${padVisible(truncateVisible(keyState, 22), 22)} ` +
+        `${padVisible(entry?.budget.mode ?? "--", 12)} ` +
+        `${this.options.config.defaultProvider === name ? "default" : ""}`;
+      lines.push(
+        truncateVisible(
+          `${prefix}${nameCell} ${rest}${testCell ? ` ${testCell}` : ""}`,
+          contentWidth,
+        ),
       );
-      lines.push(index === this.providerIndex ? this.options.theme.inverse(row) : row);
     }
     lines.push(`Showing ${start + 1}–${end} of ${providerNames.length}`);
     return lines;
+  }
+
+  private renderTestCell(name: string, isSelected: boolean): string {
+    // "Testing…" takes precedence while a request is in flight for the
+    // selected row. Show this regardless of whether the row is a search
+    // provider — only the selected row can show it.
+    if (isSelected && this.testController !== undefined) {
+      return this.options.theme.dim("Testing…");
+    }
+    const result = this.testResults.get(name);
+    if (!result) return "";
+    // Non-search providers never show a successful test cell, but they can
+    // still display a deterministic failure if `t` was pressed on them.
+    const isSearchProvider =
+      this.options.registry.selectSearchCandidates(name).length > 0;
+    if (!isSearchProvider) {
+      // Render the deterministic failure for non-search providers.
+      return `FAIL • ${result.message}`;
+    }
+    if (result.ok) {
+      const summary = `OK • ${result.latencyMs}ms`;
+      return result.resultCount > 0
+        ? `${summary} • ${result.resultCount} result${result.resultCount === 1 ? "" : "s"}`
+        : summary;
+    }
+    // Failure path: result.ok is false, so message is the diagnostic text.
+    return `FAIL • ${result.latencyMs}ms • ${result.message}`;
   }
 
   private renderStatus(contentWidth: number): string[] {
@@ -204,34 +248,6 @@ export class ToolsDashboardComponent implements Component {
       .renderStatusTable()
       .split("\n")
       .flatMap((line) => wrapVisible(line, contentWidth));
-  }
-
-  private renderTest(contentWidth: number): string[] {
-    const names = this.options.registry.getSearchProviderNames();
-    const lines = [
-      truncateVisible(this.testController ? "Testing…" : "Enter/t Test • a Test all", contentWidth),
-      "",
-    ];
-    if (names.length === 0) {
-      return [...lines, this.options.theme.dim("No enabled search providers")];
-    }
-
-    const results = new Map(this.testResults.map((result) => [result.provider, result]));
-    const { start, end } = visibleRange(this.testIndex, names.length);
-    for (let index = start; index < end; index += 1) {
-      const name = names[index];
-      const result = results.get(name);
-      const detail = result
-        ? `${result.ok ? "OK" : "FAIL"} • ${result.latencyMs}ms • ${result.resultCount} result${result.resultCount === 1 ? "" : "s"}${result.message === "OK" ? "" : ` • ${result.message}`}`
-        : "";
-      const row = truncateVisible(
-        `${padVisible(index === this.testIndex ? ">" : "", 2)}${padVisible(truncateVisible(name, 20), 20)} ${detail}`,
-        contentWidth,
-      );
-      lines.push(index === this.testIndex ? this.options.theme.inverse(row) : row);
-    }
-    lines.push(truncateVisible(`Showing ${start + 1}–${end} of ${names.length}`, contentWidth));
-    return lines;
   }
 
   private renderActivity(contentWidth: number): string[] {
@@ -247,13 +263,12 @@ export class ToolsDashboardComponent implements Component {
   private renderFooter(contentWidth: number): string {
     let action: string;
     if (this.activeTab === "providers") {
+      const testBindings = "t Test • T Test all";
       action = this.options.scope.canWrite
-        ? "Enter Toggle • k Set key • d Set default • a Auto default • ←/→ Scope"
-        : "←/→ Scope";
+        ? `Enter Toggle • k Set key • d Set default • a Auto default • ${testBindings} • ←/→ Scope`
+        : `${testBindings} • ←/→ Scope`;
     } else if (this.activeTab === "status") {
       action = "r Reload";
-    } else if (this.activeTab === "test") {
-      action = "Enter/t Test • a Test all";
     } else {
       action = `w ${this.options.widgetEnabled ? "Disable" : "Enable"} widget`;
     }
@@ -276,6 +291,39 @@ export class ToolsDashboardComponent implements Component {
       this.options.tui.requestRender();
       return;
     }
+
+    // Test bindings work on read-only scope too — testing is non-mutating.
+    // Place these above the canWrite guard so they fire even when scope.canWrite is false.
+    if (data === "t") {
+      const name = this.options.providerNames[this.providerIndex];
+      if (!name) return;
+      const candidates = this.options.registry.selectSearchCandidates(name);
+      if (candidates.length === 0) {
+        this.testResults.set(name, {
+          provider: name,
+          ok: false,
+          latencyMs: 0,
+          resultCount: 0,
+          message: "not a search provider",
+        });
+        this.options.tui.requestRender();
+        return;
+      }
+      this.beginTest(async (signal) => [
+        await runProviderTest(name, this.options.registry, signal),
+      ]);
+      return;
+    }
+
+    if (matchesKey(data, Key.shift("t"))) {
+      const searchNames = this.options.registry.getSearchProviderNames();
+      if (searchNames.length === 0) return;
+      this.beginTest((signal) =>
+        runProviderTests(this.options.registry, searchNames, signal),
+      );
+      return;
+    }
+
     if (!this.options.scope.canWrite) return;
     const provider = this.options.providerNames[this.providerIndex];
     if (!provider) return;
@@ -291,48 +339,26 @@ export class ToolsDashboardComponent implements Component {
     }
   }
 
-  private handleTestInput(data: string): void {
-    const names = this.options.registry.getSearchProviderNames();
-    if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
-      const delta = matchesKey(data, Key.up) ? -1 : 1;
-      this.testIndex = Math.max(0, Math.min(this.testIndex + delta, names.length - 1));
-      this.options.tui.requestRender();
-    } else if (matchesKey(data, Key.enter) || data === "t") {
-      const name = names[this.testIndex];
-      if (name) {
-        this.beginTest(async (signal) => [
-          await runProviderTest(name, this.options.registry, signal),
-        ]);
-      }
-    } else if (data === "a" && names.length > 0) {
-      this.beginTest((signal) => runProviderTests(this.options.registry, names, signal));
-    }
-  }
-
   private beginTest(run: (signal: AbortSignal) => Promise<TestResult[]>): void {
     if (this.disposed) return;
     this.testController?.abort();
     const controller = new AbortController();
     this.testController = controller;
-    this.testResults = [];
     this.options.tui.requestRender();
     void run(controller.signal).then((results) => {
       if (this.disposed || this.testController !== controller) return;
-      this.testResults = results;
+      for (const result of results) {
+        this.testResults.set(result.provider, result);
+      }
       this.testController = undefined;
       this.options.tui.requestRender();
     });
   }
 
   private resume(): DashboardResumeState {
-    const names =
-      this.activeTab === "test"
-        ? this.options.registry.getSearchProviderNames()
-        : this.options.providerNames;
-    const index = this.activeTab === "test" ? this.testIndex : this.providerIndex;
     return {
       activeTab: this.activeTab,
-      selectedProvider: names[index],
+      selectedProvider: this.options.providerNames[this.providerIndex],
     };
   }
 
