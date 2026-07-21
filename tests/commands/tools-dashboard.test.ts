@@ -226,7 +226,7 @@ describe("ToolsDashboardComponent", () => {
         selectedProvider: "brave",
       });
 
-      for (const tab of ["status", "test", "activity"] as const) {
+      for (const tab of ["status", "activity"] as const) {
         const other = dashboard({ initialTab: tab });
         other.component.handleInput(key);
         expect(other.done).not.toHaveBeenCalled();
@@ -234,214 +234,13 @@ describe("ToolsDashboardComponent", () => {
     }
   });
 
-  it("renders the exact Test empty state when no search providers are enabled", () => {
-    const output = dashboard({
-      registry: searchRegistry([]),
-      initialTab: "test",
-    }).component.render(80);
 
-    expect(output.join("\n")).toContain("No enabled search providers");
-  });
 
-  it("changes the selected Test provider with up/down", () => {
-    const { component } = dashboard({ initialTab: "test" });
 
-    component.handleInput("\u001b[B");
-    expect(component.render(80).join("\n")).toMatch(/▸ duckduckgo/);
-    component.handleInput("\u001b[A");
-    expect(component.render(80).join("\n")).toMatch(/▸ brave/);
-  });
 
-  it("tests the selected provider and repaints exactly before and after", async () => {
-    const provider: SearchProvider = {
-      name: "brave",
-      label: "Brave",
-      search: vi.fn().mockResolvedValue([searchResult]),
-    };
-    const { component, tui } = dashboard({
-      registry: searchRegistry([provider]),
-      initialTab: "test",
-    });
 
-    component.handleInput("\r");
-    expect(tui.requestRender).toHaveBeenCalledOnce();
-    await vi.waitFor(() => expect(tui.requestRender).toHaveBeenCalledTimes(2));
 
-    expect(provider.search).toHaveBeenCalledWith("test", 1, expect.any(AbortSignal));
-    expect(component.render(80).join("\n")).toMatch(/brave.*OK.*1 result/);
-  });
 
-  it("tests every registered search provider and renders exact details", async () => {
-    const providers: SearchProvider[] = [
-      {
-        name: "one",
-        label: "one",
-        search: vi.fn().mockResolvedValue([searchResult]),
-      },
-      {
-        name: "two",
-        label: "two",
-        search: vi.fn().mockRejectedValue(new Error("network down")),
-      },
-    ];
-    vi.spyOn(Date, "now")
-      .mockReturnValueOnce(100)
-      .mockReturnValueOnce(107)
-      .mockReturnValueOnce(200)
-      .mockReturnValueOnce(208);
-    const { component, tui } = dashboard({
-      registry: searchRegistry(providers),
-      initialTab: "test",
-      scope: { kind: "project", path: "/repo/.pi/tools.json", canWrite: false },
-    });
-
-    expect(component.render(80).join("\n")).not.toContain("--");
-    component.handleInput("a");
-    await vi.waitFor(() => expect(tui.requestRender).toHaveBeenCalledTimes(2));
-    const output = component.render(80).join("\n");
-
-    expect(providers[0].search).toHaveBeenCalledWith("test", 1, expect.any(AbortSignal));
-    expect(providers[1].search).toHaveBeenCalledWith("test", 1, expect.any(AbortSignal));
-    expect(output).toContain("OK • 7ms • 1 result");
-    expect(output).toContain("FAIL • 8ms • 0 results • network down");
-  });
-
-  it("aborts a replaced test and ignores its later completion", async () => {
-    let resolveOld!: (results: SearchResult[]) => void;
-    let resolveNew!: (results: SearchResult[]) => void;
-    const provider: SearchProvider = {
-      name: "brave",
-      label: "Brave",
-      search: vi
-        .fn()
-        .mockImplementationOnce(
-          () => new Promise<SearchResult[]>((resolve) => (resolveOld = resolve)),
-        )
-        .mockImplementationOnce(
-          () => new Promise<SearchResult[]>((resolve) => (resolveNew = resolve)),
-        ),
-    };
-    const { component, tui } = dashboard({
-      registry: searchRegistry([provider]),
-      initialTab: "test",
-    });
-
-    component.handleInput("t");
-    const oldSignal = vi.mocked(provider.search).mock.calls[0][2];
-    component.handleInput("t");
-    expect(oldSignal?.aborted).toBe(true);
-    resolveNew([searchResult]);
-    await vi.waitFor(() => expect(tui.requestRender).toHaveBeenCalledTimes(3));
-    expect(component.render(80).join("\n")).toContain("1 result");
-
-    const output = component.render(80).join("\n");
-    const renderCount = tui.requestRender.mock.calls.length;
-    resolveOld([]);
-    await eventLoopTurn();
-    expect(component.render(80).join("\n")).toBe(output);
-    expect(tui.requestRender).toHaveBeenCalledTimes(renderCount);
-  });
-
-  it("dispose aborts a pending test and ignores its later completion", async () => {
-    let resolveSearch!: (results: SearchResult[]) => void;
-    const provider: SearchProvider = {
-      name: "brave",
-      label: "Brave",
-      search: vi.fn(() => new Promise<SearchResult[]>((resolve) => (resolveSearch = resolve))),
-    };
-    const { component, tui } = dashboard({
-      registry: searchRegistry([provider]),
-      initialTab: "test",
-    });
-
-    component.handleInput("t");
-    const signal = vi.mocked(provider.search).mock.calls[0][2];
-    component.dispose();
-    expect(signal?.aborted).toBe(true);
-    const output = component.render(80).join("\n");
-    const renderCount = tui.requestRender.mock.calls.length;
-    resolveSearch([searchResult]);
-    await eventLoopTurn();
-    expect(component.render(80).join("\n")).toBe(output);
-    expect(component.render(80).join("\n")).not.toContain("1 result");
-    expect(tui.requestRender).toHaveBeenCalledTimes(renderCount);
-  });
-
-  it.each(["q", "\u001b"])(
-    "%j aborts an active test, closes once, and unsubscribes once",
-    async (key) => {
-      let resolveSearch!: (results: SearchResult[]) => void;
-      const unsubscribe = vi.fn();
-      const provider: SearchProvider = {
-        name: "brave",
-        label: "Brave",
-        search: vi.fn(() => new Promise<SearchResult[]>((resolve) => (resolveSearch = resolve))),
-      };
-      const { component, done, tui } = dashboard(
-        {
-          registry: searchRegistry([provider]),
-          initialTab: "test",
-          subscribeActivity: vi.fn(() => unsubscribe),
-        },
-        vi.fn(),
-      );
-
-      component.handleInput("t");
-      const signal = vi.mocked(provider.search).mock.calls[0][2];
-      component.handleInput(key);
-      component.dispose();
-
-      expect(signal?.aborted).toBe(true);
-      expect(done).toHaveBeenCalledOnce();
-      expect(done).toHaveBeenCalledWith({ type: "close" });
-      expect(unsubscribe).toHaveBeenCalledOnce();
-      const renderCount = tui.requestRender.mock.calls.length;
-      resolveSearch([searchResult]);
-      await eventLoopTurn();
-      expect(tui.requestRender).toHaveBeenCalledTimes(renderCount);
-      expect(component.render(80).join("\n")).not.toContain("1 result");
-    },
-  );
-
-  it("keeps the selected provider in a bounded ten-row window", () => {
-    const names = Array.from({ length: 12 }, (_, index) => `provider-${index + 1}`);
-    const providers = Object.fromEntries(
-      names.map((name) => [name, { enabled: true, budget: { mode: "managed" as const } }]),
-    );
-    const { component } = dashboard({
-      providerNames: names,
-      tierMap: new Map(names.map((name) => [name, 2 as ProviderTier])),
-      config: { providers, defaultProvider: "auto" },
-    });
-
-    for (let index = 0; index < 11; index += 1) component.handleInput("\u001b[B");
-    const lines = component.render(80);
-    const output = lines.join("\n");
-
-    expect(output).toContain("provider-12");
-    expect(output).toContain("Showing 3–12 of 12");
-    expect(output).not.toContain("provider-1 ");
-    expect(lines.every((line) => visibleWidth(line) <= 80)).toBe(true);
-  });
-
-  it("keeps narrow Test rows and the Showing line bounded", () => {
-    const providers: SearchProvider[] = Array.from({ length: 123 }, (_, index) => ({
-      name: `search-${index + 1}`,
-      label: `Search ${index + 1}`,
-      search: vi.fn().mockResolvedValue([]),
-    }));
-    const lines = dashboard({
-      registry: searchRegistry(providers),
-      initialTab: "test",
-      initialProvider: "search-123",
-    }).component.render(24);
-    const output = lines.join("\n");
-
-    expect(output).toContain("search-123");
-    expect(output).not.toContain("search-113 ");
-    expect(lines.find((line) => line.includes("Showing"))).toContain("…");
-    expect(lines.every((line) => visibleWidth(line) <= 24)).toBe(true);
-  });
 
   it("renders only the latest ten activity entries", () => {
     const entries = Array.from({ length: 11 }, (_, index) => ({
@@ -512,7 +311,7 @@ describe("ToolsDashboardComponent", () => {
         query: "x".repeat(100),
       },
     ];
-    for (const tab of ["providers", "status", "test", "activity"] as const) {
+    for (const tab of ["providers", "status", "activity"] as const) {
       const lines = dashboard({ initialTab: tab, getActivity: () => entries }).component.render(
         width,
       );
@@ -520,7 +319,6 @@ describe("ToolsDashboardComponent", () => {
       if (width === 140) {
         expect(lines.join("\n")).toContain("Providers");
         expect(lines.join("\n")).toContain("Status");
-        expect(lines.join("\n")).toContain("Test");
         expect(lines.join("\n")).toContain("Activity");
         expect(lines[0]).toMatch(/^┏.*┓$/);
         expect(lines.at(-1)).toMatch(/^┗.*┛$/);
@@ -528,7 +326,7 @@ describe("ToolsDashboardComponent", () => {
     }
   });
 
-  it.each(["providers", "status", "test", "activity"] as const)(
+  it.each(["providers", "status", "activity"] as const)(
     "returns close for q and Escape from %s",
     (initialTab) => {
       for (const key of ["q", "\u001b"]) {
@@ -561,22 +359,7 @@ describe("ToolsDashboardComponent", () => {
     expect(output).not.toMatch(/^> /m);
   });
 
-  it("renders the indicator only on the selected Test row", () => {
-    const output = dashboard({ initialTab: "test" })
-      .component.render(100)
-      .join("\n");
-    // Default fixture selects "brave" (searchProviders[0]).
-    expect(output).toContain("▸ brave");
-    expect(output).not.toContain("▸ duckduckgo");
-    expect(output).not.toMatch(/^> /m);
-  });
 
-  it("preserves delimiter glyphs in Test detail and footer", () => {
-    const output = dashboard({ initialTab: "test" })
-      .component.render(100)
-      .join("\n");
-    expect(output).toContain("Enter/t Test • a Test all");
-  });
 
   it("preserves delimiter glyphs in Providers footer", () => {
     const output = dashboard().component.render(100).join("\n");
@@ -605,5 +388,85 @@ describe("ToolsDashboardComponent", () => {
       row!.slice(0, row!.indexOf("1", "brave".length)),
     );
     expect(tierColRow).toBe(tierColHeader);
+  });
+  it("renders the Test column empty for non-search providers", () => {
+    const lines = dashboard({
+      providerNames: ["brave", "duckduckgo", "exa"],
+      tierMap: new Map<string, ProviderTier>([
+        ["brave", 1],
+        ["duckduckgo", 3],
+        ["exa", 2],
+      ]),
+      config: {
+        providers: {
+          brave: { enabled: true, apiKey: "BRAVE_API_KEY", budget: { mode: "managed" as const } },
+          duckduckgo: { enabled: false, apiKey: "BRAVE_API_KEY", budget: { mode: "unlimited" as const } },
+          exa: { enabled: true, apiKey: "EXA_API_KEY", budget: { mode: "unlimited" as const } },
+        },
+        defaultProvider: "brave",
+      },
+    }).component.render(100);
+    const exaLine = lines.find((line) => line.includes("exa"));
+    expect(exaLine).toBeDefined();
+    expect(exaLine).not.toMatch(/OK|FAIL|Testing/);
+  });
+
+  it("marks non-search providers as 'not a search provider' when t is pressed", () => {
+    const { component } = dashboard({
+      providerNames: ["brave", "duckduckgo", "exa"],
+      tierMap: new Map<string, ProviderTier>([
+        ["brave", 1],
+        ["duckduckgo", 3],
+        ["exa", 2],
+      ]),
+      config: {
+        providers: {
+          brave: { enabled: true, apiKey: "BRAVE_API_KEY", budget: { mode: "managed" as const } },
+          duckduckgo: { enabled: false, apiKey: "BRAVE_API_KEY", budget: { mode: "unlimited" as const } },
+          exa: { enabled: true, apiKey: "EXA_API_KEY", budget: { mode: "unlimited" as const } },
+        },
+        defaultProvider: "brave",
+      },
+    });
+    component.handleInput("d");
+    component.handleInput("d");
+    component.handleInput("t");
+    const output = component.render(100).join("\n");
+    expect(output).toMatch(/exa.*not a search provider/);
+  });
+
+  it("shows the selected search provider's test result inline after t", async () => {
+    const { component, tui } = dashboard();
+    component.handleInput("t");
+    await vi.waitFor(() => expect(tui.requestRender).toHaveBeenCalledTimes(2));
+    const output = component.render(100).join("\n");
+    expect(output).toMatch(/brave.*OK.*1 result/);
+  });
+
+  it("shows each search provider's test result after T", async () => {
+    const { component, tui } = dashboard();
+    component.handleInput("T");
+    await vi.waitFor(() => expect(tui.requestRender).toHaveBeenCalledTimes(2));
+    const output = component.render(100).join("\n");
+    expect(output).toMatch(/brave.*OK/);
+    expect(output).toMatch(/duckduckgo/);
+  });
+
+  it("marks the selected row as Testing while the request is in flight", () => {
+    let resolveSearch!: (results: SearchResult[]) => void;
+    const provider: SearchProvider = {
+      name: "brave",
+      label: "Brave",
+      search: vi.fn(
+        () => new Promise<SearchResult[]>((r) => (resolveSearch = r)),
+      ),
+    };
+    const { component } = dashboard({
+      registry: searchRegistry([provider]),
+    });
+    component.handleInput("t");
+    const output = component.render(100).join("\n");
+    expect(output).toContain("Testing…");
+    resolveSearch([]);
   });
 });
