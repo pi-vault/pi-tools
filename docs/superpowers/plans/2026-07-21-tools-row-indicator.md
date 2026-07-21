@@ -389,8 +389,8 @@ Open a Pi session, run `/tools`, and confirm:
 - New assertion "delimiter Test detail and footer": Task 1.2 ✓
 - New assertion "delimiter Providers footer": Task 1.2 ✓
 - New assertion "column alignment with header": Task 1.2 ✓
-- Use of `▸` escape in source: Task 2.1 ✓ (`ROW_INDICATOR = "▸"`)
-- Use of `•` escape for delimiter: Note in Task 3.1 — the inline delimiter stays as literal `•` to minimize diff churn; if the user prefers the escape form, swap `•` for `•` in Task 3.1.
+- Use of `▸` escape in source: Task 2.1 ✓ (`ROW_INDICATOR = "▸"`); commit `86e76a5` corrected the source from literal `▸` to escape form per the spec
+- Use of delimiter in source: the inline delimiter in `renderTest`'s detail string stays as literal `•` (U+2022) per the spec's note that escape form is preferred for `ROW_INDICATOR` but not required for inline delimiter strings
 - Files NOT modified list: covered (no other files are touched)
 
 **Type consistency:**
