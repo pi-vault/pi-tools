@@ -2,7 +2,12 @@ allowBuilds:
   "@google/genai": true
   protobufjs: true
 minimumReleaseAgeExclude:
-  - "@earendil-works/pi-agent-core@0.80.10"
-  - "@earendil-works/pi-ai@0.80.10"
-  - "@earendil-works/pi-coding-agent@0.80.10"
-  - "@earendil-works/pi-tui@0.80.10"
+  - '@biomejs/biome@2.5.5'
+  - '@biomejs/cli-darwin-arm64@2.5.5'
+  - '@biomejs/cli-darwin-x64@2.5.5'
+  - '@biomejs/cli-linux-arm64-musl@2.5.5'
+  - '@biomejs/cli-linux-arm64@2.5.5'
+  - '@biomejs/cli-linux-x64-musl@2.5.5'
+  - '@biomejs/cli-linux-x64@2.5.5'
+  - '@biomejs/cli-win32-arm64@2.5.5'
+  - '@biomejs/cli-win32-x64@2.5.5'
