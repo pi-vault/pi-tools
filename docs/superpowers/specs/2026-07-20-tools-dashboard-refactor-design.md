@@ -148,7 +148,7 @@ Show enabled search providers available in the registry. Up/Down selects; Enter 
 provider.search("test", 1, signal);
 ```
 
-Tests report pass/fail, latency, and result count inline. Each run owns an `AbortController`; starting another run aborts and replaces it, and `dispose()` aborts it. A run identifier/controller check prevents replaced or disposed runs from repainting or replacing current results. A rejected provider call becomes a failed result rather than an unhandled promise rejection. Current-run completion updates the component and calls `tui.requestRender()`.
+Tests report pass/fail, latency, and result count inline. They are real searches through `ProviderRegistry`, matching the legacy typed test, so they consume normal provider quota and budget. Each run owns an `AbortController`; starting another run aborts and replaces it, while `q`, Escape, and `dispose()` abort the active run before cleanup completes. A run identifier/controller check prevents replaced or disposed runs from repainting or replacing current results. A rejected provider call becomes a failed result rather than an unhandled promise rejection. Current-run completion updates the component and calls `tui.requestRender()`.
 
 ## Activity Tab and Widget
 
@@ -212,6 +212,6 @@ Delete:
 8. Activity renders the latest ten entries; widget state persists across overlay reopen and is cleaned up at shutdown.
 9. Providers and Test keep the selected row visible through a ten-row window; overlay reopen preserves the active tab and relevant provider selection.
 10. All dashboard output, including ANSI-styled text, respects visible width and uses the `/usage` frame/tab conventions.
-11. Tests cover scope-effective config selection, read-only mutation blocking, blank key cancellation, mode-aware dispatch, legacy behavior until removal, contextual `a`, resume state, stale async runs, lifecycle cleanup, and every other acceptance criterion.
+11. Tests cover scope-effective config selection, read-only mutation blocking, blank key cancellation, mode-aware dispatch, legacy behavior until removal, contextual `a`, resume state, stale async runs, active-run cancellation through both `q` and Escape, idempotent lifecycle cleanup, and every other acceptance criterion.
 12. Each phase verifies formatting only for its explicit changed files, then runs `pnpm check`; unrelated baseline formatting debt is out of scope.
 13. No `pi-usage` imports and no package dependency changes.
