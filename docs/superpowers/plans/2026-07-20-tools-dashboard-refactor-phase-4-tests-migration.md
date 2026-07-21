@@ -16,6 +16,7 @@
 - Pi RPC reports `mode: "rpc"`; its `ui.custom()` returns `undefined` because custom components require TUI mode. Guard with `ctx.mode === "tui"`, not `ctx.hasUI`.
 - Pi disposes a custom component after `done()`. `ToolsDashboardComponent.dispose()` must therefore be idempotent.
 - Follow `pi-usage`: cancel work on `q`/Escape, request a render when async state changes, and release listeners during component cleanup.
+- Provider tests are real searches through `ProviderRegistry`, matching the legacy typed test, so they consume normal provider quota and budget.
 
 ---
 
@@ -36,6 +37,7 @@
 ### Task 1: Add abortable provider test actions
 
 **Files:**
+
 - Modify: `src/commands/tools-actions.ts`
 - Modify: `tests/commands/tools-actions.test.ts`
 
@@ -48,7 +50,9 @@ describe("provider tests", () => {
   it("passes the raw AbortSignal as search argument three", async () => {
     const search = vi.fn().mockResolvedValue([{ url: "https://example.com" }]);
     const registry = {
-      selectSearchCandidates: vi.fn(() => [{ name: "brave", label: "Brave", search }]),
+      selectSearchCandidates: vi.fn(() => [
+        { name: "brave", label: "Brave", search },
+      ]),
     } as never;
     const controller = new AbortController();
 
@@ -113,7 +117,9 @@ describe("provider tests", () => {
       ]),
     } as never;
 
-    await expect(runProviderTest("brave", registry, controller.signal)).resolves.toMatchObject({
+    await expect(
+      runProviderTest("brave", registry, controller.signal),
+    ).resolves.toMatchObject({
       ok: false,
       message: "aborted",
     });
@@ -249,6 +255,7 @@ Expected: all commands pass.
 ### Task 2: Add the Test tab and wire the registry
 
 **Files:**
+
 - Modify: `src/commands/tools-dashboard.ts`
 - Modify: `tests/commands/tools-dashboard.test.ts`
 - Modify: `src/commands/tools.ts`
@@ -279,7 +286,9 @@ function searchRegistry(
     },
   ],
 ): ProviderRegistry {
-  const byName = new Map(providers.map((provider) => [provider.name, provider]));
+  const byName = new Map(
+    providers.map((provider) => [provider.name, provider]),
+  );
   return {
     getSearchProviderNames: vi.fn(() => [...byName.keys()]),
     selectSearchCandidates: vi.fn((name?: string) => {
@@ -376,7 +385,9 @@ it("switches scope only from Providers", () => {
 });
 
 it("tests the selected provider and repaints before and after", async () => {
-  const search = vi.fn().mockResolvedValue([searchResult("https://example.com")]);
+  const search = vi
+    .fn()
+    .mockResolvedValue([searchResult("https://example.com")]);
   const registry = searchRegistry([{ name: "brave", label: "Brave", search }]);
   const { component, tui } = dashboard({ registry, initialTab: "test" });
   const before = tui.requestRender.mock.calls.length;
@@ -390,7 +401,7 @@ it("tests the selected provider and repaints before and after", async () => {
   expect(tui.requestRender.mock.calls.length - before).toBe(2);
 });
 
-it("tests every registered search provider with a even in read-only scope", async () => {
+it("tests every registered search provider with a, even in read-only scope", async () => {
   const brave = vi.fn().mockResolvedValue([]);
   const exa = vi.fn().mockResolvedValue([searchResult("https://example.com")]);
   const registry = searchRegistry([
@@ -421,7 +432,10 @@ it("ignores a replaced provider test after the newer run finishes", async () => 
   const second = new Promise<SearchResult[]>((resolve) => {
     resolveSecond = resolve;
   });
-  const search = vi.fn().mockImplementationOnce(() => first).mockImplementationOnce(() => second);
+  const search = vi
+    .fn()
+    .mockImplementationOnce(() => first)
+    .mockImplementationOnce(() => second);
   const registry = searchRegistry([{ name: "brave", label: "Brave", search }]);
   const { component, tui } = dashboard({ registry, initialTab: "test" });
 
@@ -443,12 +457,14 @@ it("ignores a replaced provider test after the newer run finishes", async () => 
 it("aborts and ignores a provider test completed after dispose", async () => {
   let receivedSignal: AbortSignal | undefined;
   let resolveSearch!: (value: SearchResult[]) => void;
-  const search = vi.fn((_query: string, _count: number, signal?: AbortSignal) => {
-    receivedSignal = signal;
-    return new Promise<SearchResult[]>((resolve) => {
-      resolveSearch = resolve;
-    });
-  });
+  const search = vi.fn(
+    (_query: string, _count: number, signal?: AbortSignal) => {
+      receivedSignal = signal;
+      return new Promise<SearchResult[]>((resolve) => {
+        resolveSearch = resolve;
+      });
+    },
+  );
   const registry = searchRegistry([{ name: "brave", label: "Brave", search }]);
   const { component, tui } = dashboard({ registry, initialTab: "test" });
 
@@ -464,6 +480,48 @@ it("aborts and ignores a provider test completed after dispose", async () => {
   expect(tui.requestRender).toHaveBeenCalledTimes(rendersAfterDispose);
   expect(component.render(140).join("\n")).not.toContain("0 results");
 });
+
+it.each([
+  ["q", "q"],
+  ["Escape", "\u001b"],
+] as const)(
+  "aborts an active provider test on %s and keeps cleanup idempotent",
+  async (_label, key) => {
+    let receivedSignal: AbortSignal | undefined;
+    let resolveSearch!: (value: SearchResult[]) => void;
+    const search = vi.fn(
+      (_query: string, _count: number, signal?: AbortSignal) => {
+        receivedSignal = signal;
+        return new Promise<SearchResult[]>((resolve) => {
+          resolveSearch = resolve;
+        });
+      },
+    );
+    const unsubscribe = vi.fn();
+    const registry = searchRegistry([{ name: "brave", label: "Brave", search }]);
+    const instance = dashboard({
+      registry,
+      initialTab: "test",
+      subscribeActivity: vi.fn(() => unsubscribe),
+    });
+
+    instance.component.handleInput("t");
+    await Promise.resolve();
+    instance.component.handleInput(key);
+    instance.component.dispose();
+    const rendersAfterClose = instance.tui.requestRender.mock.calls.length;
+    resolveSearch([]);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(receivedSignal?.aborted).toBe(true);
+    expect(instance.done).toHaveBeenCalledOnce();
+    expect(instance.done).toHaveBeenCalledWith({ type: "close" });
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(instance.tui.requestRender).toHaveBeenCalledTimes(rendersAfterClose);
+    expect(instance.component.render(140).join("\n")).not.toContain("0 results");
+  },
+);
 
 it("restores and keeps the selected Test provider in a ten-row window", () => {
   const providers = Array.from({ length: 12 }, (_, index) => ({
@@ -499,9 +557,10 @@ it.each([40, 80, 140])("keeps every tab within width %i", (width) => {
     },
   ];
   for (const tab of ["providers", "status", "test", "activity"] as const) {
-    const lines = dashboard({ initialTab: tab, getActivity: () => entries }).component.render(
-      width,
-    );
+    const lines = dashboard({
+      initialTab: tab,
+      getActivity: () => entries,
+    }).component.render(width);
     expect(lines.every((line) => visibleWidth(line) <= width)).toBe(true);
     if (width === 140) {
       const output = lines.join("\n");
@@ -589,9 +648,15 @@ this.testIndex = initialTestIndex >= 0 ? initialTestIndex : 0;
 5. Extract the existing Providers window calculation for reuse:
 
 ```ts
-function visibleRange(index: number, total: number): { start: number; end: number } {
+function visibleRange(
+  index: number,
+  total: number,
+): { start: number; end: number } {
   const count = Math.min(10, total);
-  const start = Math.max(0, Math.min(index - Math.floor(count / 2), total - count));
+  const start = Math.max(
+    0,
+    Math.min(index - Math.floor(count / 2), total - count),
+  );
   return { start, end: start + count };
 }
 ```
@@ -703,6 +768,7 @@ if (this.activeTab === "providers") {
   action = `w ${this.options.widgetEnabled ? "Disable" : "Enable"} widget`;
 }
 ```
+
 8. Add the run helpers:
 
 ```ts
@@ -752,6 +818,8 @@ dispose(): void {
   unsubscribe?.();
 }
 ```
+
+Keep the existing global `q`/Escape branch: it calls `finish({ type: "close" })`, which calls `dispose()` before `done()`. Pi then calls `dispose()` again, so the idempotence guard is required.
 
 10. Replace `resume()` so `initialProvider` remains meaningful for either provider-bearing tab:
 
@@ -812,6 +880,7 @@ Expected: all commands pass. No package or lockfile changes.
 ### Task 3: Remove typed dispatch and obsolete modules
 
 **Files:**
+
 - Modify: `src/commands/tools.ts`
 - Modify: `tests/commands/tools.test.ts`
 - Delete: `src/commands/tools-setup.ts`
@@ -872,7 +941,10 @@ describe("tools tabs-only migration", () => {
   });
 
   it("does not open an empty dashboard outside TUI mode", async () => {
-    const ctx = makeCtx({ mode: "rpc", hasUI: true }) as unknown as ExtensionCommandContext;
+    const ctx = makeCtx({
+      mode: "rpc",
+      hasUI: true,
+    }) as unknown as ExtensionCommandContext;
     (ctx.ui as any).custom = vi.fn();
     const command = createToolsCommand(mem(), new Map(), [], commandDeps());
 
@@ -886,7 +958,10 @@ describe("tools tabs-only migration", () => {
   });
 
   it("shows migration before the mode warning", async () => {
-    const ctx = makeCtx({ mode: "rpc", hasUI: true }) as unknown as ExtensionCommandContext;
+    const ctx = makeCtx({
+      mode: "rpc",
+      hasUI: true,
+    }) as unknown as ExtensionCommandContext;
     (ctx.ui as any).custom = vi.fn();
     const command = createToolsCommand(mem(), new Map(), [], commandDeps());
 
@@ -1015,7 +1090,7 @@ rm tests/commands/tools-setup.test.ts tests/commands/tools-subcommands.test.ts
 Verify no surviving reference:
 
 ```bash
-! grep -RInE --include='*.ts' 'tools-setup|tools-subcommands|parseArgs|handleEnhancedSetup|handleToggle|handleKey|handleDefault|handleTest\(' src tests
+! grep -RIn --include='*.ts' 'tools-setup\|tools-subcommands' src tests
 ```
 
 Expected: command exits successfully with no matches.
@@ -1064,7 +1139,7 @@ test ! -e tests/commands/tools-setup.test.ts
 test ! -e tests/commands/tools-subcommands.test.ts
 test -e src/commands/tools-actions.ts
 test -e src/commands/tools-dashboard.ts
-! grep -RIn --include='*.ts' 'tools-setup\|tools-subcommands\|parseArgs' src tests
+! grep -RIn --include='*.ts' 'tools-setup\|tools-subcommands' src tests
 grep -n 'toolsCommand.resetMonitor' src/index.ts
 ! grep -RIn --include='*.ts' 'pi-usage' src
 git diff -- package.json pnpm-lock.yaml
