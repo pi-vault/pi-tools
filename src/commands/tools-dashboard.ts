@@ -2,6 +2,7 @@ import { Key, matchesKey, type Component, type TUI } from "@earendil-works/pi-tu
 import type { PiToolsConfig } from "../config.ts";
 import type { ActivityEntry } from "../monitor/activity-monitor.ts";
 import { formatEntryLine } from "../monitor/widget.ts";
+import type { ProviderRegistry } from "../providers/registry.ts";
 import type { ProviderTier } from "../providers/types.ts";
 import {
   type DashboardTheme,
@@ -15,9 +16,14 @@ import {
   frameContentWidth,
   renderTabBar,
 } from "../tui/overlay-render.ts";
-import { classifyCredential } from "./tools-actions.ts";
+import {
+  classifyCredential,
+  runProviderTest,
+  runProviderTests,
+  type TestResult,
+} from "./tools-actions.ts";
 
-export type DashboardTabId = "providers" | "status" | "activity";
+export type DashboardTabId = "providers" | "status" | "test" | "activity";
 
 export interface DashboardResumeState {
   activeTab: DashboardTabId;
@@ -43,6 +49,7 @@ export interface DashboardScope {
 export interface DashboardOptions {
   tui: TUI;
   theme: DashboardTheme;
+  registry: ProviderRegistry;
   providerNames: string[];
   tierMap: ReadonlyMap<string, ProviderTier>;
   config: Pick<PiToolsConfig, "providers" | "defaultProvider">;
@@ -59,13 +66,23 @@ export interface DashboardOptions {
 const TABS = [
   { id: "providers", label: "Providers" },
   { id: "status", label: "Status" },
+  { id: "test", label: "Test" },
   { id: "activity", label: "Activity" },
 ] satisfies DashboardTab[];
 const SHIFT_TAB_KEY: "shift+tab" = "shift+tab";
 
+function visibleRange(index: number, total: number): { start: number; end: number } {
+  const count = Math.min(10, total);
+  const start = Math.max(0, Math.min(index - Math.floor(count / 2), total - count));
+  return { start, end: start + count };
+}
+
 export class ToolsDashboardComponent implements Component {
   private activeTab: DashboardTabId;
   private providerIndex: number;
+  private testIndex: number;
+  private testController?: AbortController;
+  private testResults: TestResult[] = [];
   private activityUnsubscribe?: () => void;
   private disposed = false;
 
@@ -75,6 +92,11 @@ export class ToolsDashboardComponent implements Component {
       ? options.providerNames.indexOf(options.initialProvider)
       : -1;
     this.providerIndex = initialIndex >= 0 ? initialIndex : 0;
+    const searchNames = options.registry.getSearchProviderNames();
+    const initialTestIndex = options.initialProvider
+      ? searchNames.indexOf(options.initialProvider)
+      : -1;
+    this.testIndex = initialTestIndex >= 0 ? initialTestIndex : 0;
     this.activityUnsubscribe = options.subscribeActivity(() => {
       if (!this.disposed) options.tui.requestRender();
     });
@@ -85,9 +107,11 @@ export class ToolsDashboardComponent implements Component {
     const content =
       this.activeTab === "providers"
         ? this.renderProviders(contentWidth)
-        : this.activeTab === "status"
-          ? this.renderStatus(contentWidth)
-          : this.renderActivity(contentWidth);
+        : this.activeTab === "test"
+          ? this.renderTest(contentWidth)
+          : this.activeTab === "status"
+            ? this.renderStatus(contentWidth)
+            : this.renderActivity(contentWidth);
     return frame(
       [
         renderTabBar(TABS, this.activeTab, contentWidth, this.options.theme),
@@ -114,12 +138,12 @@ export class ToolsDashboardComponent implements Component {
       this.switchTab(-1);
       return;
     }
-    if (matchesKey(data, Key.left) || matchesKey(data, Key.right)) {
-      this.finish({ type: "switch-scope", ...this.resume() });
-      return;
-    }
     if (this.activeTab === "providers") {
       this.handleProviderInput(data);
+      return;
+    }
+    if (this.activeTab === "test") {
+      this.handleTestInput(data);
       return;
     }
     if (this.activeTab === "status" && data === "r") {
@@ -134,10 +158,13 @@ export class ToolsDashboardComponent implements Component {
   invalidate(): void {}
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.testController?.abort();
+    this.testController = undefined;
     const unsubscribe = this.activityUnsubscribe;
     this.activityUnsubscribe = undefined;
     unsubscribe?.();
-    this.disposed = true;
   }
 
   private renderProviders(contentWidth: number): string[] {
@@ -154,15 +181,7 @@ export class ToolsDashboardComponent implements Component {
     ];
     if (providerNames.length === 0) return [...lines, this.options.theme.dim("No providers")];
 
-    const visibleCount = Math.min(10, providerNames.length);
-    const start = Math.max(
-      0,
-      Math.min(
-        this.providerIndex - Math.floor(visibleCount / 2),
-        providerNames.length - visibleCount,
-      ),
-    );
-    const end = start + visibleCount;
+    const { start, end } = visibleRange(this.providerIndex, providerNames.length);
 
     for (let index = start; index < end; index += 1) {
       const name = providerNames[index];
@@ -187,6 +206,34 @@ export class ToolsDashboardComponent implements Component {
       .flatMap((line) => wrapVisible(line, contentWidth));
   }
 
+  private renderTest(contentWidth: number): string[] {
+    const names = this.options.registry.getSearchProviderNames();
+    const lines = [
+      truncateVisible(this.testController ? "Testing…" : "Enter/t Test • a Test all", contentWidth),
+      "",
+    ];
+    if (names.length === 0) {
+      return [...lines, this.options.theme.dim("No enabled search providers")];
+    }
+
+    const results = new Map(this.testResults.map((result) => [result.provider, result]));
+    const { start, end } = visibleRange(this.testIndex, names.length);
+    for (let index = start; index < end; index += 1) {
+      const name = names[index];
+      const result = results.get(name);
+      const detail = result
+        ? `${result.ok ? "OK" : "FAIL"} • ${result.latencyMs}ms • ${result.resultCount} result${result.resultCount === 1 ? "" : "s"}${result.message === "OK" ? "" : ` • ${result.message}`}`
+        : "";
+      const row = truncateVisible(
+        `${padVisible(index === this.testIndex ? ">" : "", 2)}${padVisible(truncateVisible(name, 20), 20)} ${detail}`,
+        contentWidth,
+      );
+      lines.push(index === this.testIndex ? this.options.theme.inverse(row) : row);
+    }
+    lines.push(truncateVisible(`Showing ${start + 1}–${end} of ${names.length}`, contentWidth));
+    return lines;
+  }
+
   private renderActivity(contentWidth: number): string[] {
     const entries = this.options.getActivity().slice(-10);
     if (entries.length === 0) {
@@ -204,9 +251,11 @@ export class ToolsDashboardComponent implements Component {
         ? "Enter Toggle • k Set key • d Set default • a Auto default • ←/→ Scope"
         : "←/→ Scope";
     } else if (this.activeTab === "status") {
-      action = "r Reload • ←/→ Scope";
+      action = "r Reload";
+    } else if (this.activeTab === "test") {
+      action = "Enter/t Test • a Test all";
     } else {
-      action = `w ${this.options.widgetEnabled ? "Disable" : "Enable"} widget • ←/→ Scope`;
+      action = `w ${this.options.widgetEnabled ? "Disable" : "Enable"} widget`;
     }
     return this.options.theme.dim(
       truncateVisible(`${action} • Tab/Shift-Tab Switch tab • q Close`, contentWidth),
@@ -214,6 +263,10 @@ export class ToolsDashboardComponent implements Component {
   }
 
   private handleProviderInput(data: string): void {
+    if (matchesKey(data, Key.left) || matchesKey(data, Key.right)) {
+      this.finish({ type: "switch-scope", ...this.resume() });
+      return;
+    }
     if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
       const delta = matchesKey(data, Key.up) ? -1 : 1;
       this.providerIndex = Math.max(
@@ -238,10 +291,55 @@ export class ToolsDashboardComponent implements Component {
     }
   }
 
+  private handleTestInput(data: string): void {
+    const names = this.options.registry.getSearchProviderNames();
+    if (matchesKey(data, Key.up) || matchesKey(data, Key.down)) {
+      const delta = matchesKey(data, Key.up) ? -1 : 1;
+      this.testIndex = Math.max(0, Math.min(this.testIndex + delta, names.length - 1));
+      this.options.tui.requestRender();
+    } else if (matchesKey(data, Key.enter) || data === "t") {
+      this.testSelected();
+    } else if (data === "a") {
+      this.testAll();
+    }
+  }
+
+  private testSelected(): void {
+    const name = this.options.registry.getSearchProviderNames()[this.testIndex];
+    if (!name) return;
+    this.beginTest(async (signal) => [await runProviderTest(name, this.options.registry, signal)]);
+  }
+
+  private testAll(): void {
+    const names = this.options.registry.getSearchProviderNames();
+    if (names.length === 0) return;
+    this.beginTest((signal) => runProviderTests(this.options.registry, names, signal));
+  }
+
+  private beginTest(run: (signal: AbortSignal) => Promise<TestResult[]>): void {
+    if (this.disposed) return;
+    this.testController?.abort();
+    const controller = new AbortController();
+    this.testController = controller;
+    this.testResults = [];
+    this.options.tui.requestRender();
+    void run(controller.signal).then((results) => {
+      if (this.disposed || this.testController !== controller) return;
+      this.testResults = results;
+      this.testController = undefined;
+      this.options.tui.requestRender();
+    });
+  }
+
   private resume(): DashboardResumeState {
+    const names =
+      this.activeTab === "test"
+        ? this.options.registry.getSearchProviderNames()
+        : this.options.providerNames;
+    const index = this.activeTab === "test" ? this.testIndex : this.providerIndex;
     return {
       activeTab: this.activeTab,
-      selectedProvider: this.options.providerNames[this.providerIndex],
+      selectedProvider: names[index],
     };
   }
 

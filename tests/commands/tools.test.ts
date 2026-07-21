@@ -627,8 +627,9 @@ describe("tools provider dashboard actions", () => {
       ],
       captures,
     );
+    const registry = mem();
     const command = createToolsCommand(
-      mem(),
+      registry,
       new Map([["brave", 1]]),
       ["brave", "duckduckgo"],
       deps,
@@ -636,6 +637,7 @@ describe("tools provider dashboard actions", () => {
 
     await command.handler("", ctx);
 
+    expect(captures[0].registry).toBe(registry);
     expect(deps.getConfig.mock.calls.map(([scope]) => scope)).toEqual(["global", "project"]);
     expect(captures[0].config).toBe(globalProviderState);
     expect(captures[0].scope.kind).toBe("global");

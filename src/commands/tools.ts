@@ -220,6 +220,7 @@ export function createToolsCommand(
               new ToolsDashboardComponent({
                 tui,
                 theme: fromPiTheme(theme),
+                registry,
                 providerNames: allProviderNames,
                 tierMap,
                 config,
