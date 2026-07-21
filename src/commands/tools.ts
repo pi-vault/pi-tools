@@ -19,13 +19,6 @@ import {
   type DashboardScope,
   ToolsDashboardComponent,
 } from "./tools-dashboard.ts";
-import {
-  parseArgs,
-  handleToggle,
-  handleKey,
-  handleDefault,
-  handleTest,
-} from "./tools-subcommands.ts";
 
 export interface ToolsCommandDeps {
   getConfig: (scope: ConfigScope) => Pick<PiToolsConfig, "providers" | "defaultProvider">;
@@ -99,18 +92,9 @@ export function buildStatusTable(
   return [header, "-".repeat(header.length), ...rows.map(render)].join("\n");
 }
 
-const USAGE = `Usage: /tools [subcommand]
-
-Subcommands:
-  (no args)          Open the Providers dashboard
-  status             Show provider status table
-  reload             Refresh config from disk
-  enable <name>      Enable a provider
-  disable <name>     Disable a provider
-  key <name> <value> Set API key for a provider
-  test [name]        Test provider connection
-  default <name>     Set default provider
-  monitor [on|off]   Toggle activity monitor widget`;
+const MIGRATION_HINT = `/tools no longer supports typed subcommands.
+Use /tools (no arguments) to open the interactive dashboard.
+The dashboard provides the previous status, provider, key, test, default, reload, and monitor actions through tabs.`;
 
 async function applyDashboardAction(
   action: DashboardAction,
@@ -194,138 +178,72 @@ export function createToolsCommand(
 
   return {
     name: "tools",
-    description:
-      "Manage search/fetch providers. Run with no args for the Providers dashboard, or use subcommands (status, enable, disable, key, test, default, reload, monitor).",
+    description: "Manage providers in an interactive dashboard.",
 
     async handler(args: string, ctx: ExtensionCommandContext) {
-      if (args.trim() === "") {
-        if (ctx.mode !== "tui") {
-          ctx.ui.notify("/tools requires an interactive TUI", "warning");
-          return;
-        }
-        let selectedScope: ConfigScope = "global";
-        let resumeState: DashboardResumeState = { activeTab: "providers" };
-        while (true) {
-          const scope: DashboardScope =
-            selectedScope === "global"
-              ? { kind: "global", path: getConfigPath(), canWrite: true }
-              : {
-                  kind: "project",
-                  path: findWritableProjectPath(ctx.cwd),
-                  canWrite: ctx.isProjectTrusted(),
-                };
-          const config = deps.getConfig(selectedScope);
-          const action = await ctx.ui.custom<DashboardAction>(
-            (tui, theme, _keybindings, done) =>
-              new ToolsDashboardComponent({
-                tui,
-                theme: fromPiTheme(theme),
-                providerNames: allProviderNames,
-                tierMap,
-                config,
-                scope,
-                renderStatusTable: () => buildStatusTable(registry, tierMap),
-                getActivity: () => activityMonitor.getEntries(),
-                subscribeActivity: (listener) => activityMonitor.onUpdate(listener),
-                widgetEnabled: isWidgetEnabled(),
-                initialTab: resumeState.activeTab,
-                initialProvider: resumeState.selectedProvider,
-                done,
-              }),
-            {
-              overlay: true,
-              overlayOptions: { anchor: "center", maxHeight: "85%", width: "92%" },
-            },
-          );
-          if (!action || action.type === "close") return;
-          resumeState = {
-            activeTab: action.activeTab,
-            selectedProvider: action.selectedProvider,
-          };
-          if (action.type === "switch-scope") {
-            if (selectedScope === "project") {
-              selectedScope = "global";
-            } else if (ctx.isProjectTrusted() || findProjectConfigPath(ctx.cwd)) {
-              selectedScope = "project";
-            } else {
-              ctx.ui.notify(
-                "Project scope requires trust or an existing project config",
-                "warning",
-              );
-            }
-            continue;
-          }
-          if (action.type === "toggle-widget") {
-            setWidget(ctx, !isWidgetEnabled());
-            continue;
-          }
-          await applyDashboardAction(action, ctx, scope, config, allProviderNames, deps);
-        }
-      }
-
-      const { subcommand, rest } = parseArgs(args);
-
-      // Legacy flag support
-      if (subcommand === "--status") {
-        ctx.ui.notify(buildStatusTable(registry, tierMap));
+      if (args.trim() !== "") {
+        ctx.ui.notify(MIGRATION_HINT, "warning");
         return;
       }
-      if (subcommand === "--reload") {
-        deps.reload();
-        ctx.ui.notify(buildStatusTable(registry, tierMap));
+      if (ctx.mode !== "tui") {
+        ctx.ui.notify("/tools requires an interactive TUI", "warning");
         return;
       }
-
-      switch (subcommand) {
-        case "status":
-          ctx.ui.notify(buildStatusTable(registry, tierMap));
-          break;
-
-        case "reload":
-          deps.reload();
-          ctx.ui.notify(buildStatusTable(registry, tierMap));
-          break;
-
-        case "enable":
-          handleToggle(ctx, rest[0] ?? "", true, allProviderNames);
-          deps.reload();
-          break;
-
-        case "disable":
-          handleToggle(ctx, rest[0] ?? "", false, allProviderNames);
-          deps.reload();
-          break;
-
-        case "key":
-          handleKey(ctx, rest[0] ?? "", rest[1], allProviderNames);
-          deps.reload();
-          break;
-
-        case "test":
-          await handleTest(ctx, rest[0], registry);
-          break;
-
-        case "default":
-          handleDefault(ctx, rest[0] ?? "", allProviderNames);
-          deps.reload();
-          break;
-
-        case "monitor": {
-          const action = rest[0];
-          if (action === "on") {
-            setWidget(ctx, true);
-            ctx.ui.notify("Activity monitor enabled");
-          } else if (action === "off") {
-            setWidget(ctx, false);
-            ctx.ui.notify("Activity monitor disabled");
+      let selectedScope: ConfigScope = "global";
+      let resumeState: DashboardResumeState = { activeTab: "providers" };
+      while (true) {
+        const scope: DashboardScope =
+          selectedScope === "global"
+            ? { kind: "global", path: getConfigPath(), canWrite: true }
+            : {
+                kind: "project",
+                path: findWritableProjectPath(ctx.cwd),
+                canWrite: ctx.isProjectTrusted(),
+              };
+        const config = deps.getConfig(selectedScope);
+        const action = await ctx.ui.custom<DashboardAction>(
+          (tui, theme, _keybindings, done) =>
+            new ToolsDashboardComponent({
+              tui,
+              theme: fromPiTheme(theme),
+              registry,
+              providerNames: allProviderNames,
+              tierMap,
+              config,
+              scope,
+              renderStatusTable: () => buildStatusTable(registry, tierMap),
+              getActivity: () => activityMonitor.getEntries(),
+              subscribeActivity: (listener) => activityMonitor.onUpdate(listener),
+              widgetEnabled: isWidgetEnabled(),
+              initialTab: resumeState.activeTab,
+              initialProvider: resumeState.selectedProvider,
+              done,
+            }),
+          {
+            overlay: true,
+            overlayOptions: { anchor: "center", maxHeight: "85%", width: "92%" },
+          },
+        );
+        if (!action || action.type === "close") return;
+        resumeState = {
+          activeTab: action.activeTab,
+          selectedProvider: action.selectedProvider,
+        };
+        if (action.type === "switch-scope") {
+          if (selectedScope === "project") {
+            selectedScope = "global";
+          } else if (ctx.isProjectTrusted() || findProjectConfigPath(ctx.cwd)) {
+            selectedScope = "project";
           } else {
-            ctx.ui.notify("Usage: /tools monitor [on|off]");
+            ctx.ui.notify("Project scope requires trust or an existing project config", "warning");
           }
-          break;
+          continue;
         }
-
-        default:
-          ctx.ui.notify(`Unknown subcommand "${subcommand}".\n\n${USAGE}`);
+        if (action.type === "toggle-widget") {
+          setWidget(ctx, !isWidgetEnabled());
+          continue;
+        }
+        await applyDashboardAction(action, ctx, scope, config, allProviderNames, deps);
       }
     },
 

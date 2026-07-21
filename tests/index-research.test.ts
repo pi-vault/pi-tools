@@ -132,16 +132,21 @@ describe("web_research registration", () => {
     const pi = createMockPi();
     createExtension(pi as never);
     const ctx = makeCtx();
+    const custom = vi
+      .fn()
+      .mockResolvedValueOnce({ type: "reload", activeTab: "status" })
+      .mockResolvedValueOnce({ type: "close" });
+    ctx.ui.custom = custom as unknown as typeof ctx.ui.custom;
     pi.events.get("session_start")?.[0]?.({ type: "session_start", reason: "startup" }, ctx);
     const command = pi.commands.find(({ name }) => name === "tools");
     if (!command) throw new Error("tools command not registered");
-    await command.options.handler("reload", ctx);
+    await command.options.handler("", ctx);
 
     const tool = pi.tools.find(({ name }) => name === "web_research");
     if (!tool) throw new Error("web_research tool not registered");
-    await expect(
-      tool.execute("call", { query: "test" }, undefined, vi.fn(), ctx),
-    ).rejects.toThrow("disabled");
+    await expect(tool.execute("call", { query: "test" }, undefined, vi.fn(), ctx)).rejects.toThrow(
+      "disabled",
+    );
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -171,10 +176,15 @@ describe("web_research registration", () => {
     const pi = createMockPi();
     createExtension(pi as never);
     const ctx = makeCtx();
+    const custom = vi
+      .fn()
+      .mockResolvedValueOnce({ type: "reload", activeTab: "status" })
+      .mockResolvedValueOnce({ type: "close" });
+    ctx.ui.custom = custom as unknown as typeof ctx.ui.custom;
     pi.events.get("session_start")?.[0]?.({ type: "session_start", reason: "startup" }, ctx);
     const command = pi.commands.find(({ name }) => name === "tools");
     if (!command) throw new Error("tools command not registered");
-    await command.options.handler("reload", ctx);
+    await command.options.handler("", ctx);
 
     const tool = pi.tools.find(({ name }) => name === "web_docs_search");
     if (!tool) throw new Error("web_docs_search tool not registered");

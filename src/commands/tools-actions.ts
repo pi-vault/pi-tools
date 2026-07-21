@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { findProjectConfigPath, getConfigPath } from "../config.ts";
+import type { ProviderRegistry } from "../providers/registry.ts";
 
 export type ConfigScope = "global" | "project";
 
@@ -11,7 +12,82 @@ export interface ScopeOptions {
   trusted: boolean;
 }
 
-export type CredentialClass = "env" | "literal" | "shell";
+export interface TestResult {
+  provider: string;
+  ok: boolean;
+  latencyMs: number;
+  resultCount: number;
+  message: string;
+}
+
+export async function runProviderTest(
+  providerName: string,
+  registry: ProviderRegistry,
+  signal: AbortSignal,
+): Promise<TestResult> {
+  if (signal.aborted) {
+    return {
+      provider: providerName,
+      ok: false,
+      latencyMs: 0,
+      resultCount: 0,
+      message: "aborted",
+    };
+  }
+
+  const provider = registry.selectSearchCandidates(providerName)[0];
+  if (!provider) {
+    return {
+      provider: providerName,
+      ok: false,
+      latencyMs: 0,
+      resultCount: 0,
+      message: "not found or not enabled",
+    };
+  }
+
+  const started = Date.now();
+  try {
+    const results = await provider.search("test", 1, signal);
+    if (signal.aborted) {
+      return {
+        provider: providerName,
+        ok: false,
+        latencyMs: Date.now() - started,
+        resultCount: 0,
+        message: "aborted",
+      };
+    }
+    return {
+      provider: providerName,
+      ok: true,
+      latencyMs: Date.now() - started,
+      resultCount: results.length,
+      message: "OK",
+    };
+  } catch (error) {
+    return {
+      provider: providerName,
+      ok: false,
+      latencyMs: Date.now() - started,
+      resultCount: 0,
+      message: signal.aborted ? "aborted" : error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export async function runProviderTests(
+  registry: ProviderRegistry,
+  names: readonly string[],
+  signal: AbortSignal,
+): Promise<TestResult[]> {
+  const results: TestResult[] = [];
+  for (const name of names) {
+    if (signal.aborted) break;
+    results.push(await runProviderTest(name, registry, signal));
+  }
+  return results;
+}
 
 const ENV_NAME = /^[A-Z][A-Z0-9_]+$/;
 
@@ -55,7 +131,7 @@ function providerObjects(
   return { providers, entry: rawEntry ?? {} };
 }
 
-export function classifyCredential(value: string): CredentialClass {
+export function classifyCredential(value: string) {
   return value.startsWith("!") ? "shell" : ENV_NAME.test(value) ? "env" : "literal";
 }
 

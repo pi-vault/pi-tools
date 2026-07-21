@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   classifyCredential,
   findWritableProjectPath,
+  runProviderTest,
+  runProviderTests,
   setDefaultProvider,
   setProviderEnabled,
   setProviderKey,
@@ -161,6 +163,184 @@ describe("safe read-modify-write", () => {
       expect(fs.writeFileSync).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("provider tests", () => {
+  it("returns aborted without selecting a provider when already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const selectSearchCandidates = vi.fn(() => []);
+    const registry = { selectSearchCandidates } as never;
+
+    await expect(runProviderTest("brave", registry, controller.signal)).resolves.toEqual({
+      provider: "brave",
+      ok: false,
+      latencyMs: 0,
+      resultCount: 0,
+      message: "aborted",
+    });
+    expect(selectSearchCandidates).not.toHaveBeenCalled();
+  });
+
+  it("passes the raw AbortSignal as search argument three", async () => {
+    const search = vi.fn().mockResolvedValue([{ url: "https://example.com" }]);
+    const registry = {
+      selectSearchCandidates: vi.fn(() => [{ name: "brave", label: "Brave", search }]),
+    } as never;
+    const controller = new AbortController();
+
+    const result = await runProviderTest("brave", registry, controller.signal);
+
+    expect(search).toHaveBeenCalledWith("test", 1, controller.signal);
+    expect(result).toMatchObject({
+      provider: "brave",
+      ok: true,
+      resultCount: 1,
+      message: "OK",
+    });
+  });
+
+  it("returns a failed result for an unavailable provider", async () => {
+    const registry = { selectSearchCandidates: vi.fn(() => []) } as never;
+
+    await expect(
+      runProviderTest("missing", registry, new AbortController().signal),
+    ).resolves.toEqual({
+      provider: "missing",
+      ok: false,
+      latencyMs: 0,
+      resultCount: 0,
+      message: "not found or not enabled",
+    });
+  });
+
+  it("converts provider rejection into a failed result", async () => {
+    const registry = {
+      selectSearchCandidates: vi.fn(() => [
+        {
+          name: "brave",
+          label: "Brave",
+          search: vi.fn().mockRejectedValue(new Error("network down")),
+        },
+      ]),
+    } as never;
+
+    await expect(
+      runProviderTest("brave", registry, new AbortController().signal),
+    ).resolves.toMatchObject({
+      provider: "brave",
+      ok: false,
+      resultCount: 0,
+      message: "network down",
+    });
+  });
+
+  it("reports aborted when a provider ignores cancellation and resolves", async () => {
+    const controller = new AbortController();
+    const registry = {
+      selectSearchCandidates: vi.fn(() => [
+        {
+          name: "brave",
+          label: "Brave",
+          search: vi.fn(async () => {
+            controller.abort();
+            return [{ url: "https://example.com" }];
+          }),
+        },
+      ]),
+    } as never;
+
+    await expect(runProviderTest("brave", registry, controller.signal)).resolves.toMatchObject({
+      provider: "brave",
+      ok: false,
+      resultCount: 0,
+      message: "aborted",
+    });
+  });
+
+  it("normalizes caller cancellation to aborted", async () => {
+    const controller = new AbortController();
+    const registry = {
+      selectSearchCandidates: vi.fn(() => [
+        {
+          name: "brave",
+          label: "Brave",
+          search: vi.fn(async () => {
+            controller.abort();
+            throw new DOMException("cancelled", "AbortError");
+          }),
+        },
+      ]),
+    } as never;
+
+    await expect(runProviderTest("brave", registry, controller.signal)).resolves.toMatchObject({
+      ok: false,
+      message: "aborted",
+    });
+  });
+
+  it("runs providers sequentially", async () => {
+    let resolveFirst!: (results: { url: string }[]) => void;
+    let resolveSecond!: (results: { url: string }[]) => void;
+    const started: string[] = [];
+    const firstSearch = vi.fn(
+      () =>
+        new Promise<{ url: string }[]>((resolve) => {
+          started.push("first");
+          resolveFirst = resolve;
+        }),
+    );
+    const secondSearch = vi.fn(
+      () =>
+        new Promise<{ url: string }[]>((resolve) => {
+          started.push("second");
+          resolveSecond = resolve;
+        }),
+    );
+    const registry = {
+      selectSearchCandidates: vi.fn((name: string) => [
+        name === "first"
+          ? { name: "first", label: "First", search: firstSearch }
+          : { name: "second", label: "Second", search: secondSearch },
+      ]),
+    } as never;
+
+    const pending = runProviderTests(registry, ["first", "second"], new AbortController().signal);
+
+    expect(started).toEqual(["first"]);
+    expect(secondSearch).not.toHaveBeenCalled();
+    resolveFirst([{ url: "https://first.example" }]);
+    await vi.waitFor(() => expect(secondSearch).toHaveBeenCalledOnce());
+    expect(started).toEqual(["first", "second"]);
+    resolveSecond([{ url: "https://second.example" }]);
+
+    await expect(pending).resolves.toMatchObject([
+      { provider: "first", ok: true, resultCount: 1, message: "OK" },
+      { provider: "second", ok: true, resultCount: 1, message: "OK" },
+    ]);
+  });
+
+  it("runs providers sequentially and does not start the next after abort", async () => {
+    const controller = new AbortController();
+    const firstSearch = vi.fn(async () => {
+      controller.abort();
+      throw new DOMException("cancelled", "AbortError");
+    });
+    const secondSearch = vi.fn().mockResolvedValue([]);
+    const selectSearchCandidates = vi.fn((name: string) =>
+      name === "first"
+        ? [{ name: "first", label: "First", search: firstSearch }]
+        : [{ name: "second", label: "Second", search: secondSearch }],
+    );
+    const registry = { selectSearchCandidates } as never;
+
+    const results = await runProviderTests(registry, ["first", "second"], controller.signal);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({ provider: "first", message: "aborted" });
+    expect(secondSearch).not.toHaveBeenCalled();
+    expect(selectSearchCandidates).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("default provider", () => {
