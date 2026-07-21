@@ -6,7 +6,7 @@ import type { ConfigScope } from "../../src/commands/tools-actions.ts";
 import type { DashboardOptions } from "../../src/commands/tools-dashboard.ts";
 import { buildStatusTable, createToolsCommand } from "../../src/commands/tools.ts";
 import { activityMonitor } from "../../src/monitor/activity-monitor.ts";
-import { getConfigPath, type ProviderBudget } from "../../src/config.ts";
+import type { ProviderBudget } from "../../src/config.ts";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
 import type { ProviderTier, SearchProvider } from "../../src/providers/types.ts";
 import { makeCtx } from "../helpers.ts";
