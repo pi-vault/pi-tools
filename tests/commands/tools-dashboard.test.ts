@@ -539,31 +539,35 @@ describe("ToolsDashboardComponent", () => {
     },
   );
 
-  it("renders the row prefix as a single small triangle on every selectable row", () => {
+  it("renders the ▸ indicator only on the selected row", () => {
     const lines = dashboard().component.render(100);
     const providerRows = lines.filter(
       (line) => line.includes("brave") || line.includes("duckduckgo"),
     );
-    for (const row of providerRows) {
-      // Rows live inside the frame overlay, so each line begins with the
-      // left border glyph and 2 spaces of padding before the row content.
-      expect(row).toMatch(/^┃\s+▸ /);
-    }
+    // Exactly one row should carry the indicator (the selected one).
+    const rowsWithIndicator = providerRows.filter((row) => row.includes("▸"));
+    expect(rowsWithIndicator).toHaveLength(1);
+    // The unselected row should not carry the indicator anywhere.
+    const unselectedRows = providerRows.filter((row) => !row.includes("▸"));
+    expect(unselectedRows.length).toBeGreaterThan(0);
   });
 
-  it("renders the selected Providers row's first cell without inverse styling", () => {
+  it("renders the indicator only on the selected Providers row", () => {
     const output = dashboard().component.render(100).join("\n");
+    // Default fixture selects "brave" (providerNames[0]).
     expect(output).toContain("▸ brave");
-    expect(output).toContain("▸ duckduckgo");
+    // Unselected row carries no indicator — alignment comes from spaces.
+    expect(output).not.toContain("▸ duckduckgo");
     expect(output).not.toMatch(/^> /m);
   });
 
-  it("renders the selected Test row's first cell without inverse styling", () => {
+  it("renders the indicator only on the selected Test row", () => {
     const output = dashboard({ initialTab: "test" })
       .component.render(100)
       .join("\n");
+    // Default fixture selects "brave" (searchProviders[0]).
     expect(output).toContain("▸ brave");
-    expect(output).toContain("▸ duckduckgo");
+    expect(output).not.toContain("▸ duckduckgo");
     expect(output).not.toMatch(/^> /m);
   });
 

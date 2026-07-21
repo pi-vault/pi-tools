@@ -78,11 +78,15 @@ function visibleRange(index: number, total: number): { start: number; end: numbe
 }
 
 const ROW_INDICATOR = "\u25B8"; // right-pointing small triangle (U+25B8)
+const ROW_PREFIX_WIDTH = 2; // width of the indicator column (incl. trailing space)
 
 function renderRowPrefix(selected: boolean, theme: DashboardTheme): string {
-  return selected
-    ? theme.fg("accent", ROW_INDICATOR)
-    : theme.dim(ROW_INDICATOR);
+  // Selected row carries the indicator; unselected rows use spaces to keep
+  // the column width constant so the name column stays aligned with the
+  // header. (Originally the row used `>` only on the selected row with empty
+  // padding elsewhere; this restores that pattern with the new glyph.)
+  if (!selected) return " ".repeat(ROW_PREFIX_WIDTH);
+  return `${theme.fg("accent", ROW_INDICATOR)} `;
 }
 
 export class ToolsDashboardComponent implements Component {
@@ -202,7 +206,7 @@ export class ToolsDashboardComponent implements Component {
             ? `env: ${key}`
             : "set";
       const isSelected = index === this.providerIndex;
-      const prefix = `${renderRowPrefix(isSelected, this.options.theme)} `;
+      const prefix = renderRowPrefix(isSelected, this.options.theme);
       const paddedName = padVisible(truncateVisible(name, 20), 20);
       const nameCell = isSelected
         ? this.options.theme.fg("accent", this.options.theme.bold(paddedName))
@@ -245,7 +249,7 @@ export class ToolsDashboardComponent implements Component {
         ? `${result.ok ? "OK" : "FAIL"} • ${result.latencyMs}ms • ${result.resultCount} result${result.resultCount === 1 ? "" : "s"}${result.message === "OK" ? "" : ` • ${result.message}`}`
         : "";
       const isSelected = index === this.testIndex;
-      const prefix = `${renderRowPrefix(isSelected, this.options.theme)} `;
+      const prefix = renderRowPrefix(isSelected, this.options.theme);
       const paddedName = padVisible(truncateVisible(name, 20), 20);
       const nameCell = isSelected
         ? this.options.theme.fg("accent", this.options.theme.bold(paddedName))
