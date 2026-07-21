@@ -30,7 +30,7 @@ Add a tiny file-private helper in `src/commands/tools-dashboard.ts` that returns
 In `src/commands/tools-dashboard.ts`, near `visibleRange` (currently at line 74):
 
 ```ts
-const ROW_INDICATOR = "▸"; // ▸ right-pointing small triangle
+const ROW_INDICATOR = "\u25B8"; // right-pointing small triangle (U+25B8)
 
 function renderRowPrefix(selected: boolean, theme: DashboardTheme): string {
   return selected
@@ -39,7 +39,7 @@ function renderRowPrefix(selected: boolean, theme: DashboardTheme): string {
 }
 ```
 
-The helper returns a one-character string that is either accent-colored or dim, matching the selection state. `ROW_INDICATOR` is encoded as `▸` in source so the file remains ASCII-only and the glyph is unambiguous.
+The helper returns a one-character string that is either accent-colored or dim, matching the selection state. `ROW_INDICATOR` is encoded as `\u25B8` in source so the file remains ASCII-only and the glyph is unambiguous.
 
 ### `renderProviders` change
 
@@ -81,7 +81,7 @@ for (let index = start; index < end; index += 1) {
   const name = names[index];
   const result = results.get(name);
   const detail = result
-    ? `${result.ok ? "OK" : "FAIL"} • ${result.latencyMs}ms • ${result.resultCount} result${result.resultCount === 1 ? "" : "s"}${result.message === "OK" ? "" : ` • ${result.message}`}`
+    ? `${result.ok ? "OK" : "FAIL"} \u2022 ${result.latencyMs}ms \u2022 ${result.resultCount} result${result.resultCount === 1 ? "" : "s"}${result.message === "OK" ? "" : ` \u2022 ${result.message}`}`
     : "";
   const isSelected = index === this.testIndex;
   const prefix = `${renderRowPrefix(isSelected, theme)} `;
@@ -95,7 +95,7 @@ for (let index = start; index < end; index += 1) {
 Differences from the current code:
 - Same prefix and first-cell highlight pattern as Providers
 - `theme.inverse(row)` (whole row) → first cell only
-- Existing `•` literals in the `detail` string are rewritten as `•` escapes; the rendered output is byte-identical
+- Existing literal `•` (U+2022) characters in the `detail` string are rewritten as `\u2022` escape sequences; the rendered output is byte-identical
 - The header line at line 212 (`"Enter/t Test • a Test all"`) is left alone — it already uses the escape form
 
 ### Files to modify
