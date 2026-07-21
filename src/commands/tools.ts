@@ -1,12 +1,22 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { PiToolsConfig } from "../config.ts";
+import { findProjectConfigPath, getConfigPath } from "../config.ts";
+import { activityMonitor } from "../monitor/activity-monitor.ts";
+import { renderWidgetLines } from "../monitor/widget.ts";
 import type { ProviderRegistry } from "../providers/registry.ts";
 import type { ProviderTier } from "../providers/types.ts";
 import { fromPiTheme } from "../tui/dashboard-theme.ts";
-import { activityMonitor } from "../monitor/activity-monitor.ts";
-import { renderWidgetLines } from "../monitor/widget.ts";
+import {
+  type ConfigScope,
+  findWritableProjectPath,
+  setDefaultProvider,
+  setProviderEnabled,
+  setProviderKey,
+} from "./tools-actions.ts";
 import {
   type DashboardAction,
-  type DashboardTabId,
+  type DashboardResumeState,
+  type DashboardScope,
   ToolsDashboardComponent,
 } from "./tools-dashboard.ts";
 import {
@@ -16,6 +26,11 @@ import {
   handleDefault,
   handleTest,
 } from "./tools-subcommands.ts";
+
+export interface ToolsCommandDeps {
+  getConfig: (scope: ConfigScope) => Pick<PiToolsConfig, "providers" | "defaultProvider">;
+  reload: () => void;
+}
 
 function formatAmount(value: number, unit: string): string {
   return unit === "usd" ? value.toFixed(6) : value.toLocaleString("en-US");
@@ -87,7 +102,7 @@ export function buildStatusTable(
 const USAGE = `Usage: /tools [subcommand]
 
 Subcommands:
-  (no args)          Open the Status dashboard
+  (no args)          Open the Providers dashboard
   status             Show provider status table
   reload             Refresh config from disk
   enable <name>      Enable a provider
@@ -97,11 +112,53 @@ Subcommands:
   default <name>     Set default provider
   monitor [on|off]   Toggle activity monitor widget`;
 
+async function applyDashboardAction(
+  action: DashboardAction,
+  ctx: ExtensionCommandContext,
+  scope: DashboardScope,
+  config: Pick<PiToolsConfig, "providers" | "defaultProvider">,
+  allProviderNames: string[],
+  deps: ToolsCommandDeps,
+): Promise<void> {
+  try {
+    const options = {
+      scope: scope.kind,
+      cwd: ctx.cwd,
+      trusted: ctx.isProjectTrusted(),
+    } as const;
+    if (action.type === "reload") {
+      deps.reload();
+      return;
+    }
+    if (action.type === "toggle") {
+      setProviderEnabled(options, action.provider, !config.providers[action.provider].enabled);
+      deps.reload();
+      ctx.ui.notify(`Updated ${action.provider} in ${scope.kind} config`);
+      return;
+    }
+    if (action.type === "set-key") {
+      const value = (await ctx.ui.input(`API key for ${action.provider}`))?.trim();
+      if (!value) return;
+      setProviderKey(options, action.provider, value);
+      deps.reload();
+      ctx.ui.notify(`Updated ${action.provider} credential in ${scope.kind} config`);
+      return;
+    }
+    if (action.type === "set-default") {
+      setDefaultProvider(options, action.provider, new Set(allProviderNames));
+      deps.reload();
+      ctx.ui.notify(`Updated default provider in ${scope.kind} config`);
+    }
+  } catch (error) {
+    ctx.ui.notify(error instanceof Error ? error.message : String(error), "warning");
+  }
+}
+
 export function createToolsCommand(
   registry: ProviderRegistry,
   tierMap: ReadonlyMap<string, ProviderTier>,
-  allProviderNames?: string[],
-  onReload?: () => void,
+  allProviderNames: string[],
+  deps: ToolsCommandDeps,
 ) {
   let widgetUnsubscribe: (() => void) | undefined;
   let widgetContext: ExtensionCommandContext | undefined;
@@ -138,7 +195,7 @@ export function createToolsCommand(
   return {
     name: "tools",
     description:
-      "Manage search/fetch providers. Run with no args for the Status dashboard, or use subcommands (status, enable, disable, key, test, default, reload, monitor).",
+      "Manage search/fetch providers. Run with no args for the Providers dashboard, or use subcommands (status, enable, disable, key, test, default, reload, monitor).",
 
     async handler(args: string, ctx: ExtensionCommandContext) {
       if (args.trim() === "") {
@@ -146,18 +203,33 @@ export function createToolsCommand(
           ctx.ui.notify("/tools requires an interactive TUI", "warning");
           return;
         }
-        let initialTab: DashboardTabId = "status";
+        let selectedScope: ConfigScope = "global";
+        let resumeState: DashboardResumeState = { activeTab: "providers" };
         while (true) {
+          const scope: DashboardScope =
+            selectedScope === "global"
+              ? { kind: "global", path: getConfigPath(), canWrite: true }
+              : {
+                  kind: "project",
+                  path: findWritableProjectPath(ctx.cwd),
+                  canWrite: ctx.isProjectTrusted(),
+                };
+          const config = deps.getConfig(selectedScope);
           const action = await ctx.ui.custom<DashboardAction>(
             (tui, theme, _keybindings, done) =>
               new ToolsDashboardComponent({
                 tui,
                 theme: fromPiTheme(theme),
+                providerNames: allProviderNames,
+                tierMap,
+                config,
+                scope,
                 renderStatusTable: () => buildStatusTable(registry, tierMap),
                 getActivity: () => activityMonitor.getEntries(),
                 subscribeActivity: (listener) => activityMonitor.onUpdate(listener),
                 widgetEnabled: isWidgetEnabled(),
-                initialTab,
+                initialTab: resumeState.activeTab,
+                initialProvider: resumeState.selectedProvider,
                 done,
               }),
             {
@@ -166,16 +238,31 @@ export function createToolsCommand(
             },
           );
           if (!action || action.type === "close") return;
-          initialTab = action.activeTab;
+          resumeState = {
+            activeTab: action.activeTab,
+            selectedProvider: action.selectedProvider,
+          };
+          if (action.type === "switch-scope") {
+            if (selectedScope === "project") {
+              selectedScope = "global";
+            } else if (ctx.isProjectTrusted() || findProjectConfigPath(ctx.cwd)) {
+              selectedScope = "project";
+            } else {
+              ctx.ui.notify(
+                "Project scope requires trust or an existing project config",
+                "warning",
+              );
+            }
+            continue;
+          }
           if (action.type === "toggle-widget") {
             setWidget(ctx, !isWidgetEnabled());
             continue;
           }
-          onReload?.();
+          await applyDashboardAction(action, ctx, scope, config, allProviderNames, deps);
         }
       }
 
-      const providers = allProviderNames ?? [];
       const { subcommand, rest } = parseArgs(args);
 
       // Legacy flag support
@@ -184,7 +271,7 @@ export function createToolsCommand(
         return;
       }
       if (subcommand === "--reload") {
-        onReload?.();
+        deps.reload();
         ctx.ui.notify(buildStatusTable(registry, tierMap));
         return;
       }
@@ -195,23 +282,23 @@ export function createToolsCommand(
           break;
 
         case "reload":
-          onReload?.();
+          deps.reload();
           ctx.ui.notify(buildStatusTable(registry, tierMap));
           break;
 
         case "enable":
-          handleToggle(ctx, rest[0] ?? "", true, providers);
-          onReload?.();
+          handleToggle(ctx, rest[0] ?? "", true, allProviderNames);
+          deps.reload();
           break;
 
         case "disable":
-          handleToggle(ctx, rest[0] ?? "", false, providers);
-          onReload?.();
+          handleToggle(ctx, rest[0] ?? "", false, allProviderNames);
+          deps.reload();
           break;
 
         case "key":
-          handleKey(ctx, rest[0] ?? "", rest[1], providers);
-          onReload?.();
+          handleKey(ctx, rest[0] ?? "", rest[1], allProviderNames);
+          deps.reload();
           break;
 
         case "test":
@@ -219,8 +306,8 @@ export function createToolsCommand(
           break;
 
         case "default":
-          handleDefault(ctx, rest[0] ?? "", providers);
-          onReload?.();
+          handleDefault(ctx, rest[0] ?? "", allProviderNames);
+          deps.reload();
           break;
 
         case "monitor": {

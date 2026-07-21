@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   loadConfig,
@@ -341,18 +342,18 @@ describe("findProjectConfigPath", () => {
 
   it("returns path when .pi/tools.json exists in cwd", () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => {
-      return p === path.join("/projects/my-app", ".pi", "tools.json");
+      return p === path.join("/projects/my-app", CONFIG_DIR_NAME, "tools.json");
     });
     const result = findProjectConfigPath("/projects/my-app");
-    expect(result).toBe(path.join("/projects/my-app", ".pi", "tools.json"));
+    expect(result).toBe(path.join("/projects/my-app", CONFIG_DIR_NAME, "tools.json"));
   });
 
   it("walks up to find .pi/tools.json in ancestor", () => {
     vi.mocked(fs.existsSync).mockImplementation((p) => {
-      return p === path.join("/projects", ".pi", "tools.json");
+      return p === path.join("/projects", CONFIG_DIR_NAME, "tools.json");
     });
     const result = findProjectConfigPath("/projects/my-app/src/deep");
-    expect(result).toBe(path.join("/projects", ".pi", "tools.json"));
+    expect(result).toBe(path.join("/projects", CONFIG_DIR_NAME, "tools.json"));
   });
 
   it("returns undefined when no .pi/tools.json found", () => {
@@ -420,7 +421,7 @@ describe("loadMergedConfig", () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
     vi.mocked(fs.readFileSync).mockImplementation((filePath) => {
       const resolved = typeof filePath === "string" ? filePath : filePath.toString();
-      if (resolved.includes(path.join(".pi", "tools.json"))) return "not json";
+      if (resolved.includes(path.join(CONFIG_DIR_NAME, "tools.json"))) return "not json";
       throw new Error("ENOENT");
     });
 

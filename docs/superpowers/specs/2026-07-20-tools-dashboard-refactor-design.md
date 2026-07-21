@@ -40,9 +40,9 @@ They import only `@earendil-works/pi-tui`, `@earendil-works/pi-coding-agent`, an
 Responsibilities:
 
 - `tools-actions.ts`: pure key classification, project-path resolution, safe document reads/writes, scoped provider/default updates, and provider test execution.
-- `tools-dashboard.ts`: rendering, tab state, keyboard handling, and action results. It receives current effective config and callbacks; it does not read or write files directly.
-- `tools.ts`: command entry point, dashboard loop, action orchestration, and activity-widget ownership.
-- `ConfigManager`: remains the source of effective runtime configuration and is refreshed after writes.
+- `tools-dashboard.ts`: rendering, tab state, keyboard handling, and action results. It receives config resolved for the selected scope and callbacks; it does not read or write files directly.
+- `tools.ts`: command entry point, dashboard loop, scope-aware config selection, action orchestration, and activity-widget ownership.
+- `ConfigManager`: remains the source of effective Project configuration and is refreshed after writes. Global view state is resolved from built-in defaults plus global config only.
 
 ## Phased Delivery
 
@@ -84,25 +84,25 @@ The component implements `render(width)`, `handleInput(data)`, `invalidate()`, a
 
 ## Providers Tab
 
-Display every provider from `allProviders`, including providers that are currently disabled or missing credentials. Each row contains:
+Display every provider from `allProviders`, including providers that are currently disabled or missing credentials. Values are effective for the selected scope: Global resolves built-in defaults plus global config, while Project resolves built-in defaults plus global and nearest project config. Each row contains:
 
 - provider name
 - tier
-- effective enabled state from the loaded config, not `registry.getMetrics()`
+- scope-effective enabled state, not `registry.getMetrics()`
 - key state: `set`, `unset`, or `env: NAME`; never display a secret value
 - budget mode/unit
-- default marker for the effective `defaultProvider`
+- default marker for the scope-effective `defaultProvider`
 
 Navigation:
 
 - Up/Down selects a provider.
 - Left/Right switches between Global and Project scope.
-- Enter returns a `toggle` action.
-- `k` returns a `set-key` action; the command handler owns the input prompt.
-- `d` returns a `set-default` action for the selected provider.
-- `a` returns a `set-default` action for `auto`. On Test, the same key remains contextual and starts all tests.
+- In writable scope, Enter returns a `toggle` action.
+- In writable scope, `k` returns a `set-key` action; the command handler owns the input prompt.
+- In writable scope, `d` returns a `set-default` action for the selected provider.
+- In writable scope, `a` returns a `set-default` action for `auto`. On Test, the same key remains contextual and starts all tests.
 
-The component returns actions through `done()` or an action callback so the command handler can perform file I/O and reopen/render fresh state. Actions that reopen the overlay include the active tab and selected provider; the next component receives these as initial state. Reloads, writes, scope switches, and widget toggles therefore return users to the same context. No key is ever placed in the dashboard render output.
+The component returns actions through `done()` or an action callback so the command handler can perform file I/O and reopen/render fresh state. Actions that reopen the overlay include the active tab and selected provider; the next component receives these as initial state. Reloads, writes, scope switches, and widget toggles therefore return users to the same context. A scope switch also resolves fresh config for the destination scope. No key is ever placed in the dashboard render output.
 
 ## Config Scope and Security
 
@@ -111,7 +111,7 @@ The component returns actions through `done()` or an action callback so the comm
 - Global: `getConfigPath()` (`<agentDir>/extensions/tools.json`).
 - Project: `findProjectConfigPath(ctx.cwd)` for the nearest existing `<CONFIG_DIR_NAME>/tools.json`; if none exists, use `<ctx.cwd>/<CONFIG_DIR_NAME>/tools.json`. `CONFIG_DIR_NAME` is imported from `@earendil-works/pi-coding-agent`, never duplicated as `.pi`.
 
-Project scope is selectable when the project is trusted or a project config exists. The dashboard displays the selected target path. Global is the default.
+Project scope is selectable when the project is trusted or a project config exists. A trusted Project scope is writable. An existing untrusted Project config is viewable but explicitly read-only; provider mutation keys return no action. The dashboard displays the selected target path and read-only state. Global is the default.
 
 ### Writes
 
@@ -121,19 +121,20 @@ Use a read-modify-write operation that preserves unknown JSON fields and all unt
 2. If it does not exist (`ENOENT`), start with `{}`.
 3. If it exists but contains malformed JSON, return an error and do not call `writeFileSync`.
 4. If another read error occurs, return an error and do not write.
-5. Apply a narrow updater.
-6. Write formatted JSON only after successful parsing/updating.
+5. For provider mutations, reject non-object `providers` or selected-provider nodes instead of replacing malformed nested structure.
+6. Apply a narrow updater.
+7. Write formatted JSON only after successful parsing/updating.
 
-Project writes require `ctx.isProjectTrusted() === true`. Project credential values must match the environment-variable-name pattern `^[A-Z][A-Z0-9_]+$`. Literal secrets and values beginning with `!` (shell commands) are rejected. This restriction applies to new or edited `providers.<name>.apiKey` values. Global scope accepts the existing literal/env/shell formats.
+Project writes require `ctx.isProjectTrusted() === true`. Project credential values must match the environment-variable-name pattern `^[A-Z][A-Z0-9_]+$`. Literal secrets and values beginning with `!` (shell commands) are rejected. This restriction applies to new or edited `providers.<name>.apiKey` values. Global scope accepts the existing literal/env/shell formats. Blank or whitespace-only credential input is treated as cancellation and does not read, write, or reload config.
 
-A rejected or failed action leaves the file unchanged and reports a warning through `ctx.ui.notify()`.
+A rejected or failed action leaves the file unchanged and reports a warning through `ctx.ui.notify()`. Read-only Project interactions are blocked in the component before orchestration, while the action layer retains trust checks as defense in depth.
 
 ### Actions
 
-- Toggle updates only `providers.<name>.enabled`.
+- Toggle updates only `providers.<name>.enabled`, using the inverse of the selected scope's effective value.
 - Set key updates only `providers.<name>.apiKey`, after scope/trust validation.
 - Set default updates only `defaultProvider`; permitted values are `auto` or a known provider name.
-- Reload refreshes `ConfigManager` and the dashboard reads the new effective config.
+- Reload refreshes `ConfigManager` and the dashboard resolves fresh config for the selected scope.
 
 ## Status Tab
 
@@ -202,14 +203,15 @@ Delete:
 ## Acceptance Criteria
 
 1. `/tools` opens a centered four-tab overlay; arguments are rejected with the migration hint.
-2. Providers shows all provider rows with effective enabled/key/default/budget state.
-3. Global toggle, key, and default actions persist changes while preserving unknown fields.
-4. Project writes use the nearest/fallback project path, reject malformed overwrites, require trust, and accept only environment-variable names for credentials.
-5. Status renders budget/metrics and reloads with `r`.
-6. Test runs one/all providers with inline results, correct abort propagation, and repainting.
-7. Activity renders the latest ten entries; widget state persists across overlay reopen and is cleaned up at shutdown.
-8. Providers and Test keep the selected row visible through a ten-row window; overlay reopen preserves the active tab and relevant provider selection.
-9. All dashboard output, including ANSI-styled text, respects visible width and uses the `/usage` frame/tab conventions.
-10. Tests cover mode-aware dispatch, legacy behavior until removal, contextual `a`, resume state, stale async runs, lifecycle cleanup, and every other acceptance criterion.
-11. Each phase verifies formatting only for its explicit changed files, then runs `pnpm check`; unrelated baseline formatting debt is out of scope.
-12. No `pi-usage` imports and no package dependency changes.
+2. Providers shows all provider rows with enabled/key/default/budget state effective for the selected scope.
+3. Global and Project views resolve their own scope-effective values, so project overrides cannot cause masked or no-op Global toggles.
+4. Global toggle, key, and default actions persist changes while preserving unknown fields.
+5. Project writes use the nearest/fallback project path, reject malformed root or touched provider structures, require trust, and accept only environment-variable names for credentials; existing untrusted Project config is viewable but read-only.
+6. Status renders budget/metrics and reloads with `r`.
+7. Test runs one/all providers with inline results, correct abort propagation, and repainting.
+8. Activity renders the latest ten entries; widget state persists across overlay reopen and is cleaned up at shutdown.
+9. Providers and Test keep the selected row visible through a ten-row window; overlay reopen preserves the active tab and relevant provider selection.
+10. All dashboard output, including ANSI-styled text, respects visible width and uses the `/usage` frame/tab conventions.
+11. Tests cover scope-effective config selection, read-only mutation blocking, blank key cancellation, mode-aware dispatch, legacy behavior until removal, contextual `a`, resume state, stale async runs, lifecycle cleanup, and every other acceptance criterion.
+12. Each phase verifies formatting only for its explicit changed files, then runs `pnpm check`; unrelated baseline formatting debt is out of scope.
+13. No `pi-usage` imports and no package dependency changes.
