@@ -587,12 +587,19 @@ describe("ToolsDashboardComponent", () => {
     const row = lines.find((line) => line.includes("brave"));
     expect(header).toBeDefined();
     expect(row).toBeDefined();
-    // The header puts "Tier" at a known column; the row must put the tier
-    // digit at the same column. With the styled nameCell padded to 20
-    // visible columns, alignment holds even when the styled name is shorter
-    // than 20 visible characters.
-    const tierInHeader = header?.indexOf("Tier") ?? -1;
-    const tierInRow = row?.indexOf("1") ?? -1;
-    expect(tierInRow).toBe(tierInHeader);
+    // Measure the visible width from the start of each raw line to the target
+    // token. The frame applies the same internal padding to every line, so
+    // any frame chrome cancels out. visibleWidth counts ANSI-aware width, so
+    // this stays correct when the styled nameCell injects escape codes via
+    // fg/bold.
+    const tierColHeader = visibleWidth(
+      header!.slice(0, header!.indexOf("Tier")),
+    );
+    // Slice past the padded name so the search for the tier digit doesn't
+    // accidentally hit a "1" inside the provider name if the fixture changes.
+    const tierColRow = visibleWidth(
+      row!.slice(0, row!.indexOf("1", "brave".length)),
+    );
+    expect(tierColRow).toBe(tierColHeader);
   });
 });
