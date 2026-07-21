@@ -9,7 +9,7 @@ The `/tools` dashboard in pi-tools renders selectable rows in the Providers and 
 
 The pi-usage dashboard renders the equivalent rows with a different visual treatment:
 
-- A `▸` (`U+25B8`) glyph as the row marker, with `fg("accent", glyph)` on the selected row and `dim(glyph)` on unselected rows
+- A `▸` (`U+25B8`) glyph only on the selected row; unselected rows carry two spaces in the indicator column to keep the name column aligned with the header
 - A text-level highlight on the row label only (`fg("accent", bold(label))` for selected, `dim(label)` for unselected), with the rest of the row left unstyled
 
 This change aligns the pi-tools visual language with pi-usage for a consistent look across the two extensions, and removes the heavy reverse-video "border" effect in favor of a lighter text highlight.
@@ -31,15 +31,18 @@ In `src/commands/tools-dashboard.ts`, near `visibleRange` (currently at line 74)
 
 ```ts
 const ROW_INDICATOR = "\u25B8"; // right-pointing small triangle (U+25B8)
+const ROW_PREFIX_WIDTH = 2; // width of the indicator column (incl. trailing space)
 
 function renderRowPrefix(selected: boolean, theme: DashboardTheme): string {
-  return selected
-    ? theme.fg("accent", ROW_INDICATOR)
-    : theme.dim(ROW_INDICATOR);
+  // Selected row carries the indicator; unselected rows use spaces to keep
+  // the column width constant so the name column stays aligned with the
+  // header.
+  if (!selected) return " ".repeat(ROW_PREFIX_WIDTH);
+  return `${theme.fg("accent", ROW_INDICATOR)} `;
 }
 ```
 
-The helper returns a one-character string that is either accent-colored or dim, matching the selection state. `ROW_INDICATOR` is encoded as `\u25B8` in source so the file remains ASCII-only and the glyph is unambiguous.
+The helper returns a 2-char prefix. For selected rows it is the styled indicator followed by a space; for unselected rows it is two spaces (no indicator). The constant width keeps the name column aligned with the header. `ROW_INDICATOR` is encoded as `\u25B8` in source so the file remains ASCII-only and the glyph is unambiguous.
 
 ### `renderProviders` change
 

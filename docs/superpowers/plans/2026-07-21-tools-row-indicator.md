@@ -4,7 +4,7 @@
 
 **Goal:** Replace the `>` cursor prefix and `theme.inverse(row)` selection highlight in the `/tools` Providers and Test tabs with a `▸` glyph and a text-only highlight, mirroring pi-usage's row pattern.
 
-**Architecture:** Add a file-private `renderRowPrefix(selected, theme)` helper in `src/commands/tools-dashboard.ts` that returns either `fg("accent", "▸")` or `dim("▸")`. Update the row loops in `renderProviders` and `renderTest` to use the helper and apply `fg("accent", bold(name))` / `dim(name)` styling only to the first cell (the name). The rest of each row stays unstyled. Pad the truncated name to 20 visible columns before styling so column alignment with the header is preserved.
+**Architecture:** Add a file-private `renderRowPrefix(selected, theme)` helper in `src/commands/tools-dashboard.ts` that returns either `${fg("accent", "▸")} ` (selected) or `"  "` (unselected, two spaces for alignment). Update the row loops in `renderProviders` and `renderTest` to use the helper and apply `fg("accent", bold(name))` / `dim(name)` styling only to the first cell (the name). The rest of each row stays unstyled. Pad the truncated name to 20 visible columns before styling so column alignment with the header is preserved.
 
 **Tech Stack:** TypeScript, `@earendil-works/pi-tui` (Component, Key, matchesKey, visibleWidth), pi-tools local `dashboard-theme.ts` (DashboardTheme adapter + ANSI-safe `padVisible` / `truncateVisible` / `wrapVisible`), vitest, biome.
 
