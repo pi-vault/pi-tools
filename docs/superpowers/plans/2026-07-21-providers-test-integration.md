@@ -711,3 +711,14 @@ Launch a Pi session, run `/tools`, confirm:
 **Placeholder scan:** No "TBD", "TODO", "implement later". All code blocks contain complete, runnable code.
 
 **Out-of-scope behaviors:** None. The spec's "in flight for the selected row" behavior for `T` (test all) is documented; per-row "Testing…" during bulk tests is left as a follow-up.
+
+## Post-Implementation Retrospective
+
+**Process note — regex-based cleanup missed `renderTest`**: Step 2.7 ("Delete `renderTest` and `handleTestInput` methods") used a regex with `.*?\n  \}\n` to match each function's closing brace. The regex stopped at the first `\n  }\n` it found, which can be inside an inner conditional (`}\n`) with the same indentation as the function's outer `}`. The leftover `renderTest` body referenced `this.testIndex` (deleted earlier in the same commit) and `testResults: TestResult[]` (already changed to Map), so `tsc --noEmit` caught it and a follow-up commit cleaned it up.
+
+**Lesson for future method-deletion refactors**:
+- Do deletions in a deterministic order: function-by-function, smallest first.
+- Run `tsc --noEmit` as a hard gate between the deletion commit and the GREEN commit. Don't declare a refactor complete on `vitest pass` alone — the existing tests may not exercise the deleted code's callers, so type errors are the only signal.
+- For multi-line function bodies, prefer a TS-aware tool (ts-morph, jscodeshift) or a hand-anchored edit per function, rather than a single regex across multiple functions.
+
+**Other follow-ups applied during review** (not in original plan): t/T handlers moved above the `canWrite` guard (matches spec's "test bindings work on read-only scope too"), read-only test added to lock that behavior in, dead `result.message === "OK"` branch dropped from `renderTestCell` (unreachable), `isSearchProvider` lookup moved below the `!result` guard so untested rows skip the registry call entirely, weak "empty Test column" assertion tightened with word-boundary regex, "Testing…" test now async and asserts the post-resolution OK state, blank lines collapsed.

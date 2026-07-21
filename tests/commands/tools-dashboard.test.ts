@@ -233,13 +233,6 @@ describe("ToolsDashboardComponent", () => {
   });
 
 
-
-
-
-
-
-
-
   it("renders only the latest ten activity entries", () => {
     const entries = Array.from({ length: 11 }, (_, index) => ({
       id: String(index),
@@ -358,7 +351,6 @@ describe("ToolsDashboardComponent", () => {
   });
 
 
-
   it("preserves delimiter glyphs in Providers footer", () => {
     const output = dashboard().component.render(100).join("\n");
     expect(output).toContain("Enter Toggle • k Set key • d Set default");
@@ -406,7 +398,12 @@ describe("ToolsDashboardComponent", () => {
     }).component.render(200);
     const exaLine = lines.find((line) => line.includes("exa"));
     expect(exaLine).toBeDefined();
-    expect(exaLine).not.toMatch(/OK|FAIL|Testing/);
+    // Use word-boundary patterns so we don't match substrings inside other
+    // text. The Test cell is empty for non-search providers that haven't
+    // been tested.
+    expect(exaLine).not.toMatch(/\bOK\b/);
+    expect(exaLine).not.toMatch(/\bFAIL\b/);
+    expect(exaLine).not.toContain("Testing");
   });
 
   it("marks non-search providers as 'not a search provider' when t is pressed", () => {
@@ -450,7 +447,7 @@ describe("ToolsDashboardComponent", () => {
     expect(output).toMatch(/duckduckgo.*OK/);
   });
 
-  it("marks the selected row as Testing while the request is in flight", () => {
+  it("marks the selected row as Testing while the request is in flight", async () => {
     let resolveSearch!: (results: SearchResult[]) => void;
     const provider: SearchProvider = {
       name: "brave",
@@ -463,9 +460,13 @@ describe("ToolsDashboardComponent", () => {
       registry: searchRegistry([provider]),
     });
     component.handleInput("t");
-    const output = component.render(100).join("\n");
-    expect(output).toContain("Testing…");
+    expect(component.render(200).join("\n")).toContain("Testing…");
     resolveSearch([]);
+    await eventLoopTurn();
+    // After resolution, the in-flight indicator is gone and the OK result
+    // is rendered for the selected row.
+    expect(component.render(200).join("\n")).toContain("OK");
+    expect(component.render(200).join("\n")).not.toContain("Testing…");
   });
   it("runs t and T on read-only scope without needing canWrite", async () => {
     const readOnly = dashboard({ scope: { kind: "project", path: "/repo/.pi/tools.json", canWrite: false } });

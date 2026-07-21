@@ -224,11 +224,11 @@ export class ToolsDashboardComponent implements Component {
       return this.options.theme.dim("Testing…");
     }
     const result = this.testResults.get(name);
+    if (!result) return "";
     // Non-search providers never show a successful test cell, but they can
     // still display a deterministic failure if `t` was pressed on them.
     const isSearchProvider =
       this.options.registry.selectSearchCandidates(name).length > 0;
-    if (!result) return "";
     if (!isSearchProvider) {
       // Render the deterministic failure for non-search providers.
       return `FAIL • ${result.message}`;
@@ -239,9 +239,8 @@ export class ToolsDashboardComponent implements Component {
         ? `${summary} • ${result.resultCount} result${result.resultCount === 1 ? "" : "s"}`
         : summary;
     }
-    return result.message === "OK"
-      ? `FAIL • ${result.latencyMs}ms`
-      : `FAIL • ${result.latencyMs}ms • ${result.message}`;
+    // Failure path: result.ok is false, so message is the diagnostic text.
+    return `FAIL • ${result.latencyMs}ms • ${result.message}`;
   }
 
   private renderStatus(contentWidth: number): string[] {
