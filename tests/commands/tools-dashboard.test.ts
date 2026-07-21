@@ -200,7 +200,7 @@ describe("ToolsDashboardComponent", () => {
     });
   });
 
-  it("cycles Providers, Status, Test, Activity and wraps both ways", () => {
+  it("cycles Providers, Status, Activity and wraps both ways", () => {
     const { component, tui } = dashboard();
 
     component.handleInput("\u001b[Z");
@@ -210,10 +210,8 @@ describe("ToolsDashboardComponent", () => {
     component.handleInput("\t");
     expect(component.render(80).join("\n")).toContain("r Reload");
     component.handleInput("\t");
-    expect(component.render(80).join("\n")).toContain("Enter/t Test • a Test all");
-    component.handleInput("\t");
     expect(component.render(80).join("\n")).toContain("w Enable widget");
-    expect(tui.requestRender).toHaveBeenCalledTimes(5);
+    expect(tui.requestRender).toHaveBeenCalledTimes(4);
   });
 
   it("switches scope with left/right only from Providers", () => {
@@ -405,7 +403,7 @@ describe("ToolsDashboardComponent", () => {
         },
         defaultProvider: "brave",
       },
-    }).component.render(100);
+    }).component.render(200);
     const exaLine = lines.find((line) => line.includes("exa"));
     expect(exaLine).toBeDefined();
     expect(exaLine).not.toMatch(/OK|FAIL|Testing/);
@@ -428,10 +426,10 @@ describe("ToolsDashboardComponent", () => {
         defaultProvider: "brave",
       },
     });
-    component.handleInput("d");
-    component.handleInput("d");
+    component.handleInput("[B");
+    component.handleInput("[B");
     component.handleInput("t");
-    const output = component.render(100).join("\n");
+    const output = component.render(200).join("\n");
     expect(output).toMatch(/exa.*not a search provider/);
   });
 
@@ -439,7 +437,7 @@ describe("ToolsDashboardComponent", () => {
     const { component, tui } = dashboard();
     component.handleInput("t");
     await vi.waitFor(() => expect(tui.requestRender).toHaveBeenCalledTimes(2));
-    const output = component.render(100).join("\n");
+    const output = component.render(200).join("\n");
     expect(output).toMatch(/brave.*OK.*1 result/);
   });
 
@@ -447,7 +445,7 @@ describe("ToolsDashboardComponent", () => {
     const { component, tui } = dashboard();
     component.handleInput("T");
     await vi.waitFor(() => expect(tui.requestRender).toHaveBeenCalledTimes(2));
-    const output = component.render(100).join("\n");
+    const output = component.render(200).join("\n");
     expect(output).toMatch(/brave.*OK/);
     expect(output).toMatch(/duckduckgo/);
   });
