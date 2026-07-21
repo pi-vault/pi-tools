@@ -296,10 +296,6 @@ describe("tools dashboard", () => {
 });
 
 describe("tools tabs-only migration", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it.each([
     "status",
     "reload",
@@ -315,7 +311,6 @@ describe("tools tabs-only migration", () => {
   ])("rejects typed args %j without side effects", async (args) => {
     const deps = commandDeps();
     const command = createToolsCommand(mem(), new Map(), ["brave"], deps);
-    trackedCommands.add(command);
     const ctx = widgetCtx();
     const custom = vi.fn();
     (ctx.ui as any).custom = custom;
@@ -415,7 +410,6 @@ describe("tools dashboard widget lifecycle", () => {
 
 describe("tools provider dashboard actions", () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
     vi.mocked(fs.existsSync).mockReturnValue(false);
     vi.mocked(fs.readFileSync).mockImplementation(() => {
       throw Object.assign(new Error("missing"), { code: "ENOENT" });

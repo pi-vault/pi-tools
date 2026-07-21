@@ -298,22 +298,15 @@ export class ToolsDashboardComponent implements Component {
       this.testIndex = Math.max(0, Math.min(this.testIndex + delta, names.length - 1));
       this.options.tui.requestRender();
     } else if (matchesKey(data, Key.enter) || data === "t") {
-      this.testSelected();
-    } else if (data === "a") {
-      this.testAll();
+      const name = names[this.testIndex];
+      if (name) {
+        this.beginTest(async (signal) => [
+          await runProviderTest(name, this.options.registry, signal),
+        ]);
+      }
+    } else if (data === "a" && names.length > 0) {
+      this.beginTest((signal) => runProviderTests(this.options.registry, names, signal));
     }
-  }
-
-  private testSelected(): void {
-    const name = this.options.registry.getSearchProviderNames()[this.testIndex];
-    if (!name) return;
-    this.beginTest(async (signal) => [await runProviderTest(name, this.options.registry, signal)]);
-  }
-
-  private testAll(): void {
-    const names = this.options.registry.getSearchProviderNames();
-    if (names.length === 0) return;
-    this.beginTest((signal) => runProviderTests(this.options.registry, names, signal));
   }
 
   private beginTest(run: (signal: AbortSignal) => Promise<TestResult[]>): void {

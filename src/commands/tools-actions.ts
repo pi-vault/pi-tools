@@ -12,8 +12,6 @@ export interface ScopeOptions {
   trusted: boolean;
 }
 
-export type CredentialClass = "env" | "literal" | "shell";
-
 export interface TestResult {
   provider: string;
   ok: boolean;
@@ -133,7 +131,7 @@ function providerObjects(
   return { providers, entry: rawEntry ?? {} };
 }
 
-export function classifyCredential(value: string): CredentialClass {
+export function classifyCredential(value: string) {
   return value.startsWith("!") ? "shell" : ENV_NAME.test(value) ? "env" : "literal";
 }
 
