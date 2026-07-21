@@ -51,12 +51,17 @@ for (let index = start; index < end; index += 1) {
   const entry = this.options.config.providers[name];
   const key = entry?.apiKey;
   const keyState =
-    key === undefined ? "unset" : classifyCredential(key) === "env" ? `env: ${key}` : "set";
+    key === undefined
+      ? "unset"
+      : classifyCredential(key) === "env"
+        ? `env: ${key}`
+        : "set";
   const isSelected = index === this.providerIndex;
   const prefix = `${renderRowPrefix(isSelected, theme)} `;
+  const paddedName = padVisible(truncateVisible(name, 20), 20);
   const nameCell = isSelected
-    ? theme.fg("accent", theme.bold(truncateVisible(name, 20)))
-    : theme.dim(truncateVisible(name, 20));
+    ? theme.fg("accent", theme.bold(paddedName))
+    : theme.dim(paddedName);
   const rest =
     `${padVisible(String(this.options.tierMap.get(name) ?? 3), 4)} ` +
     `${padVisible(entry?.enabled === false ? "disabled" : "enabled", 8)} ` +
@@ -68,6 +73,7 @@ for (let index = start; index < end; index += 1) {
 ```
 
 Differences from the current code:
+
 - `padVisible(index === this.providerIndex ? ">" : "", 2)` → `${renderRowPrefix(isSelected, theme)} ` (the prefix is now a one-character glyph followed by a single space, not a padded column)
 - `theme.inverse(row)` (whole row) → only the first cell (provider name) is highlighted with `fg("accent", bold(...))` on selected rows or `dim(...)` on unselected rows. The remaining 5 cells stay unstyled.
 - The trimmed name is padded to 20 visible columns inside `nameCell` so alignment with unselected rows (and the header row) is preserved.
@@ -85,14 +91,16 @@ for (let index = start; index < end; index += 1) {
     : "";
   const isSelected = index === this.testIndex;
   const prefix = `${renderRowPrefix(isSelected, theme)} `;
+  const paddedName = padVisible(truncateVisible(name, 20), 20);
   const nameCell = isSelected
-    ? theme.fg("accent", theme.bold(truncateVisible(name, 20)))
-    : theme.dim(truncateVisible(name, 20));
+    ? theme.fg("accent", theme.bold(paddedName))
+    : theme.dim(paddedName);
   lines.push(truncateVisible(`${prefix}${nameCell} ${detail}`, contentWidth));
 }
 ```
 
 Differences from the current code:
+
 - Same prefix and first-cell highlight pattern as Providers
 - `theme.inverse(row)` (whole row) → first cell only
 - Existing literal `•` (U+2022) characters in the `detail` string are rewritten as `\u2022` escape sequences; the rendered output is byte-identical
@@ -137,8 +145,8 @@ In the `describe("ToolsDashboardComponent")` block:
 ```ts
 it("renders the row prefix as a single small triangle on every selectable row", () => {
   const lines = dashboard().component.render(100);
-  const providerRows = lines.filter((line) =>
-    line.includes("brave") || line.includes("duckduckgo"),
+  const providerRows = lines.filter(
+    (line) => line.includes("brave") || line.includes("duckduckgo"),
   );
   for (const row of providerRows) {
     expect(row).toMatch(/^▸ /);
@@ -153,14 +161,18 @@ it("renders the selected Providers row's first cell without inverse styling", ()
 });
 
 it("renders the selected Test row's first cell without inverse styling", () => {
-  const output = dashboard({ initialTab: "test" }).component.render(100).join("\n");
+  const output = dashboard({ initialTab: "test" })
+    .component.render(100)
+    .join("\n");
   expect(output).toContain("▸ brave");
   expect(output).toContain("▸ duckduckgo");
   expect(output).not.toMatch(/^> /m);
 });
 
 it("preserves delimiter glyphs in Test detail and footer", () => {
-  const output = dashboard({ initialTab: "test" }).component.render(100).join("\n");
+  const output = dashboard({ initialTab: "test" })
+    .component.render(100)
+    .join("\n");
   expect(output).toContain("Enter/t Test • a Test all");
 });
 
@@ -168,9 +180,24 @@ it("preserves delimiter glyphs in Providers footer", () => {
   const output = dashboard().component.render(100).join("\n");
   expect(output).toContain("Enter Toggle • k Set key • d Set default");
 });
+
+it("keeps Providers row cells aligned with the column header", () => {
+  const lines = dashboard().component.render(100);
+  const header = lines.find((line) => line.includes("Provider"));
+  const row = lines.find((line) => line.includes("brave"));
+  expect(header).toBeDefined();
+  expect(row).toBeDefined();
+  // The header puts "Tier" at a known column; the row must put the tier
+  // digit at the same column. With the styled `nameCell` padded to 20
+  // visible columns, alignment holds even when the styled name is shorter
+  // than 20 visible characters.
+  const tierInHeader = header?.indexOf("Tier") ?? -1;
+  const tierInRow = row?.indexOf("1") ?? -1;
+  expect(tierInRow).toBe(tierInHeader);
+});
 ```
 
-These tests pin the indicator character, lock the delimiter to `U+2022`, and catch a partial migration (any row still prefixed with `>` will fail).
+These tests pin the indicator character, lock the delimiter to `U+2022`, lock column alignment with the header, and catch a partial migration (any row still prefixed with `>` will fail).
 
 ### Visual verification
 
