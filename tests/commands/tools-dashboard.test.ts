@@ -545,7 +545,9 @@ describe("ToolsDashboardComponent", () => {
       (line) => line.includes("brave") || line.includes("duckduckgo"),
     );
     for (const row of providerRows) {
-      expect(row).toMatch(/^▸ /);
+      // Rows live inside the frame overlay, so each line begins with the
+      // left border glyph and 2 spaces of padding before the row content.
+      expect(row).toMatch(/^┃\s+▸ /);
     }
   });
 
@@ -579,7 +581,9 @@ describe("ToolsDashboardComponent", () => {
 
   it("keeps Providers row cells aligned with the column header", () => {
     const lines = dashboard().component.render(100);
-    const header = lines.find((line) => line.includes("Provider"));
+    // The column header contains "Tier" but the tab bar contains "Providers"
+    // (plural). Match on "Tier" to find the column header specifically.
+    const header = lines.find((line) => line.includes("Tier"));
     const row = lines.find((line) => line.includes("brave"));
     expect(header).toBeDefined();
     expect(row).toBeDefined();
