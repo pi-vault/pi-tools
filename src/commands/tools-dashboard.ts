@@ -244,11 +244,13 @@ export class ToolsDashboardComponent implements Component {
       const detail = result
         ? `${result.ok ? "OK" : "FAIL"} • ${result.latencyMs}ms • ${result.resultCount} result${result.resultCount === 1 ? "" : "s"}${result.message === "OK" ? "" : ` • ${result.message}`}`
         : "";
-      const row = truncateVisible(
-        `${padVisible(index === this.testIndex ? ">" : "", 2)}${padVisible(truncateVisible(name, 20), 20)} ${detail}`,
-        contentWidth,
-      );
-      lines.push(index === this.testIndex ? this.options.theme.inverse(row) : row);
+      const isSelected = index === this.testIndex;
+      const prefix = `${renderRowPrefix(isSelected, this.options.theme)} `;
+      const paddedName = padVisible(truncateVisible(name, 20), 20);
+      const nameCell = isSelected
+        ? this.options.theme.fg("accent", this.options.theme.bold(paddedName))
+        : this.options.theme.dim(paddedName);
+      lines.push(truncateVisible(`${prefix}${nameCell} ${detail}`, contentWidth));
     }
     lines.push(truncateVisible(`Showing ${start + 1}–${end} of ${names.length}`, contentWidth));
     return lines;
