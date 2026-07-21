@@ -77,7 +77,7 @@ function visibleRange(index: number, total: number): { start: number; end: numbe
   return { start, end: start + count };
 }
 
-const ROW_INDICATOR = "▸"; // right-pointing small triangle (U+25B8)
+const ROW_INDICATOR = "\u25B8"; // right-pointing small triangle (U+25B8)
 
 function renderRowPrefix(selected: boolean, theme: DashboardTheme): string {
   return selected
