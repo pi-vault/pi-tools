@@ -279,6 +279,47 @@ describe("provider tests", () => {
     });
   });
 
+  it("runs providers sequentially", async () => {
+    let resolveFirst!: (results: { url: string }[]) => void;
+    let resolveSecond!: (results: { url: string }[]) => void;
+    const started: string[] = [];
+    const firstSearch = vi.fn(
+      () =>
+        new Promise<{ url: string }[]>((resolve) => {
+          started.push("first");
+          resolveFirst = resolve;
+        }),
+    );
+    const secondSearch = vi.fn(
+      () =>
+        new Promise<{ url: string }[]>((resolve) => {
+          started.push("second");
+          resolveSecond = resolve;
+        }),
+    );
+    const registry = {
+      selectSearchCandidates: vi.fn((name: string) => [
+        name === "first"
+          ? { name: "first", label: "First", search: firstSearch }
+          : { name: "second", label: "Second", search: secondSearch },
+      ]),
+    } as never;
+
+    const pending = runProviderTests(registry, ["first", "second"], new AbortController().signal);
+
+    expect(started).toEqual(["first"]);
+    expect(secondSearch).not.toHaveBeenCalled();
+    resolveFirst([{ url: "https://first.example" }]);
+    await vi.waitFor(() => expect(secondSearch).toHaveBeenCalledOnce());
+    expect(started).toEqual(["first", "second"]);
+    resolveSecond([{ url: "https://second.example" }]);
+
+    await expect(pending).resolves.toMatchObject([
+      { provider: "first", ok: true, resultCount: 1, message: "OK" },
+      { provider: "second", ok: true, resultCount: 1, message: "OK" },
+    ]);
+  });
+
   it("runs providers sequentially and does not start the next after abort", async () => {
     const controller = new AbortController();
     const firstSearch = vi.fn(async () => {

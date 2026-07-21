@@ -1,5 +1,5 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type DashboardOptions,
   ToolsDashboardComponent,
@@ -14,6 +14,10 @@ const searchResult: SearchResult = {
   url: "https://example.com",
   snippet: "Found",
 };
+
+const eventLoopTurn = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+afterEach(() => vi.restoreAllMocks());
 
 function searchRegistry(
   providers: SearchProvider[] = [
@@ -280,8 +284,7 @@ describe("ToolsDashboardComponent", () => {
         search: vi.fn().mockRejectedValue(new Error("network down")),
       },
     ];
-    const now = vi
-      .spyOn(Date, "now")
+    vi.spyOn(Date, "now")
       .mockReturnValueOnce(100)
       .mockReturnValueOnce(107)
       .mockReturnValueOnce(200)
@@ -296,7 +299,6 @@ describe("ToolsDashboardComponent", () => {
     component.handleInput("a");
     await vi.waitFor(() => expect(tui.requestRender).toHaveBeenCalledTimes(2));
     const output = component.render(80).join("\n");
-    now.mockRestore();
 
     expect(providers[0].search).toHaveBeenCalledWith("test", 1, expect.any(AbortSignal));
     expect(providers[1].search).toHaveBeenCalledWith("test", 1, expect.any(AbortSignal));
@@ -332,11 +334,12 @@ describe("ToolsDashboardComponent", () => {
     await vi.waitFor(() => expect(tui.requestRender).toHaveBeenCalledTimes(3));
     expect(component.render(80).join("\n")).toContain("1 result");
 
+    const output = component.render(80).join("\n");
+    const renderCount = tui.requestRender.mock.calls.length;
     resolveOld([]);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(component.render(80).join("\n")).toContain("1 result");
-    expect(tui.requestRender).toHaveBeenCalledTimes(3);
+    await eventLoopTurn();
+    expect(component.render(80).join("\n")).toBe(output);
+    expect(tui.requestRender).toHaveBeenCalledTimes(renderCount);
   });
 
   it("dispose aborts a pending test and ignores its later completion", async () => {
@@ -355,22 +358,26 @@ describe("ToolsDashboardComponent", () => {
     const signal = vi.mocked(provider.search).mock.calls[0][2];
     component.dispose();
     expect(signal?.aborted).toBe(true);
+    const output = component.render(80).join("\n");
+    const renderCount = tui.requestRender.mock.calls.length;
     resolveSearch([searchResult]);
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(tui.requestRender).toHaveBeenCalledOnce();
+    await eventLoopTurn();
+    expect(component.render(80).join("\n")).toBe(output);
+    expect(component.render(80).join("\n")).not.toContain("1 result");
+    expect(tui.requestRender).toHaveBeenCalledTimes(renderCount);
   });
 
   it.each(["q", "\u001b"])(
     "%j aborts an active test, closes once, and unsubscribes once",
     async (key) => {
+      let resolveSearch!: (results: SearchResult[]) => void;
       const unsubscribe = vi.fn();
       const provider: SearchProvider = {
         name: "brave",
         label: "Brave",
-        search: vi.fn(() => new Promise<SearchResult[]>(() => {})),
+        search: vi.fn(() => new Promise<SearchResult[]>((resolve) => (resolveSearch = resolve))),
       };
-      const { component, done } = dashboard(
+      const { component, done, tui } = dashboard(
         {
           registry: searchRegistry([provider]),
           initialTab: "test",
@@ -388,6 +395,11 @@ describe("ToolsDashboardComponent", () => {
       expect(done).toHaveBeenCalledOnce();
       expect(done).toHaveBeenCalledWith({ type: "close" });
       expect(unsubscribe).toHaveBeenCalledOnce();
+      const renderCount = tui.requestRender.mock.calls.length;
+      resolveSearch([searchResult]);
+      await eventLoopTurn();
+      expect(tui.requestRender).toHaveBeenCalledTimes(renderCount);
+      expect(component.render(80).join("\n")).not.toContain("1 result");
     },
   );
 
