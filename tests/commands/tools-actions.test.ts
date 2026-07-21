@@ -17,10 +17,10 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("project credential policy", () => {
   it("classifies env names, literals, and shell commands", () => {
-    expect(classifyCredential("BRAVE_API_KEY").kind).toBe("env");
-    expect(classifyCredential("literal-secret").kind).toBe("literal");
-    expect(classifyCredential("!op read op://vault/key").kind).toBe("shell");
-    expect(classifyCredential("lower_case").kind).toBe("literal");
+    expect(classifyCredential("BRAVE_API_KEY")).toBe("env");
+    expect(classifyCredential("literal-secret")).toBe("literal");
+    expect(classifyCredential("!op read op://vault/key")).toBe("shell");
+    expect(classifyCredential("lower_case")).toBe("literal");
   });
 
   it.each(["literal-secret", "!op read op://vault/key", "lower_case"])(

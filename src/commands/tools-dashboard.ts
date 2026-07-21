@@ -169,11 +169,7 @@ export class ToolsDashboardComponent implements Component {
       const entry = this.options.config.providers[name];
       const key = entry?.apiKey;
       const keyState =
-        key === undefined
-          ? "unset"
-          : classifyCredential(key).kind === "env"
-            ? `env: ${key}`
-            : "set";
+        key === undefined ? "unset" : classifyCredential(key) === "env" ? `env: ${key}` : "set";
       const row = truncateVisible(
         `${padVisible(index === this.providerIndex ? ">" : "", 2)}${padVisible(truncateVisible(name, 20), 20)} ${padVisible(String(this.options.tierMap.get(name) ?? 3), 4)} ${padVisible(entry?.enabled === false ? "disabled" : "enabled", 8)} ${padVisible(truncateVisible(keyState, 22), 22)} ${padVisible(entry?.budget.mode ?? "--", 12)} ${this.options.config.defaultProvider === name ? "default" : ""}`,
         contentWidth,

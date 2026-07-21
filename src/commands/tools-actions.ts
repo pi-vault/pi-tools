@@ -11,10 +11,7 @@ export interface ScopeOptions {
   trusted: boolean;
 }
 
-export type CredentialClass = {
-  kind: "env" | "literal" | "shell";
-  value: string;
-};
+export type CredentialClass = "env" | "literal" | "shell";
 
 const ENV_NAME = /^[A-Z][A-Z0-9_]+$/;
 
@@ -59,10 +56,7 @@ function providerObjects(
 }
 
 export function classifyCredential(value: string): CredentialClass {
-  return {
-    kind: value.startsWith("!") ? "shell" : ENV_NAME.test(value) ? "env" : "literal",
-    value,
-  };
+  return value.startsWith("!") ? "shell" : ENV_NAME.test(value) ? "env" : "literal";
 }
 
 export function findWritableProjectPath(cwd: string): string {
@@ -95,7 +89,7 @@ export function setProviderEnabled(
 }
 
 export function setProviderKey(options: ScopeOptions, provider: string, value: string): string {
-  if (options.scope === "project" && classifyCredential(value).kind !== "env") {
+  if (options.scope === "project" && classifyCredential(value) !== "env") {
     throw new Error("Project credentials must be an environment-variable name");
   }
   return updateScopedConfig(options, (document) => {
