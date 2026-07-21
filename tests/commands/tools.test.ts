@@ -4,7 +4,7 @@ import { CONFIG_DIR_NAME, type ExtensionCommandContext } from "@earendil-works/p
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigScope } from "../../src/commands/tools-actions.ts";
 import type { DashboardOptions } from "../../src/commands/tools-dashboard.ts";
-import { createToolsCommand } from "../../src/commands/tools.ts";
+import { buildStatusTable, createToolsCommand } from "../../src/commands/tools.ts";
 import { activityMonitor } from "../../src/monitor/activity-monitor.ts";
 import { getConfigPath, type ProviderBudget } from "../../src/config.ts";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
@@ -141,17 +141,8 @@ function registerSearch(
   );
 }
 
-describe("tools status subcommand", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    vi.mocked(fs.readFileSync).mockImplementation(() => {
-      throw new Error("ENOENT");
-    });
-    vi.mocked(fs.writeFileSync).mockImplementation(() => {});
-    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
-  });
-
-  it("displays hard, managed, unlimited, and docs-only budgets with metrics", async () => {
+describe("buildStatusTable", () => {
+  it("displays hard, managed, unlimited, and docs-only budgets with metrics", () => {
     const registry = mem();
     registerSearch(
       registry,
@@ -199,13 +190,7 @@ describe("tools status subcommand", () => {
       ["context7", 1],
     ]);
 
-    const command = testToolsCommand(registry, tierMap);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("status", ctx);
-
-    expect(ctx.ui.notify).toHaveBeenCalled();
-    const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
+    const output = buildStatusTable(registry, tierMap);
 
     expect(output).toContain("brave");
     expect(output).toContain("exa");
@@ -223,7 +208,7 @@ describe("tools status subcommand", () => {
     expect(output).toContain("pool: brave");
   });
 
-  it("shows one shared-pool counter for both providers", async () => {
+  it("shows one shared-pool counter for both providers", () => {
     const registry = mem();
     const budget: ProviderBudget = {
       mode: "hard",
@@ -236,180 +221,33 @@ describe("tools status subcommand", () => {
     registerSearch(registry, "brave-llm", budget, 1, () => 0.005);
     registry.consume("brave", { capability: "search", maxResults: 10 });
 
-    const command = testToolsCommand(
+    const output = buildStatusTable(
       registry,
       new Map<string, ProviderTier>([
         ["brave", 1],
         ["brave-llm", 1],
       ]),
     );
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-    await command.handler("status", ctx);
-
-    const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
     expect(output.match(/0\.005000/g)).toHaveLength(2);
   });
 
-  it("shows -- for avg latency when no successful calls", async () => {
+  it("shows -- for avg latency when no successful calls", () => {
     const registry = mem();
     registerSearch(registry, "duckduckgo", { mode: "unlimited" }, 3);
 
     const tierMap = new Map<string, ProviderTier>([["duckduckgo", 3]]);
-    const command = testToolsCommand(registry, tierMap);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("status", ctx);
-
-    const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
+    const output = buildStatusTable(registry, tierMap);
     expect(output).toContain("--");
   });
 
-  it("handles empty registry gracefully", async () => {
-    const registry = mem();
-    const tierMap = new Map<string, ProviderTier>();
+  it("handles empty registry gracefully", () => {
+    const output = buildStatusTable(mem(), new Map());
 
-    const command = testToolsCommand(registry, tierMap);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("status", ctx);
-
-    expect(ctx.ui.notify).toHaveBeenCalled();
-    const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
     expect(output).toContain("No providers registered");
   });
-
-  it("also accepts legacy --status flag", async () => {
-    const registry = mem();
-    registerSearch(registry, "brave", { mode: "managed" }, 1);
-
-    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
-    const command = testToolsCommand(registry, tierMap);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("--status", ctx);
-
-    expect(ctx.ui.notify).toHaveBeenCalled();
-    const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
-    expect(output).toContain("brave");
-  });
 });
 
-describe("tools reload subcommand", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("calls onReload callback when reload is passed", async () => {
-    const registry = mem();
-    registerSearch(registry, "brave", { mode: "managed" }, 1);
-
-    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
-    const onReload = vi.fn();
-    const command = testToolsCommand(registry, tierMap, ["brave"], onReload);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("reload", ctx);
-
-    expect(onReload).toHaveBeenCalledTimes(1);
-    expect(ctx.ui.notify).toHaveBeenCalled();
-    const output = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
-    expect(output).toContain("brave");
-  });
-
-  it("also accepts legacy --reload flag", async () => {
-    const registry = mem();
-    registerSearch(registry, "brave", { mode: "managed" }, 1);
-
-    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
-    const onReload = vi.fn();
-    const command = testToolsCommand(registry, tierMap, ["brave"], onReload);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("--reload", ctx);
-
-    expect(onReload).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("tools subcommand dispatch", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    vi.mocked(fs.readFileSync).mockImplementation(() => {
-      throw new Error("ENOENT");
-    });
-    vi.mocked(fs.writeFileSync).mockImplementation(() => {});
-    vi.mocked(fs.mkdirSync).mockImplementation(() => undefined);
-    vi.mocked(fs.existsSync).mockReturnValue(false);
-  });
-
-  it("dispatches enable subcommand", async () => {
-    const registry = mem();
-    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
-    const command = testToolsCommand(registry, tierMap, ["brave"]);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("enable brave", ctx);
-
-    expect(fs.writeFileSync).toHaveBeenCalled();
-    const [, writeContent] = vi.mocked(fs.writeFileSync).mock.calls[0];
-    const written = JSON.parse(writeContent as string);
-    expect(written.providers.brave.enabled).toBe(true);
-  });
-
-  it("dispatches disable subcommand", async () => {
-    const registry = mem();
-    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
-    const command = testToolsCommand(registry, tierMap, ["brave"]);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("disable brave", ctx);
-
-    expect(fs.writeFileSync).toHaveBeenCalled();
-    const [, writeContent] = vi.mocked(fs.writeFileSync).mock.calls[0];
-    const written = JSON.parse(writeContent as string);
-    expect(written.providers.brave.enabled).toBe(false);
-  });
-
-  it("dispatches key subcommand", async () => {
-    const registry = mem();
-    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
-    const command = testToolsCommand(registry, tierMap, ["brave"]);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("key brave BSA_abc123def456", ctx);
-
-    expect(fs.writeFileSync).toHaveBeenCalled();
-    const [, writeContent] = vi.mocked(fs.writeFileSync).mock.calls[0];
-    const written = JSON.parse(writeContent as string);
-    expect(written.providers.brave.apiKey).toBe("BSA_abc123def456");
-  });
-
-  it("dispatches default subcommand", async () => {
-    const registry = mem();
-    const tierMap = new Map<string, ProviderTier>([["exa", 1]]);
-    const command = testToolsCommand(registry, tierMap, ["exa"]);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("default exa", ctx);
-
-    expect(fs.writeFileSync).toHaveBeenCalled();
-    const [, writeContent] = vi.mocked(fs.writeFileSync).mock.calls[0];
-    const written = JSON.parse(writeContent as string);
-    expect(written.defaultProvider).toBe("exa");
-  });
-
-  it("shows usage for unknown subcommand", async () => {
-    const registry = mem();
-    const tierMap = new Map<string, ProviderTier>();
-    const command = testToolsCommand(registry, tierMap, []);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("foobar", ctx);
-
-    const msg = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
-    expect(msg.toLowerCase()).toContain("unknown");
-  });
-
+describe("tools dashboard", () => {
   it("opens the Providers overlay for an empty argument string", async () => {
     const registry = mem();
     const command = testToolsCommand(registry, new Map());
@@ -441,117 +279,74 @@ describe("tools subcommand dispatch", () => {
     expect(reload).toHaveBeenCalledOnce();
     expect(custom).toHaveBeenCalledTimes(2);
   });
+});
 
-  it("warns instead of opening the overlay outside TUI mode", async () => {
+describe("tools tabs-only migration", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it.each([
+    "status",
+    "reload",
+    "enable brave",
+    "disable brave",
+    "key brave SECRET",
+    "test brave",
+    "default brave",
+    "monitor on",
+    "--status",
+    "--reload",
+    "unknown",
+  ])("rejects typed args %j without side effects", async (args) => {
+    const deps = commandDeps();
+    const command = createToolsCommand(mem(), new Map(), ["brave"], deps);
+    trackedCommands.add(command);
+    const ctx = widgetCtx();
+    const custom = vi.fn();
+    (ctx.ui as any).custom = custom;
+
+    await command.handler(args, ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("no longer supports typed subcommands"),
+      "warning",
+    );
+    expect(custom).not.toHaveBeenCalled();
+    expect(fs.readFileSync).not.toHaveBeenCalled();
+    expect(fs.writeFileSync).not.toHaveBeenCalled();
+    expect(deps.reload).not.toHaveBeenCalled();
+  });
+
+  it("warns RPC callers with empty args that the dashboard requires an interactive TUI", async () => {
     const command = testToolsCommand(mem(), new Map());
-    const ctx = makeCtx({
-      mode: "rpc",
-      hasUI: true,
-    }) as unknown as ExtensionCommandContext;
-    (ctx.ui as any).custom = vi.fn();
+    const ctx = makeCtx({ mode: "rpc", hasUI: true }) as unknown as ExtensionCommandContext;
+    const custom = vi.fn();
+    (ctx.ui as any).custom = custom;
 
     await command.handler("", ctx);
 
-    expect((ctx.ui as any).custom).not.toHaveBeenCalled();
+    expect(custom).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       expect.stringContaining("interactive TUI"),
       "warning",
     );
   });
 
-  it("keeps typed provider tests available outside TUI mode", async () => {
-    const registry = mem();
-    const provider = mockProvider("brave", "Brave");
-    registry.registerProvider(
-      { search: provider },
-      {
-        name: "brave",
-        tier: 1,
-        budget: { mode: "managed" },
-        config: { enabled: true, budget: { mode: "managed" } },
-      },
+  it("gives RPC typed args the migration warning before the TUI warning", async () => {
+    const command = testToolsCommand(mem(), new Map());
+    const ctx = makeCtx({ mode: "rpc", hasUI: true }) as unknown as ExtensionCommandContext;
+
+    await command.handler("status", ctx);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("no longer supports typed subcommands"),
+      "warning",
     );
-    const command = testToolsCommand(registry, new Map(), ["brave"]);
-    const ctx = makeCtx({ mode: "rpc" }) as unknown as ExtensionCommandContext;
-    (ctx.ui as any).custom = vi.fn();
-
-    await command.handler("test brave", ctx);
-
-    expect(vi.mocked(provider.search).mock.calls[0]?.slice(0, 2)).toEqual(["test", 1]);
-    expect((ctx.ui as any).custom).not.toHaveBeenCalled();
-  });
-
-  it("calls onReload after config-modifying subcommands", async () => {
-    const registry = mem();
-    const tierMap = new Map<string, ProviderTier>([["brave", 1]]);
-    const onReload = vi.fn();
-    const command = testToolsCommand(registry, tierMap, ["brave"], onReload);
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("enable brave", ctx);
-    expect(onReload).toHaveBeenCalledTimes(1);
-
-    await command.handler("disable brave", ctx);
-    expect(onReload).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe("tools monitor subcommand", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it("monitor on subscribes and shows notification", async () => {
-    const command = trackedToolsCommand(mem(), new Map());
-    const ctx = widgetCtx();
-
-    await command.handler("monitor on", ctx);
-
-    const msg = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
-    expect(msg.toLowerCase()).toContain("enabled");
-    expect((ctx.ui as any).setWidget).toHaveBeenCalledWith(
-      "pi-tools-activity",
-      expect.arrayContaining([expect.any(String)]),
+    expect(ctx.ui.notify).not.toHaveBeenCalledWith(
+      expect.stringContaining("interactive TUI"),
+      "warning",
     );
-  });
-
-  it("monitor off removes widget and shows notification", async () => {
-    const command = trackedToolsCommand(mem(), new Map());
-    const ctx = widgetCtx();
-
-    await command.handler("monitor on", ctx);
-    await command.handler("monitor off", ctx);
-
-    const lastCall = (ctx.ui as any).setWidget.mock.calls.at(-1);
-    expect(lastCall[0]).toBe("pi-tools-activity");
-    expect(lastCall[1]).toBeUndefined();
-
-    const notifyCalls = vi.mocked(ctx.ui.notify).mock.calls;
-    const lastNotify = notifyCalls.at(-1)?.[0] as string;
-    expect(lastNotify.toLowerCase()).toContain("disabled");
-  });
-
-  it("monitor without on/off shows usage", async () => {
-    const command = trackedToolsCommand(mem(), new Map());
-    const ctx = makeCtx() as unknown as ExtensionCommandContext;
-
-    await command.handler("monitor", ctx);
-
-    const msg = vi.mocked(ctx.ui.notify).mock.calls[0][0] as string;
-    expect(msg.toLowerCase()).toContain("usage");
-  });
-
-  it("monitor on twice keeps one subscription and one initial render", async () => {
-    const onUpdate = vi.spyOn(activityMonitor, "onUpdate");
-    const command = trackedToolsCommand(mem(), new Map());
-    const ctx = widgetCtx();
-
-    await command.handler("monitor on", ctx);
-    const renders = (ctx.ui as any).setWidget.mock.calls.length;
-    await command.handler("monitor on", ctx);
-
-    expect(onUpdate).toHaveBeenCalledOnce();
-    expect((ctx.ui as any).setWidget).toHaveBeenCalledTimes(renders);
   });
 });
 
