@@ -77,6 +77,14 @@ function visibleRange(index: number, total: number): { start: number; end: numbe
   return { start, end: start + count };
 }
 
+const ROW_INDICATOR = "▸"; // right-pointing small triangle (U+25B8)
+
+function renderRowPrefix(selected: boolean, theme: DashboardTheme): string {
+  return selected
+    ? theme.fg("accent", ROW_INDICATOR)
+    : theme.dim(ROW_INDICATOR);
+}
+
 export class ToolsDashboardComponent implements Component {
   private activeTab: DashboardTabId;
   private providerIndex: number;
@@ -188,12 +196,24 @@ export class ToolsDashboardComponent implements Component {
       const entry = this.options.config.providers[name];
       const key = entry?.apiKey;
       const keyState =
-        key === undefined ? "unset" : classifyCredential(key) === "env" ? `env: ${key}` : "set";
-      const row = truncateVisible(
-        `${padVisible(index === this.providerIndex ? ">" : "", 2)}${padVisible(truncateVisible(name, 20), 20)} ${padVisible(String(this.options.tierMap.get(name) ?? 3), 4)} ${padVisible(entry?.enabled === false ? "disabled" : "enabled", 8)} ${padVisible(truncateVisible(keyState, 22), 22)} ${padVisible(entry?.budget.mode ?? "--", 12)} ${this.options.config.defaultProvider === name ? "default" : ""}`,
-        contentWidth,
-      );
-      lines.push(index === this.providerIndex ? this.options.theme.inverse(row) : row);
+        key === undefined
+          ? "unset"
+          : classifyCredential(key) === "env"
+            ? `env: ${key}`
+            : "set";
+      const isSelected = index === this.providerIndex;
+      const prefix = `${renderRowPrefix(isSelected, this.options.theme)} `;
+      const paddedName = padVisible(truncateVisible(name, 20), 20);
+      const nameCell = isSelected
+        ? this.options.theme.fg("accent", this.options.theme.bold(paddedName))
+        : this.options.theme.dim(paddedName);
+      const rest =
+        `${padVisible(String(this.options.tierMap.get(name) ?? 3), 4)} ` +
+        `${padVisible(entry?.enabled === false ? "disabled" : "enabled", 8)} ` +
+        `${padVisible(truncateVisible(keyState, 22), 22)} ` +
+        `${padVisible(entry?.budget.mode ?? "--", 12)} ` +
+        `${this.options.config.defaultProvider === name ? "default" : ""}`;
+      lines.push(truncateVisible(`${prefix}${nameCell} ${rest}`, contentWidth));
     }
     lines.push(`Showing ${start + 1}–${end} of ${providerNames.length}`);
     return lines;
