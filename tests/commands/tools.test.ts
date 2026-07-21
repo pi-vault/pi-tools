@@ -70,8 +70,9 @@ function dashboardActions(
       testTheme as never,
       {} as never,
       vi.fn(),
-    ) as unknown as { options: DashboardOptions };
+    ) as unknown as { options: DashboardOptions; dispose(): void };
     captures.push(component.options);
+    component.dispose();
     return actions.shift();
   });
   ctx.ui.custom = custom as unknown as typeof ctx.ui.custom;
@@ -104,6 +105,7 @@ afterEach(() => {
   for (const command of trackedCommands) command.resetMonitor();
   trackedCommands.clear();
   activityMonitor.clear();
+  vi.restoreAllMocks();
 });
 
 function widgetCtx() {
@@ -262,6 +264,18 @@ describe("tools dashboard", () => {
       overlayOptions: { anchor: "center", maxHeight: "85%", width: "92%" },
     });
     expect(ctx.ui.select).not.toHaveBeenCalled();
+  });
+
+  it("disposes a mocked dashboard after the close action", async () => {
+    const unsubscribe = vi.fn();
+    vi.spyOn(activityMonitor, "onUpdate").mockReturnValue(unsubscribe);
+    const ctx = makeCtx() as unknown as ExtensionCommandContext;
+    dashboardActions(ctx, [{ type: "close" }]);
+    const command = testToolsCommand(mem(), new Map());
+
+    await command.handler("", ctx);
+
+    expect(unsubscribe).toHaveBeenCalledOnce();
   });
 
   it("reloads and reopens the Status overlay", async () => {
