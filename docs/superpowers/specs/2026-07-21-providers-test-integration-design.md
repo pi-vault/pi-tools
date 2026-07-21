@@ -105,19 +105,26 @@ for (let index = start; index < end; index += 1) {
 
 ### `renderTestCell` — new private method
 
-Returns the trailing Test column content. Empty for non-search providers and untested search providers; `"Testing…"` while a test is in flight for the selected row; the formatted result otherwise.
+Returns the trailing Test column content. `"Testing…"` while a test is in flight for the selected row. Empty for rows that have never been tested. The formatted result otherwise. For non-search providers that have been tested (via `t`), the cell shows `FAIL • not a search provider`.
 
 ```ts
 private renderTestCell(name: string, isSelected: boolean): string {
-  // Non-search providers never show a test cell.
-  if (this.options.registry.selectSearchCandidates(name).length === 0) {
-    return "";
-  }
+  // "Testing…" takes precedence while a request is in flight for the
+  // selected row. Show this regardless of whether the row is a search
+  // provider — only the selected row can show it.
   if (isSelected && this.testController !== undefined) {
     return this.options.theme.dim("Testing…");
   }
   const result = this.testResults.get(name);
   if (!result) return "";
+  // Non-search providers never show a successful test cell, but they can
+  // still display a deterministic failure if `t` was pressed on them.
+  const isSearchProvider =
+    this.options.registry.selectSearchCandidates(name).length > 0;
+  if (!isSearchProvider) {
+    // Render the deterministic failure for non-search providers.
+    return `FAIL • ${result.message}`;
+  }
   if (result.ok) {
     const summary = `OK • ${result.latencyMs}ms`;
     return result.resultCount > 0

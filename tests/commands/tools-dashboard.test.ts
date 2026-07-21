@@ -447,7 +447,7 @@ describe("ToolsDashboardComponent", () => {
     await vi.waitFor(() => expect(tui.requestRender).toHaveBeenCalledTimes(2));
     const output = component.render(200).join("\n");
     expect(output).toMatch(/brave.*OK/);
-    expect(output).toMatch(/duckduckgo/);
+    expect(output).toMatch(/duckduckgo.*OK/);
   });
 
   it("marks the selected row as Testing while the request is in flight", () => {
@@ -467,4 +467,36 @@ describe("ToolsDashboardComponent", () => {
     expect(output).toContain("Testing…");
     resolveSearch([]);
   });
-});
+  it("runs t and T on read-only scope without needing canWrite", async () => {
+    const readOnly = dashboard({ scope: { kind: "project", path: "/repo/.pi/tools.json", canWrite: false } });
+    readOnly.component.handleInput("t");
+    await vi.waitFor(() => expect(readOnly.tui.requestRender).toHaveBeenCalledTimes(2));
+    expect(readOnly.component.render(200).join("\n")).toMatch(/brave.*OK/);
+
+    readOnly.component.handleInput("T");
+    await vi.waitFor(() => expect(readOnly.tui.requestRender).toHaveBeenCalledTimes(4));
+    expect(readOnly.component.render(200).join("\n")).toMatch(/duckduckgo.*OK/);
+  });
+
+  it("keeps the selected provider in a bounded ten-row window", () => {
+    const names = Array.from({ length: 12 }, (_, index) => `provider-${index + 1}`);
+    const providers = Object.fromEntries(
+      names.map((name) => [name, { enabled: true, budget: { mode: "managed" as const } }]),
+    );
+    const { component } = dashboard({
+      providerNames: names,
+      tierMap: new Map(names.map((name) => [name, 2 as ProviderTier])),
+      config: { providers, defaultProvider: "auto" },
+    });
+
+    for (let index = 0; index < 11; index += 1) component.handleInput("[B");
+    const lines = component.render(80);
+    const output = lines.join("\n");
+
+    expect(output).toContain("provider-12");
+    expect(output).toContain("Showing 3–12 of 12");
+    expect(output).not.toContain("provider-1 ");
+    expect(lines.every((line) => visibleWidth(line) <= 80)).toBe(true);
+  });
+
+})

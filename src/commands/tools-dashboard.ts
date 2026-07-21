@@ -292,20 +292,9 @@ export class ToolsDashboardComponent implements Component {
       this.options.tui.requestRender();
       return;
     }
-    if (!this.options.scope.canWrite) return;
-    const provider = this.options.providerNames[this.providerIndex];
-    if (!provider) return;
 
-    if (matchesKey(data, Key.enter)) {
-      this.finish({ type: "toggle", provider, ...this.resume() });
-    } else if (data === "k") {
-      this.finish({ type: "set-key", provider, ...this.resume() });
-    } else if (data === "d") {
-      this.finish({ type: "set-default", provider, ...this.resume() });
-    } else if (data === "a") {
-      this.finish({ type: "set-default", provider: "auto", ...this.resume() });
-    }
-
+    // Test bindings work on read-only scope too — testing is non-mutating.
+    // Place these above the canWrite guard so they fire even when scope.canWrite is false.
     if (data === "t") {
       const name = this.options.providerNames[this.providerIndex];
       if (!name) return;
@@ -334,6 +323,20 @@ export class ToolsDashboardComponent implements Component {
         runProviderTests(this.options.registry, searchNames, signal),
       );
       return;
+    }
+
+    if (!this.options.scope.canWrite) return;
+    const provider = this.options.providerNames[this.providerIndex];
+    if (!provider) return;
+
+    if (matchesKey(data, Key.enter)) {
+      this.finish({ type: "toggle", provider, ...this.resume() });
+    } else if (data === "k") {
+      this.finish({ type: "set-key", provider, ...this.resume() });
+    } else if (data === "d") {
+      this.finish({ type: "set-default", provider, ...this.resume() });
+    } else if (data === "a") {
+      this.finish({ type: "set-default", provider: "auto", ...this.resume() });
     }
   }
 
