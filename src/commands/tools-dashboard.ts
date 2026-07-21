@@ -251,36 +251,6 @@ export class ToolsDashboardComponent implements Component {
       .flatMap((line) => wrapVisible(line, contentWidth));
   }
 
-  private renderTest(contentWidth: number): string[] {
-    const names = this.options.registry.getSearchProviderNames();
-    const lines = [
-      truncateVisible(this.testController ? "Testing…" : "Enter/t Test • a Test all", contentWidth),
-      "",
-    ];
-    if (names.length === 0) {
-      return [...lines, this.options.theme.dim("No enabled search providers")];
-    }
-
-    const results = new Map(this.testResults.map((result) => [result.provider, result]));
-    const { start, end } = visibleRange(this.testIndex, names.length);
-    for (let index = start; index < end; index += 1) {
-      const name = names[index];
-      const result = results.get(name);
-      const detail = result
-        ? `${result.ok ? "OK" : "FAIL"} • ${result.latencyMs}ms • ${result.resultCount} result${result.resultCount === 1 ? "" : "s"}${result.message === "OK" ? "" : ` • ${result.message}`}`
-        : "";
-      const isSelected = index === this.testIndex;
-      const prefix = renderRowPrefix(isSelected, this.options.theme);
-      const paddedName = padVisible(truncateVisible(name, 20), 20);
-      const nameCell = isSelected
-        ? this.options.theme.fg("accent", this.options.theme.bold(paddedName))
-        : this.options.theme.dim(paddedName);
-      lines.push(truncateVisible(`${prefix}${nameCell} ${detail}`, contentWidth));
-    }
-    lines.push(truncateVisible(`Showing ${start + 1}–${end} of ${names.length}`, contentWidth));
-    return lines;
-  }
-
   private renderActivity(contentWidth: number): string[] {
     const entries = this.options.getActivity().slice(-10);
     if (entries.length === 0) {
