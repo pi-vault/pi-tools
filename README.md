@@ -7,6 +7,16 @@
 
 Web search, content extraction, documentation lookup, and deep research tools for [Pi](https://github.com/earendil-works/pi).
 
+## What's new in 0.5.0
+
+> **Dashboard replaces typed `/tools` subcommands.** Run `/tools` to open the interactive dashboard with three tabs: **Providers** (toggle, key, default, run tests), **Status** (budgets, session outcomes, latency), and **Activity** (recent provider events). Typed subcommands such as `/tools status`, `/tools enable`, `/tools key`, `/tools test`, `/tools default`, and `/tools monitor on|off` are no longer supported.
+>
+> **Provider budgets are enforceable.** Hard, managed, unlimited, and shared-pool policies replace the old `monthlyQuota` settings. Budget status is reported per provider in the Status tab.
+>
+> **`openai-codex` requires Pi OAuth.** The `OPENAI_API_KEY` fallback is gone. Run `/login` and select `openai-codex` before using it. To search with `OPENAI_API_KEY` instead, configure `openai-web-search`.
+>
+> **Usage persistence moved.** Provider usage now lives at `$PI_CODING_AGENT_DIR/cache/pi-tools/usage.json` using a version 2 UTC-period ledger.
+
 ## Install
 
 ```bash
@@ -26,7 +36,7 @@ uv tool install ddgs
 # or: pip install ddgs
 ```
 
-Run `/tools` in Pi to configure more providers. The setup wizard detects available environment variables and can write the global config for you.
+Run `/tools` in Pi to open the dashboard and configure more providers. The dashboard detects available environment variables and can write the global config for you.
 
 ```text
 /tools
@@ -99,22 +109,15 @@ Research the trade-offs between PostgreSQL logical replication and CDC. Save a f
 
 ## Manage providers
 
-Use `/tools` without arguments for guided setup, or run a subcommand directly:
+Run `/tools` to open the interactive dashboard. The dashboard has three tabs:
 
-| Command                     | Action                                                       |
-| --------------------------- | ------------------------------------------------------------ |
-| `/tools`                    | Open the setup wizard                                        |
-| `/tools status`             | Show enabled providers, budgets, outcomes, and average latency |
-| `/tools reload`             | Reload configuration from disk                               |
-| `/tools enable <name>`      | Enable a provider                                            |
-| `/tools disable <name>`     | Disable a provider                                           |
-| `/tools key <name> <value>` | Save a provider API key or environment-variable reference    |
-| `/tools test [name]`        | Test one provider, or all enabled search providers           |
-| `/tools default <name>`     | Set the default provider or `auto`                           |
-| `/tools monitor on`         | Show the activity monitor widget                             |
-| `/tools monitor off`        | Hide the activity monitor widget                             |
+- **Providers** — toggle a provider on or off, set a credential, change the default provider, and run a test in place.
+- **Status** — per-provider budget state, session outcomes (success/failure), and average latency.
+- **Activity** — recent provider events streamed live.
 
-Provider configuration refreshes automatically every 30 seconds. Use `/tools reload` when you need an immediate refresh.
+Switch between **global** and **project** scope inside the dashboard. Project scope requires the project to be trusted or to already have a `.pi/tools.json`.
+
+Provider configuration refreshes automatically every 30 seconds. The dashboard's reload action triggers an immediate refresh.
 
 ### Available providers
 
@@ -145,11 +148,32 @@ Provider configuration refreshes automatically every 30 seconds. Use `/tools rel
 
 Pi Tools ranks providers by tier and availability, and optionally by recent session performance. Automatic selection skips exhausted hard budgets. Provider-specific date and domain filters depend on the upstream API; unsupported filters are applied locally where possible.
 
-OpenAI Codex uses the active Pi OAuth session. Run `/login` and select `openai-codex` before using it. To search with `OPENAI_API_KEY` instead, configure `openai-web-search`.
+`openai-codex` uses the active Pi OAuth session. Run `/login` and select `openai-codex` before using it; the provider no longer accepts `OPENAI_API_KEY` as a fallback. To search with `OPENAI_API_KEY` instead, configure `openai-web-search`.
 
 ## Configure files and credentials
 
 The global config is `$PI_CODING_AGENT_DIR/extensions/tools.json`; when the variable is unset, Pi supplies its agent directory. A project `.pi/tools.json` overrides it. Pi Tools deep-merges project settings, global settings, and built-in defaults in that order.
+
+### Minimal config
+
+A starter configuration with one keyed search provider and a few keyless defaults:
+
+```json
+{
+  "defaultProvider": "auto",
+  "providers": {
+    "exa": {
+      "enabled": true,
+      "apiKey": "EXA_API_KEY"
+    },
+    "duckduckgo": { "enabled": true },
+    "firecrawl": { "enabled": true },
+    "jina": { "enabled": true },
+    "marginalia": { "enabled": true },
+    "openai-codex": { "enabled": true }
+  }
+}
+```
 
 A provider `apiKey` can be:
 
@@ -159,7 +183,9 @@ A provider `apiKey` can be:
 
 Shell-command credentials are cached until the next config refresh. Sensitive fields in project config are ignored until Pi marks the project as trusted.
 
-The following safe example includes every configuration section and all registered providers. Keyless providers are enabled. Providers that need credentials or a local service are disabled until you configure them.
+### Full configuration reference
+
+The complete shape of the merged configuration. Every field shown here is honored by the extension; omit any section to use the built-in default.
 
 ```json
 {
