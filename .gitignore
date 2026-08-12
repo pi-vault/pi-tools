@@ -144,4 +144,4 @@ vite.config.ts.timestamp-*
 
 # Local-only working storage (plans, scratch notes, etc.)
 tmp/
-
+security-audit/
