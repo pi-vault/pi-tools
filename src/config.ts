@@ -138,6 +138,7 @@ export const FALLBACK_ENV_MAP: Record<string, string> = {
   marginalia: "MARGINALIA_API_KEY",
   context7: "CONTEXT7_API_KEY",
   parallel: "PARALLEL_API_KEY",
+  tinyfish: "TINYFISH_API_KEY",
   ollama: "OLLAMA_API_KEY",
   "openai-web-search": "OPENAI_API_KEY",
   gemini: "GEMINI_API_KEY",
@@ -266,6 +267,11 @@ const DEFAULT_CONFIG: PiToolsConfig = {
       enabled: false,
       budget: { mode: "hard", limit: 1000, period: "month", unit: "credit" },
       apiKey: "TAVILY_API_KEY",
+    },
+    tinyfish: {
+      enabled: true,
+      budget: { mode: "unlimited" },
+      apiKey: "TINYFISH_API_KEY",
     },
     websearchapi: {
       enabled: false,

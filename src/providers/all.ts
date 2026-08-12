@@ -13,6 +13,7 @@ import { providerMeta as searxng } from "./searxng.ts";
 import { providerMeta as serper } from "./serper.ts";
 import { providerMeta as sofya } from "./sofya.ts";
 import { providerMeta as tavily } from "./tavily.ts";
+import { providerMeta as tinyfish } from "./tinyfish.ts";
 
 export const allProviders: ProviderMeta[] = [
   ...httpProviders,
@@ -29,4 +30,5 @@ export const allProviders: ProviderMeta[] = [
   serper,
   sofya,
   tavily,
+  tinyfish,
 ];

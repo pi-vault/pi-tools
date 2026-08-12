@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { allProviders } from "../../src/providers/all.ts";
 
 describe("allProviders barrel", () => {
-  it("exports exactly 22 providers", () => {
-    expect(allProviders).toHaveLength(22);
+  it("exports exactly 23 providers", () => {
+    expect(allProviders).toHaveLength(23);
   });
 
   it("every entry has required ProviderMeta fields", () => {
@@ -86,6 +86,7 @@ describe("allProviders barrel", () => {
       "serper",
       "sofya",
       "tavily",
+      "tinyfish",
       "websearchapi",
       "youcom",
     ]);

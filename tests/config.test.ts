@@ -69,6 +69,7 @@ describe("loadConfig", () => {
       duckduckgo: { mode: "unlimited" },
       ollama: { mode: "unlimited" },
       searxng: { mode: "unlimited" },
+      tinyfish: { mode: "unlimited" },
       jina: { mode: "managed" },
       marginalia: { mode: "managed" },
       "openai-codex": { mode: "managed" },
@@ -861,6 +862,7 @@ describe("FALLBACK_ENV_MAP", () => {
       "marginalia",
       "context7",
       "parallel",
+      "tinyfish",
     ];
     for (const name of expected) {
       expect(FALLBACK_ENV_MAP[name]).toBeDefined();
