@@ -79,36 +79,20 @@ export async function extractYouTube(
   if (!isYouTubeEnabled()) return null;
 
   const { videoId } = isYouTubeURL(url);
-  const canonicalUrl = videoId
-    ? `https://www.youtube.com/watch?v=${videoId}`
-    : url;
+  const canonicalUrl = videoId ? `https://www.youtube.com/watch?v=${videoId}` : url;
   const effectivePrompt = options?.prompt ?? YOUTUBE_PROMPT;
   const effectiveModel = options?.model ?? getPreferredModel();
 
   // Tier 1: Gemini Web (cookie auth)
-  const webResult = await tryGeminiWeb(
-    canonicalUrl,
-    effectivePrompt,
-    effectiveModel,
-    signal,
-  );
+  const webResult = await tryGeminiWeb(canonicalUrl, effectivePrompt, effectiveModel, signal);
   if (webResult) return finalizeResult(webResult, url, videoId, signal);
 
   // Tier 2: Gemini API (key auth)
-  const apiResult = await tryGeminiApi(
-    canonicalUrl,
-    effectivePrompt,
-    effectiveModel,
-    signal,
-  );
+  const apiResult = await tryGeminiApi(canonicalUrl, effectivePrompt, effectiveModel, signal);
   if (apiResult) return finalizeResult(apiResult, url, videoId, signal);
 
   // Tier 3: Perplexity (text-only fallback)
-  const perplexityResult = await tryPerplexity(
-    canonicalUrl,
-    effectivePrompt,
-    signal,
-  );
+  const perplexityResult = await tryPerplexity(canonicalUrl, effectivePrompt, signal);
   if (perplexityResult) return finalizeResult(perplexityResult, url, videoId, signal);
 
   // All methods failed
@@ -129,13 +113,10 @@ export async function fetchYouTubeThumbnail(
 ): Promise<{ data: string; mimeType: string } | null> {
   try {
     const timeoutSignal = AbortSignal.timeout(THUMBNAIL_TIMEOUT_MS);
-    const effectiveSignal = signal
-      ? AbortSignal.any([signal, timeoutSignal])
-      : timeoutSignal;
-    const res = await fetch(
-      `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
-      { signal: effectiveSignal },
-    );
+    const effectiveSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    const res = await fetch(`https://img.youtube.com/vi/${videoId}/hqdefault.jpg`, {
+      signal: effectiveSignal,
+    });
     if (!res.ok) return null;
     const buffer = Buffer.from(await res.arrayBuffer());
     if (buffer.length === 0) return null;
@@ -159,10 +140,7 @@ export function extractHeadingTitle(text: string): string | null {
 
 function getPreferredModel(): string {
   try {
-    return (
-      loadConfig().youtube?.preferredModel ??
-      DEFAULT_YOUTUBE_CONFIG.preferredModel
-    );
+    return loadConfig().youtube?.preferredModel ?? DEFAULT_YOUTUBE_CONFIG.preferredModel;
   } catch {
     return DEFAULT_YOUTUBE_CONFIG.preferredModel;
   }

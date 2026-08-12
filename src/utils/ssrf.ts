@@ -1,3 +1,4 @@
+import * as dns from "node:dns/promises";
 import net from "node:net";
 
 export class SSRFError extends Error {
@@ -83,6 +84,21 @@ function matchesAllowedBase(parsed: URL, allowedBaseUrls: string[]): boolean {
   return false;
 }
 
+function assertAllowedAddress(address: string, allowedRanges: ParsedCidr[]): void {
+  const cleaned = address.replace(/^\[|\]$/g, "");
+  const ipVersion = net.isIP(cleaned);
+  if (ipVersion === 0) {
+    throw new SSRFError(`Invalid resolved address: ${address}`);
+  }
+
+  if (isInAllowedRange(cleaned, ipVersion, allowedRanges)) return;
+
+  const blocked = ipVersion === 6 ? isBlockedIPv6(cleaned) : isBlockedIPv4(cleaned);
+  if (blocked) {
+    throw new SSRFError(`Blocked private/reserved IP: ${address}`);
+  }
+}
+
 export function validateUrl(url: string, opts?: ValidateUrlOptions): URL {
   let parsed: URL;
   try {
@@ -110,7 +126,9 @@ export function validateUrl(url: string, opts?: ValidateUrlOptions): URL {
   // Parse allowRanges eagerly — misconfiguration must fail loud even for hostname URLs.
   const allowedRanges = parseAllowRanges(opts?.allowRanges);
 
-  const allowed = opts?.allowedBaseUrls?.length && matchesAllowedBase(parsed, opts.allowedBaseUrls);
+  const allowed = Boolean(
+    opts?.allowedBaseUrls?.length && matchesAllowedBase(parsed, opts.allowedBaseUrls),
+  );
 
   if (!allowed) {
     if (isBlockedHostname(hostname)) {
@@ -120,15 +138,39 @@ export function validateUrl(url: string, opts?: ValidateUrlOptions): URL {
     const cleanedIp = hostname.replace(/^\[|\]$/g, "");
     const ipVersion = net.isIP(cleanedIp);
 
-    if (ipVersion > 0 && !isInAllowedRange(cleanedIp, ipVersion, allowedRanges)) {
-      if (ipVersion === 6) {
-        if (isBlockedIPv6(cleanedIp)) {
-          throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
-        }
-      } else if (isBlockedIPv4(cleanedIp)) {
-        throw new SSRFError(`Blocked private/reserved IP: ${hostname}`);
-      }
+    if (ipVersion > 0) {
+      assertAllowedAddress(cleanedIp, allowedRanges);
     }
+  }
+
+  return parsed;
+}
+
+export async function validateUrlResolved(url: string, opts?: ValidateUrlOptions): Promise<URL> {
+  const parsed = validateUrl(url, opts);
+  const allowed = Boolean(
+    opts?.allowedBaseUrls?.length && matchesAllowedBase(parsed, opts.allowedBaseUrls),
+  );
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
+
+  if (allowed || net.isIP(hostname) > 0) return parsed;
+
+  let answers: Array<{ address: string; family: number }>;
+  try {
+    answers = await dns.lookup(hostname, { all: true, verbatim: true });
+  } catch (error) {
+    throw new SSRFError(
+      `DNS lookup failed for ${hostname}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  if (answers.length === 0) {
+    throw new SSRFError(`DNS lookup returned no addresses for ${hostname}`);
+  }
+
+  const allowedRanges = parseAllowRanges(opts?.allowRanges);
+  for (const answer of answers) {
+    assertAllowedAddress(answer.address, allowedRanges);
   }
 
   return parsed;

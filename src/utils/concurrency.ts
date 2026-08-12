@@ -24,10 +24,7 @@ export async function fetchWithConcurrencyLimit<T>(
     }
   }
 
-  const workers = Array.from(
-    { length: Math.min(maxConcurrent, tasks.length) },
-    () => runNext(),
-  );
+  const workers = Array.from({ length: Math.min(maxConcurrent, tasks.length) }, () => runNext());
   await Promise.all(workers);
   return results;
 }

@@ -187,11 +187,7 @@ export class ToolsDashboardComponent implements Component {
       const entry = this.options.config.providers[name];
       const key = entry?.apiKey;
       const keyState =
-        key === undefined
-          ? "unset"
-          : classifyCredential(key) === "env"
-            ? `env: ${key}`
-            : "set";
+        key === undefined ? "unset" : classifyCredential(key) === "env" ? `env: ${key}` : "set";
       const isSelected = index === this.providerIndex;
       const prefix = renderRowPrefix(isSelected, this.options.theme);
       const paddedName = padVisible(truncateVisible(name, 20), 20);
@@ -227,8 +223,7 @@ export class ToolsDashboardComponent implements Component {
     if (!result) return "";
     // Non-search providers never show a successful test cell, but they can
     // still display a deterministic failure if `t` was pressed on them.
-    const isSearchProvider =
-      this.options.registry.selectSearchCandidates(name).length > 0;
+    const isSearchProvider = this.options.registry.selectSearchCandidates(name).length > 0;
     if (!isSearchProvider) {
       // Render the deterministic failure for non-search providers.
       return `FAIL • ${result.message}`;
@@ -318,9 +313,7 @@ export class ToolsDashboardComponent implements Component {
     if (matchesKey(data, Key.shift("t"))) {
       const searchNames = this.options.registry.getSearchProviderNames();
       if (searchNames.length === 0) return;
-      this.beginTest((signal) =>
-        runProviderTests(this.options.registry, searchNames, signal),
-      );
+      this.beginTest((signal) => runProviderTests(this.options.registry, searchNames, signal));
       return;
     }
 

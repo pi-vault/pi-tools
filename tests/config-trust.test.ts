@@ -9,7 +9,7 @@ describe("stripSensitiveFields", () => {
   it("removes top-level apiKey fields", () => {
     const config = { gemini: { apiKey: "secret-123", baseUrl: "https://example.com" } };
     const result = stripSensitiveFields(config);
-    expect(result.gemini).toEqual({ baseUrl: "https://example.com" });
+    expect(result.gemini).toEqual({});
   });
 
   it("removes nested provider apiKey fields", () => {
@@ -48,7 +48,25 @@ describe("stripSensitiveFields", () => {
       },
     };
     const result = stripSensitiveFields(config);
-    expect(result.gemini).toEqual({ baseUrl: "https://example.com", chromeProfile: "Default" });
+    expect(result.gemini).toEqual({ chromeProfile: "Default" });
+  });
+
+  it("removes credential-bearing endpoint overrides while preserving provider preferences", () => {
+    const config = {
+      providers: {
+        fastcrw: { enabled: true, baseUrl: "https://attacker.example" },
+        searxng: { enabled: true, instanceUrl: "https://attacker.example" },
+        ollama: { enabled: true, baseUrl: "https://attacker.example" },
+      },
+      gemini: { baseUrl: "https://attacker.example" },
+    };
+
+    const result = stripSensitiveFields(config) as typeof config;
+
+    expect(result.providers.fastcrw).toEqual({ enabled: true });
+    expect(result.providers.searxng).toEqual({ enabled: true });
+    expect(result.providers.ollama).toEqual({ enabled: true });
+    expect(result.gemini).toEqual({});
   });
 
   it("removes fields matching *.apiSecret and *.token patterns", () => {
@@ -128,5 +146,51 @@ describe("loadMergedConfig trust gating", () => {
     recordProjectTrust({ cwd: "/test-project", isProjectTrusted: () => true });
     const config = loadMergedConfig("/test-project");
     expect(config.gemini?.apiKey).toBe("trusted-key");
+  });
+
+  it("uses trusted global endpoints for untrusted projects and preserves trusted overrides", () => {
+    const globalConfig = {
+      providers: {
+        fastcrw: { baseUrl: "https://api.fastcrw.com" },
+        searxng: { instanceUrl: "https://search.example" },
+        ollama: { baseUrl: "http://localhost:11434" },
+      },
+      gemini: { baseUrl: "https://generativelanguage.googleapis.com" },
+    };
+    const projectConfig = {
+      providers: {
+        fastcrw: { enabled: true, baseUrl: "https://attacker.example" },
+        searxng: { enabled: true, instanceUrl: "https://attacker.example" },
+        ollama: { enabled: true, baseUrl: "https://attacker.example" },
+      },
+      gemini: { baseUrl: "https://attacker.example" },
+    };
+
+    vi.mocked(fs.readFileSync).mockImplementation((filePath: any) => {
+      const p = typeof filePath === "string" ? filePath : filePath.toString();
+      if (p.includes(".pi/tools.json") && p.includes("test-project")) {
+        return JSON.stringify(projectConfig);
+      }
+      if (p.endsWith("/extensions/tools.json")) return JSON.stringify(globalConfig);
+      throw new Error("ENOENT");
+    });
+    vi.mocked(fs.existsSync).mockImplementation((filePath: any) => {
+      const p = typeof filePath === "string" ? filePath : filePath.toString();
+      return p.includes("test-project") && p.includes(".pi/tools.json");
+    });
+
+    const untrusted = loadMergedConfig("/test-project");
+    expect(untrusted.providers.fastcrw.baseUrl).toBe("https://api.fastcrw.com");
+    expect(untrusted.providers.searxng.instanceUrl).toBe("https://search.example");
+    expect(untrusted.providers.ollama.baseUrl).toBe("http://localhost:11434");
+    expect(untrusted.gemini?.baseUrl).toBe("https://generativelanguage.googleapis.com");
+    expect(untrusted.providers.fastcrw.enabled).toBe(true);
+
+    recordProjectTrust({ cwd: "/test-project", isProjectTrusted: () => true });
+    const trusted = loadMergedConfig("/test-project");
+    expect(trusted.providers.fastcrw.baseUrl).toBe("https://attacker.example");
+    expect(trusted.providers.searxng.instanceUrl).toBe("https://attacker.example");
+    expect(trusted.providers.ollama.baseUrl).toBe("https://attacker.example");
+    expect(trusted.gemini?.baseUrl).toBe("https://attacker.example");
   });
 });

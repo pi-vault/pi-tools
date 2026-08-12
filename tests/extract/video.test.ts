@@ -104,7 +104,18 @@ describe("isVideoFile", () => {
   });
 
   it("recognizes all supported extensions", () => {
-    const extensions = [".mp4", ".mov", ".webm", ".avi", ".mpeg", ".mpg", ".wmv", ".flv", ".3gp", ".3gpp"];
+    const extensions = [
+      ".mp4",
+      ".mov",
+      ".webm",
+      ".avi",
+      ".mpeg",
+      ".mpg",
+      ".wmv",
+      ".flv",
+      ".3gp",
+      ".3gpp",
+    ];
     const statSpy = vi.spyOn(fs, "statSync").mockReturnValue({
       isFile: () => true,
       size: 1024,
@@ -180,9 +191,7 @@ describe("extractVideo", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetApiKey.mockReturnValue("test-api-key");
-    mockGetVersionedApiBase.mockReturnValue(
-      "https://generativelanguage.googleapis.com/v1beta",
-    );
+    mockGetVersionedApiBase.mockReturnValue("https://generativelanguage.googleapis.com/v1beta");
     mockIsGeminiWebAvailable.mockResolvedValue(null);
     global.fetch = vi.fn();
   });
@@ -217,7 +226,9 @@ describe("extractVideo", () => {
     mockFetch.mockResolvedValueOnce({ ok: true } as Response);
 
     const fsPromises = await import("node:fs/promises");
-    vi.spyOn(fsPromises, "readFile").mockResolvedValue(Buffer.alloc(testInfo.sizeBytes) as unknown as string & Buffer);
+    vi.spyOn(fsPromises, "readFile").mockResolvedValue(
+      Buffer.alloc(testInfo.sizeBytes) as unknown as string & Buffer,
+    );
 
     const result = await extractVideo(testInfo);
 
@@ -276,7 +287,9 @@ describe("extractVideo", () => {
     mockQueryGeminiApi.mockResolvedValueOnce("Just plain text content without a heading.");
 
     const fsPromises = await import("node:fs/promises");
-    vi.spyOn(fsPromises, "readFile").mockResolvedValue(Buffer.alloc(testInfo.sizeBytes) as unknown as string & Buffer);
+    vi.spyOn(fsPromises, "readFile").mockResolvedValue(
+      Buffer.alloc(testInfo.sizeBytes) as unknown as string & Buffer,
+    );
 
     const result = await extractVideo(testInfo);
     expect(result).not.toBeNull();
@@ -373,7 +386,9 @@ describe("uploadToFilesApi (via extractVideo internals)", () => {
     global.fetch = vi.fn();
 
     const fsPromises = await import("node:fs/promises");
-    vi.spyOn(fsPromises, "readFile").mockResolvedValue(Buffer.alloc(testInfo.sizeBytes) as unknown as string & Buffer);
+    vi.spyOn(fsPromises, "readFile").mockResolvedValue(
+      Buffer.alloc(testInfo.sizeBytes) as unknown as string & Buffer,
+    );
   });
 
   it("fails gracefully when upload init returns no upload URL header", async () => {
@@ -424,7 +439,9 @@ describe("pollFileState (via extractVideo internals)", () => {
     global.fetch = vi.fn();
 
     const fsPromises = await import("node:fs/promises");
-    vi.spyOn(fsPromises, "readFile").mockResolvedValue(Buffer.alloc(testInfo.sizeBytes) as unknown as string & Buffer);
+    vi.spyOn(fsPromises, "readFile").mockResolvedValue(
+      Buffer.alloc(testInfo.sizeBytes) as unknown as string & Buffer,
+    );
     vi.useFakeTimers();
   });
 
@@ -505,7 +522,9 @@ describe("extractVideo — auto-thumbnail", () => {
     global.fetch = vi.fn();
 
     const fsPromises = await import("node:fs/promises");
-    vi.spyOn(fsPromises, "readFile").mockResolvedValue(Buffer.alloc(testInfo.sizeBytes) as unknown as string & Buffer);
+    vi.spyOn(fsPromises, "readFile").mockResolvedValue(
+      Buffer.alloc(testInfo.sizeBytes) as unknown as string & Buffer,
+    );
   });
 
   it("includes thumbnail when ffmpeg succeeds", async () => {

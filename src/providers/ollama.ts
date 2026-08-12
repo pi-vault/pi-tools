@@ -38,9 +38,10 @@ export class OllamaProvider implements SearchProvider, FetchProvider {
   private readonly isLocal: boolean;
 
   constructor(options?: { baseUrl?: string; apiKey?: string }) {
-    this.baseUrl = (
-      options?.baseUrl ?? process.env.OLLAMA_HOST ?? DEFAULT_BASE_URL
-    ).replace(/\/+$/, "");
+    this.baseUrl = (options?.baseUrl ?? process.env.OLLAMA_HOST ?? DEFAULT_BASE_URL).replace(
+      /\/+$/,
+      "",
+    );
     this.apiKey = options?.apiKey;
     this.isLocal = isLocalHost(this.baseUrl);
   }
@@ -74,7 +75,13 @@ export class OllamaProvider implements SearchProvider, FetchProvider {
       });
     } catch (err) {
       if (isConnectionRefused(err)) {
-        const host = (() => { try { return new URL(this.baseUrl).host; } catch { return this.baseUrl; } })();
+        const host = (() => {
+          try {
+            return new URL(this.baseUrl).host;
+          } catch {
+            return this.baseUrl;
+          }
+        })();
         throw new Error(
           `Could not connect to Ollama at ${host}. Make sure Ollama is running (ollama serve).`,
         );
@@ -126,10 +133,7 @@ export const providerMeta: ProviderMeta = {
   tier: 3,
   requiresKey: false,
   create: (key?: string, providerConfig?: ProviderConfigEntry) => {
-    const baseUrl =
-      (providerConfig as any)?.baseUrl ??
-      process.env.OLLAMA_HOST ??
-      DEFAULT_BASE_URL;
+    const baseUrl = (providerConfig as any)?.baseUrl ?? process.env.OLLAMA_HOST ?? DEFAULT_BASE_URL;
     if (providerConfig?.enabled !== true && !process.env.OLLAMA_HOST) return {};
     const provider = new OllamaProvider({ baseUrl, apiKey: key });
     return { search: provider, fetch: provider };

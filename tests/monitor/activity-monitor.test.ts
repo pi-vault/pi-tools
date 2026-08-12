@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  ActivityMonitor,
-  type ActivityEntry,
-} from "../../src/monitor/activity-monitor.ts";
+import { ActivityMonitor, type ActivityEntry } from "../../src/monitor/activity-monitor.ts";
 
 describe("ActivityMonitor", () => {
   let monitor: ActivityMonitor;

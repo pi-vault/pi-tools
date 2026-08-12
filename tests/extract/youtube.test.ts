@@ -24,18 +24,9 @@ vi.mock("../../src/config.ts", async (importOriginal) => {
   return { ...actual, loadConfig: vi.fn().mockReturnValue({}) };
 });
 
-import {
-  isGeminiApiAvailable,
-  queryGeminiApi,
-} from "../../src/extract/gemini-api.ts";
-import {
-  isGeminiWebAvailable,
-  queryWithCookies,
-} from "../../src/extract/gemini-web.ts";
-import {
-  isPerplexityAvailable,
-  queryPerplexity,
-} from "../../src/extract/perplexity.ts";
+import { isGeminiApiAvailable, queryGeminiApi } from "../../src/extract/gemini-api.ts";
+import { isGeminiWebAvailable, queryWithCookies } from "../../src/extract/gemini-web.ts";
+import { isPerplexityAvailable, queryPerplexity } from "../../src/extract/perplexity.ts";
 import { loadConfig, type PiToolsConfig } from "../../src/config.ts";
 import {
   extractHeadingTitle,
@@ -76,7 +67,11 @@ describe("youtube", () => {
       ["embed", "https://www.youtube.com/embed/dQw4w9WgXcQ", "dQw4w9WgXcQ"],
       ["/v/", "https://www.youtube.com/v/dQw4w9WgXcQ", "dQw4w9WgXcQ"],
       ["youtu.be", "https://youtu.be/dQw4w9WgXcQ", "dQw4w9WgXcQ"],
-      ["extra query params", "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=120&list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf", "dQw4w9WgXcQ"],
+      [
+        "extra query params",
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=120&list=PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf",
+        "dQw4w9WgXcQ",
+      ],
       ["hyphens and underscores", "https://youtu.be/a-B_c1D2e3f", "a-B_c1D2e3f"],
     ];
 
@@ -157,25 +152,19 @@ describe("youtube", () => {
     it("uses Gemini Web when available (tier 1)", async () => {
       const mockCookies = { "__Secure-1PSID": "test" };
       vi.mocked(isGeminiWebAvailable).mockResolvedValue(mockCookies);
-      vi.mocked(queryWithCookies).mockResolvedValue(
-        "# Video Title\n\nTranscript content here.",
-      );
+      vi.mocked(queryWithCookies).mockResolvedValue("# Video Title\n\nTranscript content here.");
       fetchStub.addResponse("img.youtube.com", {
         body: "fake-jpeg-data",
         headers: { "content-type": "image/jpeg" },
       });
 
-      const result = await extractYouTube(
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      );
+      const result = await extractYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
 
       expect(result).not.toBeNull();
       expect(result?.text).toContain("Transcript content here.");
       expect(result?.title).toBe("Video Title");
       expect(result?.extractionChain).toEqual(["youtube:gemini-web"]);
-      expect(result?.url).toBe(
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      );
+      expect(result?.url).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
 
       expect(queryWithCookies).toHaveBeenCalledWith(
         expect.stringContaining("Extract the complete content"),
@@ -189,9 +178,7 @@ describe("youtube", () => {
     it("falls back to Gemini API when Web unavailable (tier 2)", async () => {
       vi.mocked(isGeminiWebAvailable).mockResolvedValue(null);
       vi.mocked(isGeminiApiAvailable).mockReturnValue(true);
-      vi.mocked(queryGeminiApi).mockResolvedValue(
-        "# API Video\n\nAPI transcript.",
-      );
+      vi.mocked(queryGeminiApi).mockResolvedValue("# API Video\n\nAPI transcript.");
       fetchStub.addResponse("img.youtube.com", {
         body: "fake-jpeg-data",
         headers: { "content-type": "image/jpeg" },
@@ -223,9 +210,7 @@ describe("youtube", () => {
         headers: { "content-type": "image/jpeg" },
       });
 
-      const result = await extractYouTube(
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      );
+      const result = await extractYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
 
       expect(result).not.toBeNull();
       expect(result?.extractionChain).toEqual(["youtube:perplexity"]);
@@ -242,9 +227,7 @@ describe("youtube", () => {
       vi.mocked(isGeminiApiAvailable).mockReturnValue(false);
       vi.mocked(isPerplexityAvailable).mockReturnValue(false);
 
-      const result = await extractYouTube(
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      );
+      const result = await extractYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
 
       expect(result).toBeNull();
     });
@@ -252,9 +235,7 @@ describe("youtube", () => {
     it("returns null when YouTube is disabled via config", async () => {
       mockCfg({ youtube: { enabled: false } });
 
-      const result = await extractYouTube(
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      );
+      const result = await extractYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
 
       expect(result).toBeNull();
       expect(isGeminiWebAvailable).not.toHaveBeenCalled();
@@ -265,9 +246,7 @@ describe("youtube", () => {
     it("uses custom prompt when provided in options", async () => {
       vi.mocked(isGeminiWebAvailable).mockResolvedValue(null);
       vi.mocked(isGeminiApiAvailable).mockReturnValue(true);
-      vi.mocked(queryGeminiApi).mockResolvedValue(
-        "# Custom Analysis\n\nFocused content.",
-      );
+      vi.mocked(queryGeminiApi).mockResolvedValue("# Custom Analysis\n\nFocused content.");
       fetchStub.addResponse("img.youtube.com", {
         body: "fake-jpeg-data",
         headers: { "content-type": "image/jpeg" },
@@ -296,11 +275,9 @@ describe("youtube", () => {
         headers: { "content-type": "image/jpeg" },
       });
 
-      await extractYouTube(
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        undefined,
-        { model: "gemini-2.5-pro" },
-      );
+      await extractYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ", undefined, {
+        model: "gemini-2.5-pro",
+      });
 
       expect(queryGeminiApi).toHaveBeenCalledWith(
         expect.anything(),
@@ -328,9 +305,7 @@ describe("youtube", () => {
     it("catches Gemini Web errors and falls through to API", async () => {
       const mockCookies = { "__Secure-1PSID": "test" };
       vi.mocked(isGeminiWebAvailable).mockResolvedValue(mockCookies);
-      vi.mocked(queryWithCookies).mockRejectedValue(
-        new Error("Cookie expired"),
-      );
+      vi.mocked(queryWithCookies).mockRejectedValue(new Error("Cookie expired"));
       vi.mocked(isGeminiApiAvailable).mockReturnValue(true);
       vi.mocked(queryGeminiApi).mockResolvedValue("# Fallback\n\nContent.");
       fetchStub.addResponse("img.youtube.com", {
@@ -338,9 +313,7 @@ describe("youtube", () => {
         headers: { "content-type": "image/jpeg" },
       });
 
-      const result = await extractYouTube(
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      );
+      const result = await extractYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
 
       expect(result).not.toBeNull();
       expect(result?.extractionChain).toEqual(["youtube:gemini-api"]);
@@ -374,11 +347,9 @@ describe("youtube", () => {
         headers: { "content-type": "image/jpeg" },
       });
 
-      await extractYouTube(
-        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        undefined,
-        { prompt: "What language is used?" },
-      );
+      await extractYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ", undefined, {
+        prompt: "What language is used?",
+      });
 
       expect(queryPerplexity).toHaveBeenCalledWith(
         "What language is used? YouTube video: https://www.youtube.com/watch?v=dQw4w9WgXcQ",

@@ -1,11 +1,6 @@
 // src/providers/openai-web-search.ts
 import { parseOpenAINativeResults } from "./parsers.ts";
-import type {
-  ProviderMeta,
-  SearchFilters,
-  SearchProvider,
-  SearchResult,
-} from "./types.ts";
+import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
 import type { ProviderConfigEntry } from "../config.ts";
 
 const RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses";
@@ -44,9 +39,7 @@ class OpenAiWebSearchProvider implements SearchProvider {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `OpenAI Native API error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`OpenAI Native API error: ${response.status} ${response.statusText}`);
     }
 
     const data: unknown = await response.json();

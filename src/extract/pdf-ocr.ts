@@ -96,24 +96,19 @@ export async function rasterizePdfPages(
     await new Promise<void>((resolve, reject) => {
       execFile(
         "pdftoppm",
-        [
-          "-png",
-          "-r", String(dpi),
-          "-f", "1",
-          "-l", String(lastPage),
-          pdfPath,
-          outputPrefix,
-        ],
+        ["-png", "-r", String(dpi), "-f", "1", "-l", String(lastPage), pdfPath, outputPrefix],
         { timeout: 30_000 },
         (err, _stdout, stderr) => {
           if (err) {
             const code = (err as NodeJS.ErrnoException).code;
             if (code === "ENOENT") {
-              reject(new Error(
-                "pdftoppm not found. Install poppler-utils for PDF OCR:\n" +
-                "  macOS: brew install poppler\n" +
-                "  Ubuntu/Debian: apt-get install poppler-utils",
-              ));
+              reject(
+                new Error(
+                  "pdftoppm not found. Install poppler-utils for PDF OCR:\n" +
+                    "  macOS: brew install poppler\n" +
+                    "  Ubuntu/Debian: apt-get install poppler-utils",
+                ),
+              );
             } else {
               reject(new Error(`pdftoppm failed: ${stderr || err.message}`));
             }
@@ -125,7 +120,8 @@ export async function rasterizePdfPages(
     });
 
     // Read generated PNG files (pdftoppm names them page-01.png, page-02.png, etc.)
-    const files = fs.readdirSync(tmpDir)
+    const files = fs
+      .readdirSync(tmpDir)
       .filter((f) => f.startsWith("page") && f.endsWith(".png"))
       .sort();
 

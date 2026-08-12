@@ -160,9 +160,7 @@ describe("parseLangSearchResults", () => {
 
   it("returns empty array for malformed input", () => {
     expect(parseLangSearchResults("string")).toEqual([]);
-    expect(
-      parseLangSearchResults({ data: { webPages: { value: "not-array" } } }),
-    ).toEqual([]);
+    expect(parseLangSearchResults({ data: { webPages: { value: "not-array" } } })).toEqual([]);
   });
 
   it("truncates snippets to 500 characters", () => {
@@ -170,9 +168,7 @@ describe("parseLangSearchResults", () => {
     const data = {
       data: {
         webPages: {
-          value: [
-            { name: "Long", url: "https://example.com", snippet: longSnippet },
-          ],
+          value: [{ name: "Long", url: "https://example.com", snippet: longSnippet }],
         },
       },
     };
@@ -184,9 +180,7 @@ describe("parseLangSearchResults", () => {
     const data = {
       data: {
         webPages: {
-          value: [
-            { name: "Name", title: "Title", url: "https://example.com", snippet: "s" },
-          ],
+          value: [{ name: "Name", title: "Title", url: "https://example.com", snippet: "s" }],
         },
       },
     };
@@ -196,9 +190,7 @@ describe("parseLangSearchResults", () => {
 
   it("falls back to data array when webPages and results are absent", () => {
     const data = {
-      data: [
-        { name: "Direct Data", url: "https://example.com", snippet: "test" },
-      ],
+      data: [{ name: "Direct Data", url: "https://example.com", snippet: "test" }],
     };
     const results = parseLangSearchResults(data);
     expect(results).toHaveLength(1);
@@ -251,8 +243,7 @@ describe("parseBraveLlmResults", () => {
     expect(results[0]).toEqual({
       title: "About Brave",
       url: "https://brave.com/about",
-      snippet:
-        "Brave Search is a privacy-focused search engine.\n\nIt does not track users.",
+      snippet: "Brave Search is a privacy-focused search engine.\n\nIt does not track users.",
     });
     expect(results[1]).toEqual({
       title: "Brave AI",
@@ -273,9 +264,7 @@ describe("parseBraveLlmResults", () => {
 
   it("returns empty array when generic is not an array", () => {
     expect(parseBraveLlmResults({ grounding: {} })).toEqual([]);
-    expect(
-      parseBraveLlmResults({ grounding: { generic: "not-array" } }),
-    ).toEqual([]);
+    expect(parseBraveLlmResults({ grounding: { generic: "not-array" } })).toEqual([]);
   });
 
   it("handles entries with missing fields gracefully", () => {
@@ -320,17 +309,13 @@ describe("parseBraveLlmResults", () => {
       },
     };
     const results = parseBraveLlmResults(data);
-    expect(results[0].snippet).toBe(
-      "First chunk.\n\nSecond chunk.\n\nThird chunk.",
-    );
+    expect(results[0].snippet).toBe("First chunk.\n\nSecond chunk.\n\nThird chunk.");
   });
 
   it("handles empty snippets array", () => {
     const data = {
       grounding: {
-        generic: [
-          { url: "https://example.com", title: "Empty", snippets: [] },
-        ],
+        generic: [{ url: "https://example.com", title: "Empty", snippets: [] }],
       },
     };
     const results = parseBraveLlmResults(data);
@@ -340,10 +325,7 @@ describe("parseBraveLlmResults", () => {
   it("handles null entries in generic array gracefully", () => {
     const data = {
       grounding: {
-        generic: [
-          null,
-          { url: "https://example.com", title: "Valid", snippets: ["test"] },
-        ],
+        generic: [null, { url: "https://example.com", title: "Valid", snippets: ["test"] }],
       },
     };
     const results = parseBraveLlmResults(data);
@@ -359,9 +341,7 @@ describe("parseBraveLlmResults", () => {
   it("handles non-array snippets gracefully", () => {
     const data = {
       grounding: {
-        generic: [
-          { url: "https://example.com", title: "Bad", snippets: "not-array" },
-        ],
+        generic: [{ url: "https://example.com", title: "Bad", snippets: "not-array" }],
       },
     };
     const results = parseBraveLlmResults(data);
@@ -415,9 +395,7 @@ describe("parseBraveResults", () => {
 describe("parseSerperResults", () => {
   it("extracts results from valid response", () => {
     const data = {
-      organic: [
-        { title: "Google Result", link: "https://google.com/1", snippet: "A snippet" },
-      ],
+      organic: [{ title: "Google Result", link: "https://google.com/1", snippet: "A snippet" }],
     };
     const results = parseSerperResults(data);
     expect(results).toHaveLength(1);
@@ -540,7 +518,11 @@ describe("parsePerplexityResults", () => {
     };
     const results = parsePerplexityResults(data);
     expect(results).toHaveLength(5);
-    expect(results[4]).toEqual({ title: "https://valid.com", url: "https://valid.com", snippet: "" });
+    expect(results[4]).toEqual({
+      title: "https://valid.com",
+      url: "https://valid.com",
+      snippet: "",
+    });
   });
 });
 

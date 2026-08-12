@@ -122,8 +122,16 @@ describe("web_fetch — video parameters and ImageContent", () => {
     // text header + 2 frame images
     expect(result.content).toHaveLength(3);
     expect(result.content[0].type).toBe("text");
-    expect(result.content[1]).toEqual({ type: "image", data: "frame1base64", mimeType: "image/jpeg" });
-    expect(result.content[2]).toEqual({ type: "image", data: "frame2base64", mimeType: "image/jpeg" });
+    expect(result.content[1]).toEqual({
+      type: "image",
+      data: "frame1base64",
+      mimeType: "image/jpeg",
+    });
+    expect(result.content[2]).toEqual({
+      type: "image",
+      data: "frame2base64",
+      mimeType: "image/jpeg",
+    });
   });
 
   it("renders frames as ImageContent in multi-URL mode", async () => {
@@ -153,7 +161,9 @@ describe("web_fetch — video parameters and ImageContent", () => {
     const result = await tool.execute(
       "call-multi-1",
       { urls: ["https://example.com/page1", "https://www.youtube.com/watch?v=abc"], frames: 1 },
-      undefined, undefined, ctx,
+      undefined,
+      undefined,
+      ctx,
     );
 
     // Should have at least one image content block from the frames result
@@ -161,5 +171,4 @@ describe("web_fetch — video parameters and ImageContent", () => {
     expect(imageBlocks).toHaveLength(1);
     expect(imageBlocks[0]).toEqual({ type: "image", data: "frameData", mimeType: "image/jpeg" });
   });
-
 });

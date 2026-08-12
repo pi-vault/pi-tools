@@ -46,9 +46,7 @@ class SofyaProvider implements SearchProvider, FetchProvider {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Sofya API error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`Sofya API error: ${response.status} ${response.statusText}`);
     }
 
     const data: unknown = await response.json();
@@ -67,9 +65,7 @@ class SofyaProvider implements SearchProvider, FetchProvider {
     });
 
     if (!response.ok) {
-      throw new Error(
-        `Sofya fetch error: ${response.status} ${response.statusText}`,
-      );
+      throw new Error(`Sofya fetch error: ${response.status} ${response.statusText}`);
     }
 
     const data = (await response.json()) as {

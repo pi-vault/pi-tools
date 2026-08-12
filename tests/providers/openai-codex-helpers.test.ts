@@ -1,6 +1,9 @@
 // tests/providers/openai-codex-helpers.test.ts
 import { describe, expect, it } from "vitest";
-import { injectCodexSearchPayload, normalizeCodexToolCallResults } from "../../src/providers/openai-codex.ts";
+import {
+  injectCodexSearchPayload,
+  normalizeCodexToolCallResults,
+} from "../../src/providers/openai-codex.ts";
 
 describe("injectCodexSearchPayload", () => {
   it("adds web_search tool with external_web_access and search_context_size", () => {
@@ -44,9 +47,7 @@ describe("injectCodexSearchPayload", () => {
 describe("normalizeCodexToolCallResults", () => {
   it("extracts valid results from tool call arguments", () => {
     const args = {
-      results: [
-        { title: "Test", url: "https://example.com/page", snippet: "Description" },
-      ],
+      results: [{ title: "Test", url: "https://example.com/page", snippet: "Description" }],
     };
     const results = normalizeCodexToolCallResults(args, 10);
     expect(results).toHaveLength(1);
@@ -84,7 +85,9 @@ describe("normalizeCodexToolCallResults", () => {
   it("respects maxResults limit", () => {
     const args = {
       results: Array.from({ length: 20 }, (_, i) => ({
-        title: `Site ${i}`, url: `https://site${i}.com`, snippet: `Snippet ${i}`,
+        title: `Site ${i}`,
+        url: `https://site${i}.com`,
+        snippet: `Snippet ${i}`,
       })),
     };
     const results = normalizeCodexToolCallResults(args, 5);
@@ -93,11 +96,13 @@ describe("normalizeCodexToolCallResults", () => {
 
   it("truncates long titles and snippets", () => {
     const args = {
-      results: [{
-        title: "X".repeat(300),
-        url: "https://example.com",
-        snippet: "Y".repeat(1500),
-      }],
+      results: [
+        {
+          title: "X".repeat(300),
+          url: "https://example.com",
+          snippet: "Y".repeat(1500),
+        },
+      ],
     };
     const results = normalizeCodexToolCallResults(args, 10);
     expect(results[0].title.length).toBe(200);

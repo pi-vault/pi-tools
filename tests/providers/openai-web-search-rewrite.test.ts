@@ -52,9 +52,7 @@ describe("rewriteOpenAiWebSearchTool", () => {
     const result = rewriteOpenAiWebSearchTool(payload);
 
     expect(result.rewritten).toEqual(["web_search"]);
-    expect(result.payload.tools).toEqual([
-      { type: "web_search", external_web_access: true },
-    ]);
+    expect(result.payload.tools).toEqual([{ type: "web_search", external_web_access: true }]);
     // Messages are preserved
     expect(result.payload.messages).toEqual(payload.messages);
   });

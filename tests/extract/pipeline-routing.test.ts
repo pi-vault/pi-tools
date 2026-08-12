@@ -36,12 +36,19 @@ import {
   getLocalVideoDuration,
   getYouTubeStreamInfo,
 } from "../../src/extract/frames.ts";
-import { extractWithUrlContext, extractWithGeminiWeb } from "../../src/extract/gemini-url-context.ts";
+import {
+  extractWithUrlContext,
+  extractWithGeminiWeb,
+} from "../../src/extract/gemini-url-context.ts";
 
 async function withMockFetch(response: Response, fn: () => Promise<void>) {
   const orig = globalThis.fetch;
   globalThis.fetch = vi.fn().mockResolvedValue(response) as unknown as typeof fetch;
-  try { await fn(); } finally { globalThis.fetch = orig; }
+  try {
+    await fn();
+  } finally {
+    globalThis.fetch = orig;
+  }
 }
 
 describe("extractContent — YouTube/Video routing", () => {
@@ -117,7 +124,11 @@ describe("extractContent — YouTube/Video routing", () => {
 
   it("routes local video files to extractVideo when enabled", async () => {
     vi.mocked(isYouTubeURL).mockReturnValue({ isYouTube: false, videoId: null });
-    vi.mocked(isVideoFile).mockReturnValue({ absolutePath: "/tmp/video.mp4", mimeType: "video/mp4", sizeBytes: 1024 });
+    vi.mocked(isVideoFile).mockReturnValue({
+      absolutePath: "/tmp/video.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 1024,
+    });
     vi.mocked(isVideoEnabled).mockReturnValue(true);
     vi.mocked(extractVideo).mockResolvedValue({
       text: "Video analysis: a cat playing piano on a grand piano",
@@ -134,7 +145,11 @@ describe("extractContent — YouTube/Video routing", () => {
   });
 
   it("skips video routing when isVideoEnabled returns false", async () => {
-    vi.mocked(isVideoFile).mockReturnValue({ absolutePath: "/tmp/video.mp4", mimeType: "video/mp4", sizeBytes: 1024 });
+    vi.mocked(isVideoFile).mockReturnValue({
+      absolutePath: "/tmp/video.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 1024,
+    });
     vi.mocked(isVideoEnabled).mockReturnValue(false);
 
     // validateUrl will reject a local path — that's the expected behavior
@@ -159,7 +174,10 @@ describe("extractContent — Frame extraction routing", () => {
 
   it("extracts YouTube frames when timestamp option is present", async () => {
     vi.mocked(isYouTubeURL).mockReturnValue({ isYouTube: true, videoId: "dQw4w9WgXcQ" });
-    vi.mocked(getYouTubeStreamInfo).mockResolvedValue({ streamUrl: "https://stream.example.com/video", duration: 212 });
+    vi.mocked(getYouTubeStreamInfo).mockResolvedValue({
+      streamUrl: "https://stream.example.com/video",
+      duration: 212,
+    });
     vi.mocked(parseTimestampParam).mockReturnValue([30, 60, 90]);
     vi.mocked(extractYouTubeFrames).mockResolvedValue({
       frames: [
@@ -171,11 +189,9 @@ describe("extractContent — Frame extraction routing", () => {
       error: null,
     });
 
-    const result = await extractContent(
-      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-      undefined,
-      { timestamp: "0:30-1:30" },
-    );
+    const result = await extractContent("https://www.youtube.com/watch?v=dQw4w9WgXcQ", undefined, {
+      timestamp: "0:30-1:30",
+    });
 
     expect(result.extractionChain).toEqual(["frames:youtube"]);
     expect(result.frames).toHaveLength(3);
@@ -195,7 +211,11 @@ describe("extractContent — Frame extraction routing", () => {
 
   it("extracts local video frames when frames option is present", async () => {
     vi.mocked(isYouTubeURL).mockReturnValue({ isYouTube: false, videoId: null });
-    vi.mocked(isVideoFile).mockReturnValue({ absolutePath: "/tmp/video.mp4", mimeType: "video/mp4", sizeBytes: 1024 });
+    vi.mocked(isVideoFile).mockReturnValue({
+      absolutePath: "/tmp/video.mp4",
+      mimeType: "video/mp4",
+      sizeBytes: 1024,
+    });
     vi.mocked(getLocalVideoDuration).mockResolvedValue(120);
     vi.mocked(parseTimestampParam).mockReturnValue([15, 30, 45, 60]);
     vi.mocked(extractLocalFrames).mockResolvedValue({
@@ -219,7 +239,10 @@ describe("extractContent — Frame extraction routing", () => {
 
   it("throws when all frames fail to extract (empty frames + error)", async () => {
     vi.mocked(isYouTubeURL).mockReturnValue({ isYouTube: true, videoId: "abc123" });
-    vi.mocked(getYouTubeStreamInfo).mockResolvedValue({ streamUrl: "https://stream.example.com/video", duration: 100 });
+    vi.mocked(getYouTubeStreamInfo).mockResolvedValue({
+      streamUrl: "https://stream.example.com/video",
+      duration: 100,
+    });
     vi.mocked(parseTimestampParam).mockReturnValue([30]);
     vi.mocked(extractYouTubeFrames).mockResolvedValue({
       frames: [],

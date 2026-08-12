@@ -8,10 +8,7 @@ vi.mock("../../src/config.ts", () => ({
 }));
 
 import { resolveProviderKey } from "../../src/config.ts";
-import {
-  isPerplexityAvailable,
-  queryPerplexity,
-} from "../../src/extract/perplexity.ts";
+import { isPerplexityAvailable, queryPerplexity } from "../../src/extract/perplexity.ts";
 
 describe("perplexity", () => {
   const mockResolveProviderKey = vi.mocked(resolveProviderKey);
@@ -50,9 +47,7 @@ describe("perplexity", () => {
   describe("queryPerplexity", () => {
     it("throws when no API key is available", async () => {
       mockResolveProviderKey.mockReturnValue(undefined);
-      await expect(queryPerplexity("test query")).rejects.toThrow(
-        "Perplexity API key not found",
-      );
+      await expect(queryPerplexity("test query")).rejects.toThrow("Perplexity API key not found");
     });
 
     it("sends correct request and returns response content", async () => {
@@ -68,15 +63,12 @@ describe("perplexity", () => {
       expect(result).toBe("This is a summary of the video.");
 
       const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
-      const [calledUrl, calledInit] = fetchMock.mock.calls[0] as [
-        string,
-        RequestInit,
-      ];
+      const [calledUrl, calledInit] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(calledUrl).toBe("https://api.perplexity.ai/chat/completions");
       expect(calledInit.method).toBe("POST");
-      expect(
-        (calledInit.headers as Record<string, string>).Authorization,
-      ).toBe("Bearer pplx-test-key");
+      expect((calledInit.headers as Record<string, string>).Authorization).toBe(
+        "Bearer pplx-test-key",
+      );
 
       const body = JSON.parse(calledInit.body as string) as {
         model: string;
@@ -95,9 +87,7 @@ describe("perplexity", () => {
         body: "rate limited",
       });
 
-      await expect(queryPerplexity("test")).rejects.toThrow(
-        "Perplexity API error 429",
-      );
+      await expect(queryPerplexity("test")).rejects.toThrow("Perplexity API error 429");
     });
 
     it("throws on empty response content", async () => {

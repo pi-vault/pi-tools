@@ -54,9 +54,7 @@ describe("gemini-api", () => {
   describe("getVersionedApiBase", () => {
     it("returns default host + /v1beta path", () => {
       delete process.env.GOOGLE_GEMINI_BASE_URL;
-      expect(getVersionedApiBase()).toBe(
-        "https://generativelanguage.googleapis.com/v1beta",
-      );
+      expect(getVersionedApiBase()).toBe("https://generativelanguage.googleapis.com/v1beta");
     });
 
     it("uses custom host when GOOGLE_GEMINI_BASE_URL is set", () => {
@@ -105,8 +103,7 @@ describe("gemini-api", () => {
 
     it("does not treat non-Cloudflare URL with gateway substring as CF gateway", () => {
       delete process.env.GEMINI_API_KEY;
-      process.env.GOOGLE_GEMINI_BASE_URL =
-        "https://example.com/proxy/gateway.ai.cloudflare.com";
+      process.env.GOOGLE_GEMINI_BASE_URL = "https://example.com/proxy/gateway.ai.cloudflare.com";
       process.env.CLOUDFLARE_API_KEY = "cf-key";
       expect(isGeminiApiAvailable()).toBe(false);
     });
@@ -133,9 +130,7 @@ describe("gemini-api", () => {
       fetchStub.addResponse("generateContent", {
         status: 200,
         body: {
-          candidates: [
-            { content: { parts: [{ text: "Analysis result" }] } },
-          ],
+          candidates: [{ content: { parts: [{ text: "Analysis result" }] } }],
         },
       });
 
@@ -147,10 +142,7 @@ describe("gemini-api", () => {
       expect(result).toBe("Analysis result");
 
       const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
-      const [calledUrl, calledInit] = fetchMock.mock.calls[0] as [
-        string,
-        RequestInit,
-      ];
+      const [calledUrl, calledInit] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(calledUrl).toContain(`/models/${DEFAULT_MODEL}:generateContent`);
       expect(calledUrl).toContain("?key=test-key");
 
@@ -220,9 +212,7 @@ describe("gemini-api", () => {
       fetchStub.addResponse("generateContent", {
         status: 200,
         body: {
-          candidates: [
-            { content: { parts: [{ text: "Part 1" }, { text: "Part 2" }] } },
-          ],
+          candidates: [{ content: { parts: [{ text: "Part 1" }, { text: "Part 2" }] } }],
         },
       });
 
@@ -236,9 +226,7 @@ describe("gemini-api", () => {
         body: "Rate limit exceeded",
       });
 
-      await expect(queryGeminiApi("Test", "files/xyz")).rejects.toThrow(
-        "Gemini API error 429",
-      );
+      await expect(queryGeminiApi("Test", "files/xyz")).rejects.toThrow("Gemini API error 429");
     });
 
     it("throws when response has no candidates", async () => {
@@ -288,15 +276,12 @@ describe("gemini-api", () => {
       expect(result).toBe("CF result");
 
       const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
-      const [calledUrl, calledInit] = fetchMock.mock.calls[0] as [
-        string,
-        RequestInit,
-      ];
+      const [calledUrl, calledInit] = fetchMock.mock.calls[0] as [string, RequestInit];
       expect(calledUrl).not.toContain("?key=");
       expect(calledUrl).toContain("gateway.ai.cloudflare.com");
-      expect((calledInit.headers as Record<string, string>)[
-        "cf-aig-authorization"
-      ]).toBe("Bearer cf-secret");
+      expect((calledInit.headers as Record<string, string>)["cf-aig-authorization"]).toBe(
+        "Bearer cf-secret",
+      );
     });
   });
 });

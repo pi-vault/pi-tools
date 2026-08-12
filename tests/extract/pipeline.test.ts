@@ -429,9 +429,7 @@ describe("GitHub URL interception in extractContent", () => {
       headers: { "content-type": "text/html; charset=utf-8" },
     });
 
-    const result = await extractContent(
-      "https://github.com/owner/repo/blob/main/file.ts",
-    );
+    const result = await extractContent("https://github.com/owner/repo/blob/main/file.ts");
     expect(result.extractionChain).toContain("http:200");
     expect(result.extractionChain).not.toContain("github:raw");
   });

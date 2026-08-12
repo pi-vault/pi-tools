@@ -1,5 +1,12 @@
-import { describe, expect, it } from "vitest";
-import { SSRFError, validateUrl } from "../../src/utils/ssrf.ts";
+import * as dns from "node:dns/promises";
+import { describe, expect, it, vi } from "vitest";
+import { SSRFError, validateUrl, validateUrlResolved } from "../../src/utils/ssrf.ts";
+
+function mockResolvedAddresses(addresses: Array<{ address: string; family: number }>): void {
+  vi.mocked(dns.lookup).mockResolvedValue(
+    addresses as unknown as Awaited<ReturnType<typeof dns.lookup>>,
+  );
+}
 
 describe("validateUrl", () => {
   it("allows valid HTTPS URLs", () => {
@@ -217,5 +224,46 @@ describe("validateUrl with allowedBaseUrls", () => {
         allowedBaseUrls: ["http://localhost:8080"],
       }),
     ).toThrow("credentials");
+  });
+});
+
+describe("validateUrlResolved", () => {
+  it("allows a hostname whose every resolved address is public", async () => {
+    mockResolvedAddresses([{ address: "93.184.216.34", family: 4 }]);
+
+    await expect(validateUrlResolved("https://example.com/path")).resolves.toBeInstanceOf(URL);
+  });
+
+  it("blocks a hostname resolving to a private address", async () => {
+    mockResolvedAddresses([{ address: "127.0.0.1", family: 4 }]);
+
+    await expect(validateUrlResolved("https://example.com/admin")).rejects.toThrow(SSRFError);
+  });
+
+  it("rejects DNS lookup failures", async () => {
+    vi.mocked(dns.lookup).mockRejectedValue(new Error("NXDOMAIN"));
+
+    await expect(validateUrlResolved("https://missing.example")).rejects.toThrow(SSRFError);
+  });
+
+  it("rejects mixed public and private answers", async () => {
+    mockResolvedAddresses([
+      { address: "93.184.216.34", family: 4 },
+      { address: "10.0.0.8", family: 4 },
+    ]);
+
+    await expect(validateUrlResolved("https://mixed.example")).rejects.toThrow(SSRFError);
+  });
+
+  it("checks IPv6 answers and honors configured ranges", async () => {
+    mockResolvedAddresses([{ address: "2001:db8::1", family: 6 }]);
+    await expect(validateUrlResolved("https://ipv6.example")).resolves.toBeInstanceOf(URL);
+
+    mockResolvedAddresses([{ address: "198.18.1.4", family: 4 }]);
+    await expect(
+      validateUrlResolved("https://benchmark.example", {
+        allowRanges: ["198.18.0.0/15"],
+      }),
+    ).resolves.toBeInstanceOf(URL);
   });
 });
