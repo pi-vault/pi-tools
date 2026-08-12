@@ -96,6 +96,15 @@ describe("TinyFishProvider", () => {
     expect(results[0].url).toBe("https://a.example");
   });
 
+  it("returns no Search results for non-positive maxResults", async () => {
+    fetchStub.addResponse("api.search.tinyfish.ai", {
+      body: { results: [{ title: "A", snippet: "a", url: "https://a.example" }] },
+    });
+
+    await expect(new TinyFishProvider("tiny-key").search("test", 0)).resolves.toEqual([]);
+    await expect(new TinyFishProvider("tiny-key").search("test", -1)).resolves.toEqual([]);
+  });
+
   it("uses empty strings for missing title/snippet in Search results", async () => {
     fetchStub.addResponse("api.search.tinyfish.ai", {
       body: {

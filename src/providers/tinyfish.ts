@@ -38,6 +38,8 @@ export class TinyFishProvider implements SearchProvider, FetchProvider {
     signal?: AbortSignal,
     filters?: SearchFilters,
   ): Promise<SearchResult[]> {
+    if (maxResults <= 0) return [];
+
     const url = new URL(SEARCH_ENDPOINT);
     url.searchParams.set("query", query);
     if (filters?.includeDomains?.length) {
