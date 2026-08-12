@@ -143,6 +143,7 @@ Provider configuration refreshes automatically every 30 seconds. The dashboard's
 | Serper            | Search                        | `SERPER_API_KEY`                   |
 | Sofya             | Search, fetch                 | `SOFYA_API_KEY`                    |
 | Tavily            | Search, fetch                 | `TAVILY_API_KEY`                   |
+| TinyFish          | Search, fetch                 | `TINYFISH_API_KEY`                 |
 | WebSearchAPI      | Search                        | `WEBSEARCHAPI_API_KEY`             |
 | You.com           | Search                        | `YOUCOM_API_KEY`                   |
 
@@ -275,6 +276,10 @@ The complete shape of the merged configuration. Every field shown here is honore
     "tavily": {
       "enabled": false,
       "apiKey": "TAVILY_API_KEY"
+    },
+    "tinyfish": {
+      "enabled": true,
+      "apiKey": "TINYFISH_API_KEY"
     },
     "websearchapi": {
       "enabled": false,
