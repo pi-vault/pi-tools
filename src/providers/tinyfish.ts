@@ -26,11 +26,8 @@ function validHttpUrl(value: unknown): value is string {
 export class TinyFishProvider implements SearchProvider, FetchProvider {
   readonly name = "tinyfish";
   readonly label = "TinyFish";
-  private readonly apiKey: string;
 
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
-  }
+  constructor(private readonly apiKey: string) {}
 
   async search(
     query: string,
