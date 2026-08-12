@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import { loadMergedConfig, resolveApiKey } from "../config.ts";
-import { validateUrl } from "../utils/ssrf.ts";
+import { SSRFError, validateUrl, validateUrlResolved } from "../utils/ssrf.ts";
 import { extractGitHub, parseGitHubUrl } from "./github.ts";
 import { extractHtml } from "./html.ts";
 import { extractPdf } from "./pdf.ts";
@@ -98,6 +98,41 @@ const HONEST_USER_AGENT = "pi-tools/0.3.0 (content extraction)";
 const MAX_SIZE_BYTES = 10 * 1024 * 1024; // 10MB for non-PDF
 const MAX_PDF_SIZE_BYTES = 50 * 1024 * 1024; // 50MB for PDF
 const HEAD_TIMEOUT_MS = 5_000;
+const MAX_REDIRECTS = 10;
+
+interface ValidatedFetchOptions {
+  allowRanges?: string[];
+}
+
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+async function fetchValidated(
+  url: string,
+  init: RequestInit,
+  opts: ValidatedFetchOptions,
+): Promise<Response> {
+  let current = url;
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await validateUrlResolved(current, { allowRanges: opts.allowRanges });
+    const response = await fetch(current, { ...init, redirect: "manual" });
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
+
+    const location = response.headers.get("location");
+    if (!location) return response;
+    if (hop === MAX_REDIRECTS) {
+      throw new SSRFError(`Too many redirects for ${url}`);
+    }
+
+    try {
+      current = new URL(location, current).toString();
+    } catch {
+      throw new SSRFError(`Invalid redirect location: ${location}`);
+    }
+  }
+
+  throw new SSRFError(`Too many redirects for ${url}`);
+}
 
 export interface ProbeResult {
   skip: boolean;
@@ -107,18 +142,23 @@ export interface ProbeResult {
 export async function probeUrl(
   url: string,
   signal?: AbortSignal,
+  allowRanges?: string[],
 ): Promise<ProbeResult> {
   let response: Response;
   try {
-    response = await fetch(url, {
-      method: "HEAD",
-      headers: BROWSER_HEADERS,
-      signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(HEAD_TIMEOUT_MS)])
-        : AbortSignal.timeout(HEAD_TIMEOUT_MS),
-      redirect: "follow",
-    });
-  } catch {
+    response = await fetchValidated(
+      url,
+      {
+        method: "HEAD",
+        headers: BROWSER_HEADERS,
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(HEAD_TIMEOUT_MS)])
+          : AbortSignal.timeout(HEAD_TIMEOUT_MS),
+      },
+      { allowRanges },
+    );
+  } catch (error) {
+    if (error instanceof SSRFError) throw error;
     return { skip: false };
   }
 
@@ -248,7 +288,7 @@ export async function extractContent(
   }
 
   // HEAD probe: skip binary / oversized responses before full GET
-  const probe = await probeUrl(url, signal);
+  const probe = await probeUrl(url, signal, ssrf.allowRanges);
   if (probe.skip) {
     throw new Error(`Skipped: ${probe.reason} (${url})`);
   }
@@ -258,14 +298,18 @@ export async function extractContent(
   const fetchEntryId = activityMonitor.logStart({ type: "fetch", url });
   let response: Response;
   try {
-    response = await fetch(url, {
-      headers: BROWSER_HEADERS,
-      signal,
-      redirect: "follow",
-    });
+    response = await fetchValidated(
+      url,
+      {
+        headers: BROWSER_HEADERS,
+        signal,
+      },
+      { allowRanges: ssrf.allowRanges },
+    );
     activityMonitor.logComplete(fetchEntryId, response.status);
   } catch (err) {
     activityMonitor.logError(fetchEntryId, err instanceof Error ? err.message : String(err));
+    if (err instanceof SSRFError) throw err;
     throw new RetryableExtractionError(err instanceof Error ? err.message : String(err));
   }
 
@@ -277,14 +321,18 @@ export async function extractContent(
     chain.push("cf-challenge");
     const retryEntryId = activityMonitor.logStart({ type: "fetch", url: `${url} (cf-retry)` });
     try {
-      response = await fetch(url, {
-        headers: { ...BROWSER_HEADERS, "User-Agent": HONEST_USER_AGENT },
-        signal,
-        redirect: "follow",
-      });
+      response = await fetchValidated(
+        url,
+        {
+          headers: { ...BROWSER_HEADERS, "User-Agent": HONEST_USER_AGENT },
+          signal,
+        },
+        { allowRanges: ssrf.allowRanges },
+      );
       activityMonitor.logComplete(retryEntryId, response.status);
     } catch (err) {
       activityMonitor.logError(retryEntryId, err instanceof Error ? err.message : String(err));
+      if (err instanceof SSRFError) throw err;
       throw new RetryableExtractionError(err instanceof Error ? err.message : String(err));
     }
   }
