@@ -21,8 +21,7 @@ export function parseBraveLlmResults(data: unknown): SearchResult[] {
   const g = d.grounding as { generic?: unknown };
   if (!Array.isArray(g.generic)) return [];
   return g.generic.map((entry: unknown) => {
-    if (!entry || typeof entry !== "object")
-      return { title: "", url: "", snippet: "" };
+    if (!entry || typeof entry !== "object") return { title: "", url: "", snippet: "" };
     const e = entry as Record<string, unknown>;
     const snippets = Array.isArray(e.snippets) ? (e.snippets as string[]) : [];
     return {
@@ -43,11 +42,7 @@ export function parseLinkupResults(data: unknown): SearchResult[] {
     return {
       title: (item.title as string) || "",
       url: (item.url as string) || "",
-      snippet: (
-        (item.content as string) ||
-        (item.snippet as string) ||
-        ""
-      ).slice(0, 500),
+      snippet: ((item.content as string) || (item.snippet as string) || "").slice(0, 500),
     };
   });
 }
@@ -62,11 +57,7 @@ export function parseFastcrwResults(data: unknown): SearchResult[] {
     return {
       title: (item.title as string) || "",
       url: (item.url as string) || "",
-      snippet: (
-        (item.description as string) ||
-        (item.snippet as string) ||
-        ""
-      ).slice(0, 500),
+      snippet: ((item.description as string) || (item.snippet as string) || "").slice(0, 500),
     };
   });
 }
@@ -78,9 +69,7 @@ export function parseYouComResults(data: unknown): SearchResult[] {
   if (!Array.isArray(rawHits)) return [];
   return rawHits.map((r: unknown) => {
     const item = r as Record<string, unknown>;
-    const snippets = Array.isArray(item.snippets)
-      ? (item.snippets as string[]).join(" ")
-      : "";
+    const snippets = Array.isArray(item.snippets) ? (item.snippets as string[]).join(" ") : "";
     return {
       title: (item.title as string) || "",
       url: (item.url as string) || "",
@@ -221,7 +210,9 @@ export function parseBraveResults(data: unknown): SearchResult[] {
 export function parseLangSearchResults(data: unknown): SearchResult[] {
   if (!data || typeof data !== "object") return [];
   const d = data as Record<string, unknown>;
-  const pages = (d.data as Record<string, unknown>)?.webPages as Record<string, unknown> | undefined;
+  const pages = (d.data as Record<string, unknown>)?.webPages as
+    | Record<string, unknown>
+    | undefined;
   const items = pages?.value ?? d.results ?? d.data ?? [];
   if (!Array.isArray(items)) return [];
   return items.map((r: unknown) => {

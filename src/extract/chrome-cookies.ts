@@ -142,10 +142,7 @@ export async function getGoogleCookies(options?: {
         if (!ALL_COOKIE_NAMES.has(name)) continue;
         if (cookies[name]) continue; // keep first (freshest, sorted by expires_utc DESC)
 
-        let value =
-          typeof row.value === "string" && row.value.length > 0
-            ? row.value
-            : null;
+        let value = typeof row.value === "string" && row.value.length > 0 ? row.value : null;
         if (!value) {
           const encrypted = row.encrypted_value;
           if (encrypted instanceof Uint8Array) {
@@ -182,11 +179,7 @@ export async function getGoogleCookies(options?: {
  * - Removes PKCS7 padding
  * - If stripHash is true (Chrome DB v24+), removes first 32 bytes of plaintext
  */
-function decryptCookieValue(
-  encrypted: Uint8Array,
-  key: Buffer,
-  stripHash: boolean,
-): string | null {
+function decryptCookieValue(encrypted: Uint8Array, key: Buffer, stripHash: boolean): string | null {
   const buf = Buffer.from(encrypted);
   if (buf.length < 3) return null;
 
@@ -200,13 +193,9 @@ function decryptCookieValue(
     const iv = Buffer.alloc(16, 0x20);
     const decipher = createDecipheriv("aes-128-cbc", key, iv);
     decipher.setAutoPadding(false);
-    const plaintext = Buffer.concat([
-      decipher.update(ciphertext),
-      decipher.final(),
-    ]);
+    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
     const unpadded = removePkcs7Padding(plaintext);
-    const bytes =
-      stripHash && unpadded.length >= 32 ? unpadded.subarray(32) : unpadded;
+    const bytes = stripHash && unpadded.length >= 32 ? unpadded.subarray(32) : unpadded;
     const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     // Strip leading control characters (< 0x20)
     let i = 0;
@@ -233,8 +222,7 @@ function readBrowserPassword(
   currentPlatform: string,
 ): Promise<string | null> {
   if (currentPlatform === "darwin") {
-    if (!config.keychainAccount || !config.keychainService)
-      return Promise.resolve(null);
+    if (!config.keychainAccount || !config.keychainService) return Promise.resolve(null);
     return readKeychainPassword(config.keychainAccount, config.keychainService);
   }
   if (currentPlatform === "linux") {
@@ -243,10 +231,7 @@ function readBrowserPassword(
   return Promise.resolve(null);
 }
 
-function readKeychainPassword(
-  account: string,
-  service: string,
-): Promise<string | null> {
+function readKeychainPassword(account: string, service: string): Promise<string | null> {
   return new Promise((resolve) => {
     execFile(
       "security",
@@ -300,8 +285,7 @@ async function importSqlite(): Promise<typeof import("node:sqlite") | null> {
   // Suppress the ExperimentalWarning for SQLite
   const orig = process.emitWarning.bind(process);
   process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
-    const msg =
-      typeof warning === "string" ? warning : (warning?.message ?? "");
+    const msg = typeof warning === "string" ? warning : (warning?.message ?? "");
     if (msg.includes("SQLite is an experimental feature")) return;
     return (orig as (...a: unknown[]) => void)(warning, ...args);
   }) as typeof process.emitWarning;
@@ -341,9 +325,9 @@ async function readMetaVersion(dbPath: string): Promise<number> {
   const db = new sqlite.DatabaseSync(dbPath, opts);
 
   try {
-    const rows = db
-      .prepare("SELECT value FROM meta WHERE key = 'version'")
-      .all() as Array<Record<string, unknown>>;
+    const rows = db.prepare("SELECT value FROM meta WHERE key = 'version'").all() as Array<
+      Record<string, unknown>
+    >;
     const val = rows[0]?.value;
     if (typeof val === "number") return Math.floor(val);
     if (typeof val === "bigint") return Number(val);

@@ -8,9 +8,7 @@
  * uses its built-in web search — no API call from us, no quota cost.
  */
 
-export function isOpenAiModel(
-  model: { provider?: string } | undefined,
-): boolean {
+export function isOpenAiModel(model: { provider?: string } | undefined): boolean {
   if (!model) return false;
   const provider = (model.provider ?? "").toLowerCase();
   return provider === "openai" || provider.startsWith("openai-");

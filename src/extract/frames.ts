@@ -38,7 +38,9 @@ function isTimeoutError(err: unknown): boolean {
   const name = (err as { name?: string }).name;
   const code = (err as { code?: string }).code;
   const message = (err as { message?: string }).message ?? "";
-  return name === "AbortError" || code === "ETIMEDOUT" || message.toLowerCase().includes("timed out");
+  return (
+    name === "AbortError" || code === "ETIMEDOUT" || message.toLowerCase().includes("timed out")
+  );
 }
 
 function trimErrorText(text: string, maxLen = 200): string {
@@ -189,9 +191,8 @@ export async function getYouTubeStreamInfo(
     const rawDuration = lines[0]?.trim();
     const streamUrl = lines[1]?.trim();
     if (!streamUrl) return { error: "yt-dlp failed: missing stream URL" };
-    const parsedDuration = rawDuration && rawDuration !== "NA"
-      ? Number.parseFloat(rawDuration)
-      : Number.NaN;
+    const parsedDuration =
+      rawDuration && rawDuration !== "NA" ? Number.parseFloat(rawDuration) : Number.NaN;
     const duration = Number.isFinite(parsedDuration) ? parsedDuration : null;
     return { streamUrl, duration };
   } catch (err) {
@@ -203,9 +204,7 @@ export async function getYouTubeStreamInfo(
  * Get the duration of a local video file using ffprobe.
  * Runs: ffprobe -v quiet -show_entries format=duration -of csv=p=0 <filePath>
  */
-export async function getLocalVideoDuration(
-  filePath: string,
-): Promise<number | { error: string }> {
+export async function getLocalVideoDuration(filePath: string): Promise<number | { error: string }> {
   try {
     const output = execFileSync(
       "ffprobe",
@@ -235,11 +234,16 @@ function extractSingleFrame(source: string, timestampSec: number): Buffer | stri
     const buffer = execFileSync(
       "ffmpeg",
       [
-        "-ss", String(timestampSec),
-        "-i", source,
-        "-frames:v", "1",
-        "-f", "image2pipe",
-        "-vcodec", "mjpeg",
+        "-ss",
+        String(timestampSec),
+        "-i",
+        source,
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
         "pipe:1",
       ],
       {
@@ -258,7 +262,10 @@ function extractSingleFrame(source: string, timestampSec: number): Buffer | stri
 
 /** Shared loop: extract frames from a source, return partial results on failure. */
 function collectFrames(
-  source: string, timestamps: number[], duration: number | null, signal?: AbortSignal,
+  source: string,
+  timestamps: number[],
+  duration: number | null,
+  signal?: AbortSignal,
 ): { frames: VideoFrame[]; duration: number | null; error: string | null } {
   const frames: VideoFrame[] = [];
   let firstError: string | null = null;
@@ -266,12 +273,20 @@ function collectFrames(
     if (signal?.aborted) break;
     const result = extractSingleFrame(source, t);
     if (Buffer.isBuffer(result)) {
-      frames.push({ data: result.toString("base64"), mimeType: "image/jpeg", timestamp: formatSeconds(t) });
+      frames.push({
+        data: result.toString("base64"),
+        mimeType: "image/jpeg",
+        timestamp: formatSeconds(t),
+      });
     } else if (!firstError) {
       firstError = result;
     }
   }
-  return { frames, duration, error: frames.length === 0 ? (firstError ?? "All frames failed to extract") : null };
+  return {
+    frames,
+    duration,
+    error: frames.length === 0 ? (firstError ?? "All frames failed to extract") : null,
+  };
 }
 
 /**

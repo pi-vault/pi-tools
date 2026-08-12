@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  detectCapabilities,
-  resetCapabilitiesCache,
-} from "../../src/utils/capabilities.ts";
+import { detectCapabilities, resetCapabilitiesCache } from "../../src/utils/capabilities.ts";
 import * as childProcess from "node:child_process";
 
 vi.mock("node:child_process", () => ({

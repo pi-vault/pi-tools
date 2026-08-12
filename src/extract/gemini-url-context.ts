@@ -66,10 +66,11 @@ export async function extractWithUrlContext(
       }
     }
 
-    const text = data.candidates?.[0]?.content?.parts
-      ?.map((p) => p.text)
-      .filter(Boolean)
-      .join("\n") ?? "";
+    const text =
+      data.candidates?.[0]?.content?.parts
+        ?.map((p) => p.text)
+        .filter(Boolean)
+        .join("\n") ?? "";
 
     if (!text || text.length < MIN_CONTENT_LENGTH) return null;
 

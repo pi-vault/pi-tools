@@ -9,11 +9,12 @@ describe("probeUrl", () => {
   });
 
   it("returns skip: true for binary content type (image/png)", async () => {
-    globalThis.fetch = vi.fn(async () =>
-      new Response(null, {
-        status: 200,
-        headers: { "content-type": "image/png", "content-length": "1024" },
-      }),
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 200,
+          headers: { "content-type": "image/png", "content-length": "1024" },
+        }),
     ) as unknown as typeof fetch;
 
     const result = await probeUrl("https://example.com/photo.png");
@@ -22,11 +23,12 @@ describe("probeUrl", () => {
   });
 
   it("returns skip: true for application/octet-stream", async () => {
-    globalThis.fetch = vi.fn(async () =>
-      new Response(null, {
-        status: 200,
-        headers: { "content-type": "application/octet-stream", "content-length": "2048" },
-      }),
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 200,
+          headers: { "content-type": "application/octet-stream", "content-length": "2048" },
+        }),
     ) as unknown as typeof fetch;
 
     const result = await probeUrl("https://example.com/file.bin");
@@ -35,11 +37,12 @@ describe("probeUrl", () => {
   });
 
   it("returns skip: false for text/html", async () => {
-    globalThis.fetch = vi.fn(async () =>
-      new Response(null, {
-        status: 200,
-        headers: { "content-type": "text/html", "content-length": "5000" },
-      }),
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 200,
+          headers: { "content-type": "text/html", "content-length": "5000" },
+        }),
     ) as unknown as typeof fetch;
 
     const result = await probeUrl("https://example.com/page");
@@ -47,8 +50,8 @@ describe("probeUrl", () => {
   });
 
   it("returns skip: false when HEAD returns 405", async () => {
-    globalThis.fetch = vi.fn(async () =>
-      new Response(null, { status: 405 }),
+    globalThis.fetch = vi.fn(
+      async () => new Response(null, { status: 405 }),
     ) as unknown as typeof fetch;
 
     const result = await probeUrl("https://example.com/page");
@@ -65,11 +68,12 @@ describe("probeUrl", () => {
   });
 
   it("returns skip: true for non-PDF content over 10MB", async () => {
-    globalThis.fetch = vi.fn(async () =>
-      new Response(null, {
-        status: 200,
-        headers: { "content-type": "text/html", "content-length": String(11 * 1024 * 1024) },
-      }),
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 200,
+          headers: { "content-type": "text/html", "content-length": String(11 * 1024 * 1024) },
+        }),
     ) as unknown as typeof fetch;
 
     const result = await probeUrl("https://example.com/huge");
@@ -78,11 +82,15 @@ describe("probeUrl", () => {
   });
 
   it("allows PDF under 50MB", async () => {
-    globalThis.fetch = vi.fn(async () =>
-      new Response(null, {
-        status: 200,
-        headers: { "content-type": "application/pdf", "content-length": String(30 * 1024 * 1024) },
-      }),
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 200,
+          headers: {
+            "content-type": "application/pdf",
+            "content-length": String(30 * 1024 * 1024),
+          },
+        }),
     ) as unknown as typeof fetch;
 
     const result = await probeUrl("https://example.com/doc.pdf");
@@ -90,11 +98,15 @@ describe("probeUrl", () => {
   });
 
   it("returns skip: true for PDF over 50MB", async () => {
-    globalThis.fetch = vi.fn(async () =>
-      new Response(null, {
-        status: 200,
-        headers: { "content-type": "application/pdf", "content-length": String(55 * 1024 * 1024) },
-      }),
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 200,
+          headers: {
+            "content-type": "application/pdf",
+            "content-length": String(55 * 1024 * 1024),
+          },
+        }),
     ) as unknown as typeof fetch;
 
     const result = await probeUrl("https://example.com/huge.pdf");

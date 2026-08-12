@@ -70,10 +70,7 @@ function isCloudflareGateway(): boolean {
   }
 }
 
-function withTimeout(
-  signal: AbortSignal | undefined,
-  timeoutMs: number,
-): AbortSignal {
+function withTimeout(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
   const timeout = AbortSignal.timeout(timeoutMs);
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
@@ -150,9 +147,7 @@ export function isGeminiApiAvailable(): boolean {
 function buildAuthHeaders(): Record<string, string> {
   if (!isCloudflareGateway()) return {};
   const cloudflareApiKey = getCloudflareApiKey();
-  return cloudflareApiKey
-    ? { "cf-aig-authorization": `Bearer ${cloudflareApiKey}` }
-    : {};
+  return cloudflareApiKey ? { "cf-aig-authorization": `Bearer ${cloudflareApiKey}` } : {};
 }
 
 /**
@@ -215,9 +210,7 @@ export async function queryGeminiApi(
   if (!res.ok) {
     activityMonitor.logError(entryId, `HTTP ${res.status}`);
     const errorText = await res.text();
-    throw new Error(
-      `Gemini API error ${res.status}: ${errorText.slice(0, 300)}`,
-    );
+    throw new Error(`Gemini API error ${res.status}: ${errorText.slice(0, 300)}`);
   } else {
     activityMonitor.logComplete(entryId, res.status);
   }

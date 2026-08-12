@@ -49,13 +49,7 @@ function buildMockStreamResponse(text: string): string {
  */
 function buildMultiPartStreamResponse(texts: string[]): string {
   const parts = texts.map((text) => {
-    const innerPayload = JSON.stringify([
-      null,
-      null,
-      null,
-      null,
-      [[null, [text]]],
-    ]);
+    const innerPayload = JSON.stringify([null, null, null, null, [[null, [text]]]]);
     return [null, null, innerPayload];
   });
   return JSON.stringify(parts);
@@ -100,18 +94,14 @@ describe("gemini-web", () => {
     it("returns null when cookie access is not allowed (env var absent)", async () => {
       vi.stubEnv("PI_ALLOW_BROWSER_COOKIES", "");
 
-      const { isGeminiWebAvailable } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
+      const { isGeminiWebAvailable } = await import("../../src/extract/gemini-web.ts");
       expect(await isGeminiWebAvailable()).toBeNull();
     });
 
     it("returns cookie map when access is allowed and cookies exist", async () => {
       vi.stubEnv("PI_ALLOW_BROWSER_COOKIES", "1");
 
-      const { getGoogleCookies } = await import(
-        "../../src/extract/chrome-cookies.ts"
-      );
+      const { getGoogleCookies } = await import("../../src/extract/chrome-cookies.ts");
       (getGoogleCookies as ReturnType<typeof vi.fn>).mockResolvedValue({
         cookies: {
           "__Secure-1PSID": "sid-value",
@@ -120,9 +110,7 @@ describe("gemini-web", () => {
         warnings: [],
       });
 
-      const { isGeminiWebAvailable } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
+      const { isGeminiWebAvailable } = await import("../../src/extract/gemini-web.ts");
       const result = await isGeminiWebAvailable();
       expect(result).toEqual({
         "__Secure-1PSID": "sid-value",
@@ -133,14 +121,10 @@ describe("gemini-web", () => {
     it("returns null when cookies cannot be extracted", async () => {
       vi.stubEnv("PI_ALLOW_BROWSER_COOKIES", "1");
 
-      const { getGoogleCookies } = await import(
-        "../../src/extract/chrome-cookies.ts"
-      );
+      const { getGoogleCookies } = await import("../../src/extract/chrome-cookies.ts");
       (getGoogleCookies as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
-      const { isGeminiWebAvailable } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
+      const { isGeminiWebAvailable } = await import("../../src/extract/gemini-web.ts");
       expect(await isGeminiWebAvailable()).toBeNull();
     });
   });
@@ -165,9 +149,7 @@ describe("gemini-web", () => {
         body: buildMockStreamResponse("Hello from Gemini!"),
       });
 
-      const { queryWithCookies } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
+      const { queryWithCookies } = await import("../../src/extract/gemini-web.ts");
       const result = await queryWithCookies("test prompt", mockCookies);
       expect(result).toBe("Hello from Gemini!");
     });
@@ -181,9 +163,7 @@ describe("gemini-web", () => {
         body: buildMockStreamResponse("Video summary"),
       });
 
-      const { queryWithCookies } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
+      const { queryWithCookies } = await import("../../src/extract/gemini-web.ts");
       await queryWithCookies("summarize", mockCookies, {
         youtubeUrl: "https://youtube.com/watch?v=abc123",
       });
@@ -192,8 +172,7 @@ describe("gemini-web", () => {
       const fetchCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
       const streamCall = fetchCalls.find(
         (call: unknown[]) =>
-          typeof call[0] === "string" &&
-          (call[0] as string).includes("BardChatUi"),
+          typeof call[0] === "string" && (call[0] as string).includes("BardChatUi"),
       );
       expect(streamCall).toBeDefined();
       const body = streamCall![1].body as string;
@@ -209,16 +188,13 @@ describe("gemini-web", () => {
         body: buildMockStreamResponse("response"),
       });
 
-      const { queryWithCookies } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
+      const { queryWithCookies } = await import("../../src/extract/gemini-web.ts");
       await queryWithCookies("test", mockCookies, { model: "gemini-2.5-pro" });
 
       const fetchCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
       const streamCall = fetchCalls.find(
         (call: unknown[]) =>
-          typeof call[0] === "string" &&
-          (call[0] as string).includes("BardChatUi"),
+          typeof call[0] === "string" && (call[0] as string).includes("BardChatUi"),
       );
       expect(streamCall).toBeDefined();
       expect(streamCall![1].headers["x-goog-ext-525001261-jspb"]).toBe(
@@ -235,16 +211,13 @@ describe("gemini-web", () => {
         body: buildMockStreamResponse("response"),
       });
 
-      const { queryWithCookies } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
+      const { queryWithCookies } = await import("../../src/extract/gemini-web.ts");
       await queryWithCookies("test", mockCookies, { model: "gemini-unknown" });
 
       const fetchCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
       const streamCall = fetchCalls.find(
         (call: unknown[]) =>
-          typeof call[0] === "string" &&
-          (call[0] as string).includes("BardChatUi"),
+          typeof call[0] === "string" && (call[0] as string).includes("BardChatUi"),
       );
       // flash header used when model is unknown
       expect(streamCall![1].headers["x-goog-ext-525001261-jspb"]).toBe(
@@ -258,12 +231,10 @@ describe("gemini-web", () => {
         headers: { "content-type": "text/html" },
       });
 
-      const { queryWithCookies } = await import(
-        "../../src/extract/gemini-web.ts"
+      const { queryWithCookies } = await import("../../src/extract/gemini-web.ts");
+      await expect(queryWithCookies("test", mockCookies)).rejects.toThrow(
+        "Unable to authenticate with Gemini",
       );
-      await expect(
-        queryWithCookies("test", mockCookies),
-      ).rejects.toThrow("Unable to authenticate with Gemini");
     });
 
     it("throws on non-2xx response from StreamGenerate", async () => {
@@ -276,12 +247,10 @@ describe("gemini-web", () => {
         body: "Rate limited",
       });
 
-      const { queryWithCookies } = await import(
-        "../../src/extract/gemini-web.ts"
+      const { queryWithCookies } = await import("../../src/extract/gemini-web.ts");
+      await expect(queryWithCookies("test", mockCookies)).rejects.toThrow(
+        "Gemini Web request failed: 429",
       );
-      await expect(
-        queryWithCookies("test", mockCookies),
-      ).rejects.toThrow("Gemini Web request failed: 429");
     });
 
     it("sends required headers (x-same-domain, user-agent, host, cookie)", async () => {
@@ -293,16 +262,13 @@ describe("gemini-web", () => {
         body: buildMockStreamResponse("response"),
       });
 
-      const { queryWithCookies } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
+      const { queryWithCookies } = await import("../../src/extract/gemini-web.ts");
       await queryWithCookies("test", mockCookies);
 
       const fetchCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
       const streamCall = fetchCalls.find(
         (call: unknown[]) =>
-          typeof call[0] === "string" &&
-          (call[0] as string).includes("BardChatUi"),
+          typeof call[0] === "string" && (call[0] as string).includes("BardChatUi"),
       );
       const headers = streamCall![1].headers;
       expect(headers["x-same-domain"]).toBe("1");
@@ -319,27 +285,21 @@ describe("gemini-web", () => {
 
       // Replace fetch with one that hangs until signal aborts
       fetchStub.restore();
-      globalThis.fetch = vi.fn(
-        async (url: string | URL, init?: RequestInit) => {
-          const urlStr = url instanceof URL ? url.href : url;
-          if (urlStr.includes("gemini.google.com/app")) {
-            return new Response(`"SNlM0e":"token"`, { status: 200 });
-          }
-          await new Promise((_, reject) => {
-            init?.signal?.addEventListener("abort", () => {
-              reject(new DOMException("Aborted", "AbortError"));
-            });
+      globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const urlStr = url instanceof URL ? url.href : url;
+        if (urlStr.includes("gemini.google.com/app")) {
+          return new Response(`"SNlM0e":"token"`, { status: 200 });
+        }
+        await new Promise((_, reject) => {
+          init?.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
           });
-          return new Response("", { status: 200 });
-        },
-      ) as unknown as typeof fetch;
+        });
+        return new Response("", { status: 200 });
+      }) as unknown as typeof fetch;
 
-      const { queryWithCookies } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
-      await expect(
-        queryWithCookies("test", mockCookies, { timeoutMs: 50 }),
-      ).rejects.toThrow();
+      const { queryWithCookies } = await import("../../src/extract/gemini-web.ts");
+      await expect(queryWithCookies("test", mockCookies, { timeoutMs: 50 })).rejects.toThrow();
     });
 
     it("retries with gemini-2.5-flash when model returns error code 1052", async () => {
@@ -347,33 +307,26 @@ describe("gemini-web", () => {
       // returns 1052 error, second returns success with flash.
       fetchStub.restore();
       let streamCallCount = 0;
-      globalThis.fetch = vi.fn(
-        async (url: string | URL, init?: RequestInit) => {
-          const urlStr = url instanceof URL ? url.href : url;
-          if (urlStr.includes("gemini.google.com/app")) {
-            return new Response(`"SNlM0e":"token"`, { status: 200 });
+      globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const urlStr = url instanceof URL ? url.href : url;
+        if (urlStr.includes("gemini.google.com/app")) {
+          return new Response(`"SNlM0e":"token"`, { status: 200 });
+        }
+        if (urlStr.includes("BardChatUi")) {
+          streamCallCount++;
+          if (streamCallCount === 1) {
+            // First call: error code 1052 (model unavailable)
+            return new Response(buildMockErrorResponse(1052), {
+              status: 200,
+            });
           }
-          if (urlStr.includes("BardChatUi")) {
-            streamCallCount++;
-            if (streamCallCount === 1) {
-              // First call: error code 1052 (model unavailable)
-              return new Response(buildMockErrorResponse(1052), {
-                status: 200,
-              });
-            }
-            // Second call (fallback): success
-            return new Response(
-              buildMockStreamResponse("Fallback response"),
-              { status: 200 },
-            );
-          }
-          return new Response("Not Found", { status: 404 });
-        },
-      ) as unknown as typeof fetch;
+          // Second call (fallback): success
+          return new Response(buildMockStreamResponse("Fallback response"), { status: 200 });
+        }
+        return new Response("Not Found", { status: 404 });
+      }) as unknown as typeof fetch;
 
-      const { queryWithCookies } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
+      const { queryWithCookies } = await import("../../src/extract/gemini-web.ts");
       const result = await queryWithCookies("test", mockCookies, {
         model: "gemini-2.5-pro",
       });
@@ -381,12 +334,10 @@ describe("gemini-web", () => {
       expect(streamCallCount).toBe(2);
 
       // Verify second call used flash model header
-      const fetchCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock
-        .calls;
+      const fetchCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
       const streamCalls = fetchCalls.filter(
         (call: unknown[]) =>
-          typeof call[0] === "string" &&
-          (call[0] as string).includes("BardChatUi"),
+          typeof call[0] === "string" && (call[0] as string).includes("BardChatUi"),
       );
       expect(streamCalls[1]![1].headers["x-goog-ext-525001261-jspb"]).toBe(
         '[1,null,null,null,"9ec249fc9ad08861",null,null,0,[4]]',
@@ -396,57 +347,44 @@ describe("gemini-web", () => {
     it("follows redirects preserving cookies during token fetch", async () => {
       // Replace fetch to simulate a 302 redirect on the token page.
       fetchStub.restore();
-      globalThis.fetch = vi.fn(
-        async (url: string | URL, init?: RequestInit) => {
-          const urlStr = url instanceof URL ? url.href : url;
-          if (urlStr === "https://gemini.google.com/app") {
-            // First fetch: 302 redirect
-            return new Response("", {
-              status: 302,
-              headers: { location: "https://accounts.google.com/auth-bounce" },
-            });
-          }
-          if (urlStr === "https://accounts.google.com/auth-bounce") {
-            // Second fetch: 302 redirect back
-            return new Response("", {
-              status: 302,
-              headers: {
-                location: "https://gemini.google.com/app?authuser=0",
-              },
-            });
-          }
-          if (urlStr.includes("gemini.google.com/app?authuser=0")) {
-            // Final fetch: returns the page with the token
-            return new Response(`"SNlM0e":"redirect-token"`, { status: 200 });
-          }
-          if (urlStr.includes("BardChatUi")) {
-            return new Response(
-              buildMockStreamResponse("After redirect"),
-              { status: 200 },
-            );
-          }
-          return new Response("Not Found", { status: 404 });
-        },
-      ) as unknown as typeof fetch;
+      globalThis.fetch = vi.fn(async (url: string | URL, init?: RequestInit) => {
+        const urlStr = url instanceof URL ? url.href : url;
+        if (urlStr === "https://gemini.google.com/app") {
+          // First fetch: 302 redirect
+          return new Response("", {
+            status: 302,
+            headers: { location: "https://accounts.google.com/auth-bounce" },
+          });
+        }
+        if (urlStr === "https://accounts.google.com/auth-bounce") {
+          // Second fetch: 302 redirect back
+          return new Response("", {
+            status: 302,
+            headers: {
+              location: "https://gemini.google.com/app?authuser=0",
+            },
+          });
+        }
+        if (urlStr.includes("gemini.google.com/app?authuser=0")) {
+          // Final fetch: returns the page with the token
+          return new Response(`"SNlM0e":"redirect-token"`, { status: 200 });
+        }
+        if (urlStr.includes("BardChatUi")) {
+          return new Response(buildMockStreamResponse("After redirect"), { status: 200 });
+        }
+        return new Response("Not Found", { status: 404 });
+      }) as unknown as typeof fetch;
 
-      const { queryWithCookies } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
+      const { queryWithCookies } = await import("../../src/extract/gemini-web.ts");
       const result = await queryWithCookies("test", mockCookies);
       expect(result).toBe("After redirect");
 
       // Verify all 3 token-page fetches had the cookie header
-      const fetchCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock
-        .calls;
-      const tokenCalls = fetchCalls.filter(
-        (call: unknown[]) => {
-          const u = typeof call[0] === "string" ? call[0] : "";
-          return (
-            u.includes("gemini.google.com/app") ||
-            u.includes("accounts.google.com/auth-bounce")
-          );
-        },
-      );
+      const fetchCalls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls;
+      const tokenCalls = fetchCalls.filter((call: unknown[]) => {
+        const u = typeof call[0] === "string" ? call[0] : "";
+        return u.includes("gemini.google.com/app") || u.includes("accounts.google.com/auth-bounce");
+      });
       expect(tokenCalls.length).toBe(3);
       for (const call of tokenCalls) {
         expect(call[1].headers.cookie).toContain("__Secure-1PSID=test-sid");
@@ -459,16 +397,10 @@ describe("gemini-web", () => {
         headers: { "content-type": "text/html" },
       });
       fetchStub.addResponse("BardChatUi", {
-        body: buildMultiPartStreamResponse([
-          "First chunk",
-          "Second chunk",
-          "Final answer",
-        ]),
+        body: buildMultiPartStreamResponse(["First chunk", "Second chunk", "Final answer"]),
       });
 
-      const { queryWithCookies } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
+      const { queryWithCookies } = await import("../../src/extract/gemini-web.ts");
       const result = await queryWithCookies("test", mockCookies);
       expect(result).toBe("Final answer");
     });
@@ -489,9 +421,7 @@ describe("gemini-web", () => {
         body: buildMockStreamResponse("File analyzed"),
       });
 
-      const { queryWithCookies } = await import(
-        "../../src/extract/gemini-web.ts"
-      );
+      const { queryWithCookies } = await import("../../src/extract/gemini-web.ts");
       const result = await queryWithCookies("analyze this", mockCookies, {
         files: ["/tmp/test.png"],
       });

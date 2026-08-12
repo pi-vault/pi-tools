@@ -129,11 +129,7 @@ function counterKey(name: string, budget: Extract<ProviderBudget, { mode: "hard"
 }
 
 export class BudgetExceededError extends Error {
-  constructor(
-    providerName: string,
-    cost: number,
-    status: Extract<BudgetStatus, { mode: "hard" }>,
-  ) {
+  constructor(providerName: string, cost: number, status: Extract<BudgetStatus, { mode: "hard" }>) {
     super(
       `${providerName} budget exceeded: ${status.used}/${status.limit} ${status.unit} used; operation costs ${cost}`,
     );

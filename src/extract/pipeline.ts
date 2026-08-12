@@ -62,7 +62,11 @@ export type ImageBlock = { type: "image"; data: string; mimeType: string };
 export function collectImageBlocks(extracted: ExtractedContent): ImageBlock[] {
   const blocks: ImageBlock[] = [];
   if (extracted.thumbnail) {
-    blocks.push({ type: "image", data: extracted.thumbnail.data, mimeType: extracted.thumbnail.mimeType });
+    blocks.push({
+      type: "image",
+      data: extracted.thumbnail.data,
+      mimeType: extracted.thumbnail.mimeType,
+    });
   }
   if (extracted.frames) {
     for (const frame of extracted.frames) {
@@ -100,21 +104,17 @@ const MAX_PDF_SIZE_BYTES = 50 * 1024 * 1024; // 50MB for PDF
 const HEAD_TIMEOUT_MS = 5_000;
 const MAX_REDIRECTS = 10;
 
-interface ValidatedFetchOptions {
-  allowRanges?: string[];
-}
-
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 async function fetchValidated(
   url: string,
   init: RequestInit,
-  opts: ValidatedFetchOptions,
+  allowRanges?: string[],
 ): Promise<Response> {
   let current = url;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    await validateUrlResolved(current, { allowRanges: opts.allowRanges });
+    await validateUrlResolved(current, { allowRanges });
     const response = await fetch(current, { ...init, redirect: "manual" });
     if (!REDIRECT_STATUSES.has(response.status)) return response;
 
@@ -155,7 +155,7 @@ export async function probeUrl(
           ? AbortSignal.any([signal, AbortSignal.timeout(HEAD_TIMEOUT_MS)])
           : AbortSignal.timeout(HEAD_TIMEOUT_MS),
       },
-      { allowRanges },
+      allowRanges,
     );
   } catch (error) {
     if (error instanceof SSRFError) throw error;
@@ -304,7 +304,7 @@ export async function extractContent(
         headers: BROWSER_HEADERS,
         signal,
       },
-      { allowRanges: ssrf.allowRanges },
+      ssrf.allowRanges,
     );
     activityMonitor.logComplete(fetchEntryId, response.status);
   } catch (err) {
@@ -314,10 +314,7 @@ export async function extractContent(
   }
 
   // Cloudflare bot challenge: retry once with honest User-Agent
-  if (
-    response.status === 403 &&
-    response.headers.get("cf-mitigated") === "challenge"
-  ) {
+  if (response.status === 403 && response.headers.get("cf-mitigated") === "challenge") {
     chain.push("cf-challenge");
     const retryEntryId = activityMonitor.logStart({ type: "fetch", url: `${url} (cf-retry)` });
     try {
@@ -327,7 +324,7 @@ export async function extractContent(
           headers: { ...BROWSER_HEADERS, "User-Agent": HONEST_USER_AGENT },
           signal,
         },
-        { allowRanges: ssrf.allowRanges },
+        ssrf.allowRanges,
       );
       activityMonitor.logComplete(retryEntryId, response.status);
     } catch (err) {

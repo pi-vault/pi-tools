@@ -116,7 +116,12 @@ describe("extractTextWithGeminiVision", () => {
     }) as unknown as typeof fetch;
 
     const images = [
-      { type: "image" as const, mimeType: "image/png" as const, data: "base64data==", pageNumber: 1 },
+      {
+        type: "image" as const,
+        mimeType: "image/png" as const,
+        data: "base64data==",
+        pageNumber: 1,
+      },
     ];
     const result = await extractTextWithGeminiVision(images, "test-api-key");
     expect(result).toContain("Invoice #12345");
@@ -133,7 +138,12 @@ describe("extractTextWithGeminiVision", () => {
     }) as unknown as typeof fetch;
 
     const images = [
-      { type: "image" as const, mimeType: "image/png" as const, data: "base64data==", pageNumber: 1 },
+      {
+        type: "image" as const,
+        mimeType: "image/png" as const,
+        data: "base64data==",
+        pageNumber: 1,
+      },
     ];
     const result = await extractTextWithGeminiVision(images, "test-api-key");
     expect(result).toBeNull();
@@ -148,7 +158,12 @@ describe("extractTextWithGeminiVision", () => {
     }) as unknown as typeof fetch;
 
     const images = [
-      { type: "image" as const, mimeType: "image/png" as const, data: "base64data==", pageNumber: 1 },
+      {
+        type: "image" as const,
+        mimeType: "image/png" as const,
+        data: "base64data==",
+        pageNumber: 1,
+      },
     ];
     const result = await extractTextWithGeminiVision(images, "test-api-key");
     expect(result).toBeNull();
@@ -166,7 +181,12 @@ describe("extractTextWithGeminiVision", () => {
     }) as unknown as typeof fetch;
 
     const images = [
-      { type: "image" as const, mimeType: "image/png" as const, data: "base64data==", pageNumber: 1 },
+      {
+        type: "image" as const,
+        mimeType: "image/png" as const,
+        data: "base64data==",
+        pageNumber: 1,
+      },
     ];
     const result = await extractTextWithGeminiVision(
       images,

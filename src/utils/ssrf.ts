@@ -146,10 +146,7 @@ export function validateUrl(url: string, opts?: ValidateUrlOptions): URL {
   return parsed;
 }
 
-export async function validateUrlResolved(
-  url: string,
-  opts?: ValidateUrlOptions,
-): Promise<URL> {
+export async function validateUrlResolved(url: string, opts?: ValidateUrlOptions): Promise<URL> {
   const parsed = validateUrl(url, opts);
   const allowed = Boolean(
     opts?.allowedBaseUrls?.length && matchesAllowedBase(parsed, opts.allowedBaseUrls),

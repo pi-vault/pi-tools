@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  formatEntryLine,
-  renderWidgetLines,
-} from "../../src/monitor/widget.ts";
+import { formatEntryLine, renderWidgetLines } from "../../src/monitor/widget.ts";
 import type { ActivityEntry } from "../../src/monitor/activity-monitor.ts";
 
 // Stub theme: no-op coloring (returns text unchanged)

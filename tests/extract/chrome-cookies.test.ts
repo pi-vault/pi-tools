@@ -50,11 +50,7 @@ function encryptCookieValue(
   const key = pbkdf2Sync(password, "saltysalt", iterations, 16, "sha1");
   const iv = Buffer.alloc(16, 0x20);
   const enc = createCipheriv("aes-128-cbc", key, iv);
-  return Buffer.concat([
-    Buffer.from(prefix),
-    enc.update(plaintext, "utf8"),
-    enc.final(),
-  ]);
+  return Buffer.concat([Buffer.from(prefix), enc.update(plaintext, "utf8"), enc.final()]);
 }
 
 describe("chrome-cookies", () => {
@@ -102,18 +98,14 @@ describe("chrome-cookies", () => {
     it("returns null when no browser cookie DB exists", async () => {
       fsMock.existsSync.mockReturnValue(false);
 
-      const { getGoogleCookies } = await import(
-        "../../src/extract/chrome-cookies.ts"
-      );
+      const { getGoogleCookies } = await import("../../src/extract/chrome-cookies.ts");
       expect(await getGoogleCookies()).toBeNull();
     });
 
     it("returns null on unsupported platform", async () => {
       osMock.platform.mockReturnValue("win32");
 
-      const { getGoogleCookies } = await import(
-        "../../src/extract/chrome-cookies.ts"
-      );
+      const { getGoogleCookies } = await import("../../src/extract/chrome-cookies.ts");
       expect(await getGoogleCookies()).toBeNull();
     });
 
@@ -129,14 +121,22 @@ describe("chrome-cookies", () => {
         callCount++;
         if (callCount === 1) return [{ value: 20 }]; // readMetaVersion
         return [
-          { name: "__Secure-1PSID", value: "plain-sid", host_key: ".google.com", encrypted_value: new Uint8Array(0) },
-          { name: "__Secure-1PSIDTS", value: "plain-sidts", host_key: ".google.com", encrypted_value: new Uint8Array(0) },
+          {
+            name: "__Secure-1PSID",
+            value: "plain-sid",
+            host_key: ".google.com",
+            encrypted_value: new Uint8Array(0),
+          },
+          {
+            name: "__Secure-1PSIDTS",
+            value: "plain-sidts",
+            host_key: ".google.com",
+            encrypted_value: new Uint8Array(0),
+          },
         ];
       });
 
-      const { getGoogleCookies } = await import(
-        "../../src/extract/chrome-cookies.ts"
-      );
+      const { getGoogleCookies } = await import("../../src/extract/chrome-cookies.ts");
       const result = await getGoogleCookies();
 
       expect(result).not.toBeNull();
@@ -156,14 +156,17 @@ describe("chrome-cookies", () => {
         callCount++;
         if (callCount === 1) return [{ value: 20 }];
         return [
-          { name: "__Secure-1PSID", value: "sid", host_key: ".google.com", encrypted_value: new Uint8Array(0) },
+          {
+            name: "__Secure-1PSID",
+            value: "sid",
+            host_key: ".google.com",
+            encrypted_value: new Uint8Array(0),
+          },
           // __Secure-1PSIDTS is absent
         ];
       });
 
-      const { getGoogleCookies } = await import(
-        "../../src/extract/chrome-cookies.ts"
-      );
+      const { getGoogleCookies } = await import("../../src/extract/chrome-cookies.ts");
       const result = await getGoogleCookies({
         requiredCookies: ["__Secure-1PSID", "__Secure-1PSIDTS"],
       });
@@ -177,9 +180,7 @@ describe("chrome-cookies", () => {
         cb(new Error("Security: password not found"), "");
       });
 
-      const { getGoogleCookies } = await import(
-        "../../src/extract/chrome-cookies.ts"
-      );
+      const { getGoogleCookies } = await import("../../src/extract/chrome-cookies.ts");
       expect(await getGoogleCookies()).toBeNull();
     });
 
@@ -200,14 +201,22 @@ describe("chrome-cookies", () => {
         callCount++;
         if (callCount === 1) return [{ value: 20 }]; // version < 24, no hash strip
         return [
-          { name: "__Secure-1PSID", value: "", host_key: ".google.com", encrypted_value: encrypted },
-          { name: "__Secure-1PSIDTS", value: "", host_key: ".google.com", encrypted_value: encrypted },
+          {
+            name: "__Secure-1PSID",
+            value: "",
+            host_key: ".google.com",
+            encrypted_value: encrypted,
+          },
+          {
+            name: "__Secure-1PSIDTS",
+            value: "",
+            host_key: ".google.com",
+            encrypted_value: encrypted,
+          },
         ];
       });
 
-      const { getGoogleCookies } = await import(
-        "../../src/extract/chrome-cookies.ts"
-      );
+      const { getGoogleCookies } = await import("../../src/extract/chrome-cookies.ts");
       const result = await getGoogleCookies();
 
       expect(result).not.toBeNull();
@@ -223,9 +232,7 @@ describe("chrome-cookies", () => {
 
       mockAll.mockReturnValue([]);
 
-      const { getGoogleCookies } = await import(
-        "../../src/extract/chrome-cookies.ts"
-      );
+      const { getGoogleCookies } = await import("../../src/extract/chrome-cookies.ts");
       await getGoogleCookies();
 
       expect(fsMock.copyFileSync).toHaveBeenCalledWith(
@@ -237,14 +244,10 @@ describe("chrome-cookies", () => {
     it("accepts custom profile name", async () => {
       fsMock.existsSync.mockReturnValue(false);
 
-      const { getGoogleCookies } = await import(
-        "../../src/extract/chrome-cookies.ts"
-      );
+      const { getGoogleCookies } = await import("../../src/extract/chrome-cookies.ts");
       await getGoogleCookies({ profile: "Profile 1" });
 
-      expect(fsMock.existsSync).toHaveBeenCalledWith(
-        expect.stringContaining("Profile 1"),
-      );
+      expect(fsMock.existsSync).toHaveBeenCalledWith(expect.stringContaining("Profile 1"));
     });
 
     it("filters cookies through the allowlist", async () => {
@@ -259,14 +262,22 @@ describe("chrome-cookies", () => {
         callCount++;
         if (callCount === 1) return [{ value: 20 }];
         return [
-          { name: "__Secure-1PSID", value: "sid-value", host_key: ".google.com", encrypted_value: new Uint8Array(0) },
-          { name: "UNKNOWN_COOKIE", value: "should-be-filtered", host_key: ".google.com", encrypted_value: new Uint8Array(0) },
+          {
+            name: "__Secure-1PSID",
+            value: "sid-value",
+            host_key: ".google.com",
+            encrypted_value: new Uint8Array(0),
+          },
+          {
+            name: "UNKNOWN_COOKIE",
+            value: "should-be-filtered",
+            host_key: ".google.com",
+            encrypted_value: new Uint8Array(0),
+          },
         ];
       });
 
-      const { getGoogleCookies } = await import(
-        "../../src/extract/chrome-cookies.ts"
-      );
+      const { getGoogleCookies } = await import("../../src/extract/chrome-cookies.ts");
       const result = await getGoogleCookies();
 
       expect(result).not.toBeNull();
@@ -288,14 +299,22 @@ describe("chrome-cookies", () => {
         callCount++;
         if (callCount === 1) return [{ value: 20 }]; // version < 24 = no hash strip
         return [
-          { name: "__Secure-1PSID", value: "", host_key: ".google.com", encrypted_value: encrypted },
-          { name: "__Secure-1PSIDTS", value: "plain-ts", host_key: ".google.com", encrypted_value: new Uint8Array(0) },
+          {
+            name: "__Secure-1PSID",
+            value: "",
+            host_key: ".google.com",
+            encrypted_value: encrypted,
+          },
+          {
+            name: "__Secure-1PSIDTS",
+            value: "plain-ts",
+            host_key: ".google.com",
+            encrypted_value: new Uint8Array(0),
+          },
         ];
       });
 
-      const { getGoogleCookies } = await import(
-        "../../src/extract/chrome-cookies.ts"
-      );
+      const { getGoogleCookies } = await import("../../src/extract/chrome-cookies.ts");
       const result = await getGoogleCookies();
 
       expect(result).not.toBeNull();

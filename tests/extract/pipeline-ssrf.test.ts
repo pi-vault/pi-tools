@@ -4,11 +4,6 @@ import * as configModule from "../../src/config.ts";
 import { extractContent } from "../../src/extract/pipeline.ts";
 import { SSRFError } from "../../src/utils/ssrf.ts";
 
-vi.mock("node:dns/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:dns/promises")>();
-  return { ...actual, lookup: vi.fn() };
-});
-
 function mockResolvedAddresses(addresses: Array<{ address: string; family: number }>): void {
   vi.mocked(dns.lookup).mockResolvedValue(
     addresses as unknown as Awaited<ReturnType<typeof dns.lookup>>,
@@ -105,11 +100,12 @@ describe("extractContent SSRF with allowRanges", () => {
   it("rejects a redirect to a non-http protocol", async () => {
     mockResolvedAddresses([{ address: "93.184.216.34", family: 4 }]);
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn(async () =>
-      new Response(null, {
-        status: 302,
-        headers: { location: "file:///etc/passwd" },
-      }),
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "file:///etc/passwd" },
+        }),
     ) as unknown as typeof fetch;
 
     try {

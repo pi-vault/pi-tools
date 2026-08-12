@@ -232,7 +232,6 @@ describe("ToolsDashboardComponent", () => {
     }
   });
 
-
   it("renders only the latest ten activity entries", () => {
     const entries = Array.from({ length: 11 }, (_, index) => ({
       id: String(index),
@@ -350,7 +349,6 @@ describe("ToolsDashboardComponent", () => {
     expect(output).not.toMatch(/^> /m);
   });
 
-
   it("preserves delimiter glyphs in Providers footer", () => {
     const output = dashboard().component.render(100).join("\n");
     expect(output).toContain("Enter Toggle • k Set key • d Set default");
@@ -369,14 +367,10 @@ describe("ToolsDashboardComponent", () => {
     // any frame chrome cancels out. visibleWidth counts ANSI-aware width, so
     // this stays correct when the styled nameCell injects escape codes via
     // fg/bold.
-    const tierColHeader = visibleWidth(
-      header!.slice(0, header!.indexOf("Tier")),
-    );
+    const tierColHeader = visibleWidth(header!.slice(0, header!.indexOf("Tier")));
     // Slice past the padded name so the search for the tier digit doesn't
     // accidentally hit a "1" inside the provider name if the fixture changes.
-    const tierColRow = visibleWidth(
-      row!.slice(0, row!.indexOf("1", "brave".length)),
-    );
+    const tierColRow = visibleWidth(row!.slice(0, row!.indexOf("1", "brave".length)));
     expect(tierColRow).toBe(tierColHeader);
   });
   it("renders the Test column empty for non-search providers", () => {
@@ -390,7 +384,11 @@ describe("ToolsDashboardComponent", () => {
       config: {
         providers: {
           brave: { enabled: true, apiKey: "BRAVE_API_KEY", budget: { mode: "managed" as const } },
-          duckduckgo: { enabled: false, apiKey: "BRAVE_API_KEY", budget: { mode: "unlimited" as const } },
+          duckduckgo: {
+            enabled: false,
+            apiKey: "BRAVE_API_KEY",
+            budget: { mode: "unlimited" as const },
+          },
           exa: { enabled: true, apiKey: "EXA_API_KEY", budget: { mode: "unlimited" as const } },
         },
         defaultProvider: "brave",
@@ -417,7 +415,11 @@ describe("ToolsDashboardComponent", () => {
       config: {
         providers: {
           brave: { enabled: true, apiKey: "BRAVE_API_KEY", budget: { mode: "managed" as const } },
-          duckduckgo: { enabled: false, apiKey: "BRAVE_API_KEY", budget: { mode: "unlimited" as const } },
+          duckduckgo: {
+            enabled: false,
+            apiKey: "BRAVE_API_KEY",
+            budget: { mode: "unlimited" as const },
+          },
           exa: { enabled: true, apiKey: "EXA_API_KEY", budget: { mode: "unlimited" as const } },
         },
         defaultProvider: "brave",
@@ -452,9 +454,7 @@ describe("ToolsDashboardComponent", () => {
     const provider: SearchProvider = {
       name: "brave",
       label: "Brave",
-      search: vi.fn(
-        () => new Promise<SearchResult[]>((r) => (resolveSearch = r)),
-      ),
+      search: vi.fn(() => new Promise<SearchResult[]>((r) => (resolveSearch = r))),
     };
     const { component } = dashboard({
       registry: searchRegistry([provider]),
@@ -469,7 +469,9 @@ describe("ToolsDashboardComponent", () => {
     expect(component.render(200).join("\n")).not.toContain("Testing…");
   });
   it("runs t and T on read-only scope without needing canWrite", async () => {
-    const readOnly = dashboard({ scope: { kind: "project", path: "/repo/.pi/tools.json", canWrite: false } });
+    const readOnly = dashboard({
+      scope: { kind: "project", path: "/repo/.pi/tools.json", canWrite: false },
+    });
     readOnly.component.handleInput("t");
     await vi.waitFor(() => expect(readOnly.tui.requestRender).toHaveBeenCalledTimes(2));
     expect(readOnly.component.render(200).join("\n")).toMatch(/brave.*OK/);
@@ -499,5 +501,4 @@ describe("ToolsDashboardComponent", () => {
     expect(output).not.toContain("provider-1 ");
     expect(lines.every((line) => visibleWidth(line) <= 80)).toBe(true);
   });
-
-})
+});

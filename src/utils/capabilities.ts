@@ -41,9 +41,13 @@ export function buildAugmentedGuidance(
   caps: EnvironmentCapabilities,
 ): GuidanceOverride {
   const extras: string[] = [];
-  if (caps.hasGhCli) extras.push("For GitHub repository URLs, consider using the `gh` CLI directly for richer file access.");
+  if (caps.hasGhCli)
+    extras.push(
+      "For GitHub repository URLs, consider using the `gh` CLI directly for richer file access.",
+    );
   if (caps.hasYtDlp) extras.push("YouTube frame extraction is available (yt-dlp detected).");
-  if (caps.hasFfmpeg) extras.push("Local video analysis with frame extraction is available (ffmpeg detected).");
+  if (caps.hasFfmpeg)
+    extras.push("Local video analysis with frame extraction is available (ffmpeg detected).");
 
   if (extras.length === 0) return base ?? {};
 

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { recordProjectTrust, isProjectTrustedCached, _resetTrustRegistry } from "../../src/utils/trust.ts";
+import {
+  recordProjectTrust,
+  isProjectTrustedCached,
+  _resetTrustRegistry,
+} from "../../src/utils/trust.ts";
 
 describe("trust registry", () => {
   afterEach(() => {

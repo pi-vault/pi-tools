@@ -129,9 +129,7 @@ describe("getYouTubeStreamInfo", () => {
   });
 
   it("returns null duration when yt-dlp outputs NA", async () => {
-    vi.mocked(execFileSync).mockReturnValue(
-      "NA\nhttps://stream.example.com/video\n",
-    );
+    vi.mocked(execFileSync).mockReturnValue("NA\nhttps://stream.example.com/video\n");
     const result = await getYouTubeStreamInfo("abc123");
     expect(result).toEqual({
       streamUrl: "https://stream.example.com/video",
@@ -148,7 +146,9 @@ describe("getYouTubeStreamInfo", () => {
 
   it("returns error when yt-dlp is not installed (ENOENT)", async () => {
     const err = Object.assign(new Error("spawn yt-dlp ENOENT"), { code: "ENOENT" });
-    vi.mocked(execFileSync).mockImplementation(() => { throw err; });
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw err;
+    });
     const result = await getYouTubeStreamInfo("abc123");
     expect(result).toEqual({
       error: "yt-dlp is not installed. Install with: brew install yt-dlp",
@@ -157,7 +157,9 @@ describe("getYouTubeStreamInfo", () => {
 
   it("returns error on timeout (killed)", async () => {
     const err = Object.assign(new Error("timed out"), { killed: true });
-    vi.mocked(execFileSync).mockImplementation(() => { throw err; });
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw err;
+    });
     const result = await getYouTubeStreamInfo("abc123");
     expect(result).toEqual({
       error: "yt-dlp timed out fetching video info",
@@ -166,7 +168,9 @@ describe("getYouTubeStreamInfo", () => {
 
   it("returns error on AbortError", async () => {
     const err = Object.assign(new Error("aborted"), { name: "AbortError" });
-    vi.mocked(execFileSync).mockImplementation(() => { throw err; });
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw err;
+    });
     const result = await getYouTubeStreamInfo("abc123");
     expect(result).toEqual({
       error: "yt-dlp timed out fetching video info",
@@ -175,7 +179,9 @@ describe("getYouTubeStreamInfo", () => {
 
   it("returns error on ETIMEDOUT", async () => {
     const err = Object.assign(new Error("timed out"), { code: "ETIMEDOUT" });
-    vi.mocked(execFileSync).mockImplementation(() => { throw err; });
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw err;
+    });
     const result = await getYouTubeStreamInfo("abc123");
     expect(result).toEqual({
       error: "yt-dlp timed out fetching video info",
@@ -186,7 +192,9 @@ describe("getYouTubeStreamInfo", () => {
     const err = Object.assign(new Error("yt-dlp error"), {
       stderr: Buffer.from("ERROR: Private video. Sign in if you've been granted access."),
     });
-    vi.mocked(execFileSync).mockImplementation(() => { throw err; });
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw err;
+    });
     const result = await getYouTubeStreamInfo("private123");
     expect(result).toHaveProperty("error");
     expect((result as { error: string }).error).toContain("private");
@@ -196,7 +204,9 @@ describe("getYouTubeStreamInfo", () => {
     const err = Object.assign(new Error("yt-dlp error"), {
       stderr: Buffer.from("ERROR: Video unavailable"),
     });
-    vi.mocked(execFileSync).mockImplementation(() => { throw err; });
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw err;
+    });
     const result = await getYouTubeStreamInfo("gone123");
     expect(result).toHaveProperty("error");
     expect((result as { error: string }).error).toContain("unavailable");
@@ -221,7 +231,9 @@ describe("getLocalVideoDuration", () => {
 
   it("returns error when ffprobe is not installed (ENOENT)", async () => {
     const err = Object.assign(new Error("spawn ffprobe ENOENT"), { code: "ENOENT" });
-    vi.mocked(execFileSync).mockImplementation(() => { throw err; });
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw err;
+    });
     const result = await getLocalVideoDuration("/path/to/video.mp4");
     expect(result).toEqual({
       error: "ffprobe is not installed. Install with: brew install ffmpeg",
@@ -230,7 +242,9 @@ describe("getLocalVideoDuration", () => {
 
   it("returns error on timeout", async () => {
     const err = Object.assign(new Error("timed out"), { killed: true });
-    vi.mocked(execFileSync).mockImplementation(() => { throw err; });
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw err;
+    });
     const result = await getLocalVideoDuration("/path/to/video.mp4");
     expect(result).toHaveProperty("error");
     expect((result as { error: string }).error).toContain("timed out");
@@ -274,7 +288,9 @@ describe("extractYouTubeFrames", () => {
 
   it("returns error when yt-dlp fails", async () => {
     const err = Object.assign(new Error("spawn yt-dlp ENOENT"), { code: "ENOENT" });
-    vi.mocked(execFileSync).mockImplementation(() => { throw err; });
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw err;
+    });
 
     const result = await extractYouTubeFrames("testVideo", [10]);
     expect(result.frames).toEqual([]);
@@ -289,7 +305,9 @@ describe("extractYouTubeFrames", () => {
     vi.mocked(execFileSync)
       .mockReturnValueOnce("300\nhttps://stream.example.com/video\n") // yt-dlp
       .mockReturnValueOnce(fakeJpeg as unknown as string) // frame 1 OK
-      .mockImplementationOnce(() => { throw ffmpegErr; }); // frame 2 fails
+      .mockImplementationOnce(() => {
+        throw ffmpegErr;
+      }); // frame 2 fails
 
     const result = await extractYouTubeFrames("testVideo", [10, 20]);
     expect(result.frames).toHaveLength(1);
@@ -302,7 +320,9 @@ describe("extractYouTubeFrames", () => {
     const ffmpegErr = new Error("ffmpeg failed");
     vi.mocked(execFileSync)
       .mockReturnValueOnce("300\nhttps://stream.example.com/video\n") // yt-dlp
-      .mockImplementation(() => { throw ffmpegErr; }); // all ffmpeg calls fail
+      .mockImplementation(() => {
+        throw ffmpegErr;
+      }); // all ffmpeg calls fail
 
     const result = await extractYouTubeFrames("testVideo", [10, 20]);
     expect(result.frames).toEqual([]);
@@ -315,7 +335,9 @@ describe("extractYouTubeFrames", () => {
     });
     vi.mocked(execFileSync)
       .mockReturnValueOnce("300\nhttps://stream.example.com/video\n") // yt-dlp
-      .mockImplementation(() => { throw err; }); // ffmpeg gets 403
+      .mockImplementation(() => {
+        throw err;
+      }); // ffmpeg gets 403
 
     const result = await extractYouTubeFrames("testVideo", [10]);
     expect(result.frames).toEqual([]);
@@ -354,7 +376,9 @@ describe("extractLocalFrames", () => {
 
   it("returns error when ffprobe fails (ENOENT)", async () => {
     const err = Object.assign(new Error("spawn ffprobe ENOENT"), { code: "ENOENT" });
-    vi.mocked(execFileSync).mockImplementation(() => { throw err; });
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw err;
+    });
 
     const result = await extractLocalFrames("/tmp/video.mp4", [5]);
     expect(result.frames).toEqual([]);
@@ -365,7 +389,9 @@ describe("extractLocalFrames", () => {
     const ffmpegErr = Object.assign(new Error("spawn ffmpeg ENOENT"), { code: "ENOENT" });
     vi.mocked(execFileSync)
       .mockReturnValueOnce("60\n") // ffprobe OK
-      .mockImplementation(() => { throw ffmpegErr; }); // ffmpeg ENOENT
+      .mockImplementation(() => {
+        throw ffmpegErr;
+      }); // ffmpeg ENOENT
 
     const result = await extractLocalFrames("/tmp/video.mp4", [5]);
     expect(result.frames).toEqual([]);
@@ -379,7 +405,9 @@ describe("extractLocalFrames", () => {
     vi.mocked(execFileSync)
       .mockReturnValueOnce("120\n") // ffprobe
       .mockReturnValueOnce(fakeJpeg as unknown as string) // frame 1 OK
-      .mockImplementationOnce(() => { throw ffmpegErr; }); // frame 2 fails
+      .mockImplementationOnce(() => {
+        throw ffmpegErr;
+      }); // frame 2 fails
 
     const result = await extractLocalFrames("/tmp/video.mp4", [10, 90]);
     expect(result.frames).toHaveLength(1);

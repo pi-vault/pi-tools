@@ -27,10 +27,7 @@ export function isPerplexityAvailable(): boolean {
  * without visual understanding. Distinct from the search provider in
  * src/providers/perplexity.ts which returns structured SearchResult[].
  */
-export async function queryPerplexity(
-  query: string,
-  signal?: AbortSignal,
-): Promise<string> {
+export async function queryPerplexity(query: string, signal?: AbortSignal): Promise<string> {
   const key = resolveProviderKey("perplexity");
   if (!key) {
     throw new Error(
@@ -40,9 +37,7 @@ export async function queryPerplexity(
   }
 
   const timeoutSignal = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
-  const combinedSignal = signal
-    ? AbortSignal.any([signal, timeoutSignal])
-    : timeoutSignal;
+  const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
   const response = await fetch(PERPLEXITY_API_URL, {
     method: "POST",
@@ -76,5 +71,3 @@ export async function queryPerplexity(
 
   return content;
 }
-
-

@@ -66,9 +66,7 @@ function isBrowserCookieAccessAllowed(): boolean {
  * and extracting valid Google cookies from a local browser.
  * Returns the cookie map if available, null otherwise.
  */
-export async function isGeminiWebAvailable(
-  chromeProfile?: string,
-): Promise<CookieMap | null> {
+export async function isGeminiWebAvailable(chromeProfile?: string): Promise<CookieMap | null> {
   if (!isBrowserCookieAccessAllowed()) return null;
 
   let profile = chromeProfile?.trim() || undefined;
@@ -103,10 +101,7 @@ export async function queryWithCookies(
   cookieMap: CookieMap,
   options: GeminiWebOptions = {},
 ): Promise<string> {
-  const model =
-    options.model && MODEL_HEADERS[options.model]
-      ? options.model
-      : DEFAULT_MODEL;
+  const model = options.model && MODEL_HEADERS[options.model] ? options.model : DEFAULT_MODEL;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   let fullPrompt = prompt;
@@ -134,8 +129,7 @@ export async function queryWithCookies(
       options.signal,
     );
     if (fallback.errorMessage) throw new Error(fallback.errorMessage);
-    if (!fallback.text)
-      throw new Error("Gemini Web returned empty response (fallback model)");
+    if (!fallback.text) throw new Error("Gemini Web returned empty response (fallback model)");
     return fallback.text;
   }
 
@@ -226,16 +220,8 @@ async function runGeminiWebOnce(
  * Fetch the access token (SNlM0e or thykhd) from the Gemini app page.
  * Manually follows redirects to preserve cookies across auth bounces.
  */
-async function fetchAccessToken(
-  cookieHeader: string,
-  signal: AbortSignal,
-): Promise<string> {
-  const html = await fetchWithCookieRedirects(
-    GEMINI_APP_URL,
-    cookieHeader,
-    MAX_REDIRECTS,
-    signal,
-  );
+async function fetchAccessToken(cookieHeader: string, signal: AbortSignal): Promise<string> {
+  const html = await fetchWithCookieRedirects(GEMINI_APP_URL, cookieHeader, MAX_REDIRECTS, signal);
 
   for (const key of ["SNlM0e", "thykhd"]) {
     const match = html.match(new RegExp(`"${key}":"(.*?)"`));
@@ -314,9 +300,7 @@ async function uploadFile(
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(
-      `File upload failed: ${res.status} (${text.slice(0, 200)})`,
-    );
+    throw new Error(`File upload failed: ${res.status} (${text.slice(0, 200)})`);
   }
 
   return { id: await res.text(), name: fileName };
@@ -330,14 +314,9 @@ async function uploadFile(
  * Build the fReq payload for BardChatUi StreamGenerate.
  * Format: JSON.stringify([null, JSON.stringify(innerList)])
  */
-function buildFReqPayload(
-  prompt: string,
-  uploaded: Array<{ id: string; name: string }>,
-): string {
+function buildFReqPayload(prompt: string, uploaded: Array<{ id: string; name: string }>): string {
   const promptPayload =
-    uploaded.length > 0
-      ? [prompt, 0, null, uploaded.map((file) => [[file.id, 1]])]
-      : [prompt];
+    uploaded.length > 0 ? [prompt, 0, null, uploaded.map((file) => [[file.id, 1]])] : [prompt];
   const innerList = [promptPayload, null, null];
   return JSON.stringify([null, JSON.stringify(innerList)]);
 }
@@ -376,9 +355,7 @@ function parseStreamGenerateResponse(rawText: string): GeminiWebResult {
   }
 
   const text =
-    latestNonEmptyText.length > 0
-      ? latestNonEmptyText
-      : extractCandidateText(firstCandidateSeen);
+    latestNonEmptyText.length > 0 ? latestNonEmptyText : extractCandidateText(firstCandidateSeen);
 
   return { text, errorCode };
 }

@@ -30,14 +30,25 @@ describe("extractWithUrlContext", () => {
 
     fetchStub.addResponse("generativelanguage.googleapis.com", {
       body: {
-        candidates: [{
-          content: {
-            parts: [{ text: "# Page Title\n\nExtracted page content with enough text to pass the threshold check and more text to ensure it is over 100 characters." }],
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: "# Page Title\n\nExtracted page content with enough text to pass the threshold check and more text to ensure it is over 100 characters.",
+                },
+              ],
+            },
+            url_context_metadata: {
+              url_metadata: [
+                {
+                  retrieved_url: "https://example.com",
+                  url_retrieval_status: "URL_RETRIEVAL_STATUS_SUCCESS",
+                },
+              ],
+            },
           },
-          url_context_metadata: {
-            url_metadata: [{ retrieved_url: "https://example.com", url_retrieval_status: "URL_RETRIEVAL_STATUS_SUCCESS" }],
-          },
-        }],
+        ],
       },
       headers: { "content-type": "application/json" },
     });
@@ -62,12 +73,14 @@ describe("extractWithUrlContext", () => {
 
     fetchStub.addResponse("generativelanguage.googleapis.com", {
       body: {
-        candidates: [{
-          content: { parts: [{ text: "" }] },
-          url_context_metadata: {
-            url_metadata: [{ url_retrieval_status: "URL_RETRIEVAL_STATUS_ERROR" }],
+        candidates: [
+          {
+            content: { parts: [{ text: "" }] },
+            url_context_metadata: {
+              url_metadata: [{ url_retrieval_status: "URL_RETRIEVAL_STATUS_ERROR" }],
+            },
           },
-        }],
+        ],
       },
       headers: { "content-type": "application/json" },
     });

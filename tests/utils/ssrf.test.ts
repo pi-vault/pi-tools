@@ -1,15 +1,6 @@
 import * as dns from "node:dns/promises";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SSRFError, validateUrl, validateUrlResolved } from "../../src/utils/ssrf.ts";
-
-vi.mock("node:dns/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:dns/promises")>();
-  return { ...actual, lookup: vi.fn() };
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 function mockResolvedAddresses(addresses: Array<{ address: string; family: number }>): void {
   vi.mocked(dns.lookup).mockResolvedValue(

@@ -152,9 +152,7 @@ async function uploadToFilesApi(
 
   if (!initResponse.ok) {
     const text = await initResponse.text();
-    throw new Error(
-      `Files API upload init failed: ${initResponse.status} (${text.slice(0, 200)})`,
-    );
+    throw new Error(`Files API upload init failed: ${initResponse.status} (${text.slice(0, 200)})`);
   }
 
   const uploadUrl = initResponse.headers.get("x-goog-upload-url");
@@ -177,9 +175,7 @@ async function uploadToFilesApi(
 
   if (!uploadResponse.ok) {
     const text = await uploadResponse.text();
-    throw new Error(
-      `Files API upload failed: ${uploadResponse.status} (${text.slice(0, 200)})`,
-    );
+    throw new Error(`Files API upload failed: ${uploadResponse.status} (${text.slice(0, 200)})`);
   }
 
   const result = (await uploadResponse.json()) as { file?: { name?: string; uri?: string } };
@@ -264,11 +260,16 @@ function extractVideoFrame(
     const buffer = execFileSync(
       "ffmpeg",
       [
-        "-ss", String(seconds),
-        "-i", filePath,
-        "-frames:v", "1",
-        "-f", "image2pipe",
-        "-vcodec", "mjpeg",
+        "-ss",
+        String(seconds),
+        "-i",
+        filePath,
+        "-frames:v",
+        "1",
+        "-f",
+        "image2pipe",
+        "-vcodec",
+        "mjpeg",
         "pipe:1",
       ],
       { maxBuffer: 5 * 1024 * 1024, timeout: 10_000 },
