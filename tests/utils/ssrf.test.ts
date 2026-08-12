@@ -11,6 +11,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function mockResolvedAddresses(addresses: Array<{ address: string; family: number }>): void {
+  vi.mocked(dns.lookup).mockResolvedValue(
+    addresses as unknown as Awaited<ReturnType<typeof dns.lookup>>,
+  );
+}
+
 describe("validateUrl", () => {
   it("allows valid HTTPS URLs", () => {
     expect(() => validateUrl("https://example.com")).not.toThrow();
@@ -232,15 +238,13 @@ describe("validateUrl with allowedBaseUrls", () => {
 
 describe("validateUrlResolved", () => {
   it("allows a hostname whose every resolved address is public", async () => {
-    vi.mocked(dns.lookup).mockResolvedValue([
-      { address: "93.184.216.34", family: 4 },
-    ]);
+    mockResolvedAddresses([{ address: "93.184.216.34", family: 4 }]);
 
     await expect(validateUrlResolved("https://example.com/path")).resolves.toBeInstanceOf(URL);
   });
 
   it("blocks a hostname resolving to a private address", async () => {
-    vi.mocked(dns.lookup).mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
+    mockResolvedAddresses([{ address: "127.0.0.1", family: 4 }]);
 
     await expect(validateUrlResolved("https://example.com/admin")).rejects.toThrow(SSRFError);
   });
@@ -252,7 +256,7 @@ describe("validateUrlResolved", () => {
   });
 
   it("rejects mixed public and private answers", async () => {
-    vi.mocked(dns.lookup).mockResolvedValue([
+    mockResolvedAddresses([
       { address: "93.184.216.34", family: 4 },
       { address: "10.0.0.8", family: 4 },
     ]);
@@ -261,10 +265,10 @@ describe("validateUrlResolved", () => {
   });
 
   it("checks IPv6 answers and honors configured ranges", async () => {
-    vi.mocked(dns.lookup).mockResolvedValue([{ address: "2001:db8::1", family: 6 }]);
+    mockResolvedAddresses([{ address: "2001:db8::1", family: 6 }]);
     await expect(validateUrlResolved("https://ipv6.example")).resolves.toBeInstanceOf(URL);
 
-    vi.mocked(dns.lookup).mockResolvedValue([{ address: "198.18.1.4", family: 4 }]);
+    mockResolvedAddresses([{ address: "198.18.1.4", family: 4 }]);
     await expect(
       validateUrlResolved("https://benchmark.example", {
         allowRanges: ["198.18.0.0/15"],
