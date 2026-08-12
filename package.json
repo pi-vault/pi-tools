@@ -54,17 +54,17 @@
     "@mozilla/readability": "^0.6.0",
     "linkedom": "^0.18.13",
     "turndown": "^7.2.4",
-    "unpdf": "^1.6.2"
+    "unpdf": "^1.8.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.5",
-    "@earendil-works/pi-ai": "^0.80.10",
-    "@earendil-works/pi-coding-agent": "^0.80.10",
-    "@earendil-works/pi-tui": "^0.80.10",
-    "@types/node": "^26.1.1",
+    "@biomejs/biome": "^2.5.8",
+    "@earendil-works/pi-ai": "^0.84.1",
+    "@earendil-works/pi-coding-agent": "^0.84.1",
+    "@earendil-works/pi-tui": "^0.84.1",
+    "@types/node": "^26.2.0",
     "@types/turndown": "^5.0.6",
-    "typebox": "^1.3.6",
-    "typescript": "^6.0.3",
+    "typebox": "^1.3.13",
+    "typescript": "^7.0.2",
     "vitest": "^4.1.10"
   },
   "peerDependencies": {

@@ -15,6 +15,7 @@ vi.mock("../src/config.ts", async (importOriginal) => {
 });
 
 import { loadMergedConfig, resolveApiKey } from "../src/config.ts";
+import { providerMeta as tinyfishMeta } from "../src/providers/tinyfish.ts";
 
 const managed: ProviderBudget = { mode: "managed" };
 const hard: ProviderBudget = { mode: "hard", limit: 5, period: "month", unit: "usd" };
@@ -194,5 +195,31 @@ describe("ConfigManager", () => {
       }),
     ]);
     expect(registry.getSearchProviderNames()).toEqual(["enabled"]);
+  });
+
+  it("registers tinyfish with the real metadata, tier-2 policy, and both capabilities", () => {
+    vi.mocked(loadMergedConfig).mockReturnValue(
+      makeConfig({
+        tinyfish: entry({ mode: "unlimited" }, { apiKey: "TINYFISH_API_KEY" }),
+      }),
+    );
+    vi.mocked(resolveApiKey).mockImplementation((key) =>
+      key === "TINYFISH_API_KEY" ? "resolved-tiny-key" : key,
+    );
+
+    const registry = memory();
+    const register = vi.spyOn(registry, "registerProvider");
+
+    new ConfigManager("/cwd", registry, [tinyfishMeta]);
+
+    expect(register).toHaveBeenCalledOnce();
+    const [instances, options] = register.mock.calls[0];
+    expect(options.name).toBe("tinyfish");
+    expect(options.tier).toBe(2);
+    expect(options.budget).toEqual({ mode: "unlimited" });
+    expect(instances.search).toBeDefined();
+    expect(instances.fetch).toBeDefined();
+    expect(registry.getSearchProviderNames()).toEqual(["tinyfish"]);
+    expect(registry.getBudgetStatus("tinyfish")).toEqual({ mode: "unlimited" });
   });
 });
