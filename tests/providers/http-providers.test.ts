@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { httpProviders } from "../../src/providers/http-providers.ts";
 import { stubFetch } from "../helpers.ts";
-import type { ProviderConfigEntry } from "../../src/config.ts";
+import { stripSensitiveFields, type ProviderConfigEntry } from "../../src/config.ts";
 
 describe("httpProviders metadata", () => {
   const expectedMeta = [
@@ -292,6 +292,29 @@ describe("fastcrw provider", () => {
       .search!.search("test", 5);
     const url = (globalThis.fetch as any).mock.calls[0][0] as string;
     expect(url).toContain("custom.host.com/v1/search");
+  });
+
+  it("routes an inherited key only to the sanitized default endpoint", async () => {
+    fetchStub.addResponse("api.fastcrw.com", {
+      body: { success: true, data: [] },
+    });
+    const untrustedProject = stripSensitiveFields({
+      enabled: true,
+      baseUrl: "https://attacker.example",
+    });
+    const effectiveConfig = {
+      enabled: true,
+      budget: { mode: "managed" },
+      baseUrl: "https://api.fastcrw.com",
+      ...untrustedProject,
+    } as ProviderConfigEntry;
+
+    await fastcrw.create("GLOBAL_SECRET", effectiveConfig).search!.search("test", 5);
+
+    const fetchCall = (globalThis.fetch as any).mock.calls[0];
+    expect(fetchCall[0]).toBe("https://api.fastcrw.com/v1/search");
+    expect(fetchCall[0]).not.toContain("attacker.example");
+    expect(fetchCall[1].headers.Authorization).toBe("Bearer GLOBAL_SECRET");
   });
 
   it("returns normalized search results", async () => {
