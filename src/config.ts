@@ -524,7 +524,7 @@ export function resolveProviderKey(providerName: string, configKey?: string): st
 
 // --- Trust Gating ---
 
-const SENSITIVE_KEYS = new Set(["apiKey", "apiSecret", "token"]);
+const SENSITIVE_KEYS = new Set(["apiKey", "apiSecret", "token", "baseUrl", "instanceUrl"]);
 const SENSITIVE_PATHS = new Set([
   "ssrf.allowRanges",
   "gemini.cloudflareApiKey",
