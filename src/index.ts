@@ -14,7 +14,7 @@ import { createWebFetchTool } from "./tools/web-fetch.ts";
 import { createWebReadTool } from "./tools/web-read.ts";
 import { createWebResearchTool } from "./tools/web-research.ts";
 import { createWebSearchTool } from "./tools/web-search.ts";
-import { loadMergedConfig, resolveApiKey } from "./config.ts";
+import { loadMergedConfig } from "./config.ts";
 import { buildAugmentedGuidance, detectCapabilities } from "./utils/capabilities.ts";
 import { recordProjectTrust } from "./utils/trust.ts";
 import { handleProviderRequest, handleSessionStart } from "./session.ts";
@@ -28,6 +28,8 @@ export default function createExtension(pi: ExtensionAPI): void {
 
   const initializeSession = (ctx: ExtensionContext): void => {
     configManager = new ConfigManager(ctx.cwd, registry, allProviders, ctx.modelRegistry);
+
+    const executionHooks = registry.getExecutionHooks();
 
     const resolveCandidates = (name?: string, combine?: boolean) => {
       configManager.refresh();
@@ -50,11 +52,9 @@ export default function createExtension(pi: ExtensionAPI): void {
     pi.registerTool(
       createWebSearchTool(
         resolveCandidates,
-        (providerName, latencyMs) => {
-          registry.recordOutcome(providerName, { success: true, latencyMs });
-        },
+        executionHooks.onSuccess,
         configManager.current.guidance?.web_search,
-        (providerName) => registry.recordOutcome(providerName, { success: false }),
+        executionHooks.onFailure,
         (providerName, resultCount, requestedCount) => {
           registry.recordResultQuality(providerName, resultCount, requestedCount);
         },
@@ -66,10 +66,11 @@ export default function createExtension(pi: ExtensionAPI): void {
         store,
         () => {
           configManager.refresh();
-          return registry.selectFetchCandidates();
+          return registry.selectFetchCandidates(configManager.current.selectionStrategy);
         },
         fetchCache,
         buildAugmentedGuidance(configManager.current.guidance?.web_fetch, caps),
+        executionHooks,
       ),
     );
     pi.registerTool(createWebReadTool(store, configManager.current.guidance?.web_read));
@@ -77,53 +78,57 @@ export default function createExtension(pi: ExtensionAPI): void {
       createCodeSearchTool(
         () => {
           configManager.refresh();
-          return registry.selectCodeSearch();
+          return registry.selectCodeSearch(configManager.current.selectionStrategy);
         },
-        // Success outcome only — code-search has no failure callback
-        (providerName) => registry.recordOutcome(providerName, { success: true }),
+        // Search-quality success hook — code-search has no failure callback, so the
+        // shared success hook drives the recorded outcome.
+        (name) => executionHooks.onSuccess?.(name, 0),
         configManager.current.guidance?.code_search,
+        executionHooks,
       ),
     );
 
     // Register docs tools when Context7 provider is available
-    const docsProvider = registry.selectDocs();
-    if (docsProvider) {
+    if (registry.selectDocs()) {
       const selectDocs = () => {
         configManager.refresh();
-        return registry.selectDocs();
+        return registry.selectDocsByStrategy(configManager.current.selectionStrategy);
       };
       pi.registerTool(
-        createWebDocsSearchTool(selectDocs, configManager.current.guidance?.web_docs_search),
+        createWebDocsSearchTool(
+          selectDocs,
+          configManager.current.guidance?.web_docs_search,
+          executionHooks,
+        ),
       );
       pi.registerTool(
-        createWebDocsFetchTool(selectDocs, store, configManager.current.guidance?.web_docs_fetch),
+        createWebDocsFetchTool(
+          selectDocs,
+          store,
+          configManager.current.guidance?.web_docs_fetch,
+          executionHooks,
+        ),
       );
     }
 
-    // Register web_research when Exa key is available and deep research enabled
-    const exaConfig = configManager.current.providers?.exa;
-    const resolvedExaKey = resolveApiKey(exaConfig?.apiKey);
-    if (
-      exaConfig?.enabled !== false &&
-      resolvedExaKey &&
-      configManager.current.deepResearch?.enabled !== false
-    ) {
+    // Register web_research when any research provider is registered
+    const researchEnabled = configManager.current.deepResearch?.enabled !== false;
+    const researchProviders = researchEnabled
+      ? registry.selectResearchCandidates(configManager.current.selectionStrategy)
+      : [];
+    if (researchProviders.length > 0) {
+      const resolveResearch = () => {
+        configManager.refresh();
+        if (configManager.current.deepResearch.enabled === false) return [];
+        return registry.selectResearchCandidates(configManager.current.selectionStrategy);
+      };
       pi.registerTool(
         createWebResearchTool(
-          () => {
-            configManager.refresh();
-            const currentExa = configManager.current.providers.exa;
-            if (
-              currentExa?.enabled === false ||
-              configManager.current.deepResearch.enabled === false
-            )
-              return undefined;
-            return resolveApiKey(currentExa?.apiKey);
-          },
+          resolveResearch,
           configManager.current.deepResearch,
           (customType, data) => pi.appendEntry(customType, data),
           configManager.current.deepResearch?.guidance,
-          (operation) => registry.consume("exa", operation),
+          executionHooks,
         ),
       );
     }

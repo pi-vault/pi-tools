@@ -10,6 +10,7 @@ import type {
   CodeSearchProvider,
   DocsProvider,
   FetchProvider,
+  ResearchProvider,
   SearchProvider,
   UsageCost,
 } from "../../src/providers/types.ts";
@@ -48,6 +49,36 @@ function memory(initial: unknown = { version: 2, counters: {} }): {
   return { registry: new ProviderRegistry(adapter), adapter, save };
 }
 
+function fetch(name: string): FetchProvider {
+  return { name, fetch: vi.fn().mockResolvedValue({ text: name }) };
+}
+
+function codeSearch(name: string): CodeSearchProvider {
+  return {
+    name,
+    codeSearch: vi.fn().mockResolvedValue([{ title: name, url: `https://${name}.test`, snippet: name }]),
+  };
+}
+
+function docs(name: string): DocsProvider {
+  return {
+    name,
+    label: name,
+    searchLibrary: vi.fn().mockResolvedValue([]),
+    getContext: vi.fn().mockResolvedValue(name),
+  };
+}
+
+function research(name: string): ResearchProvider {
+  return {
+    name,
+    label: name,
+    deepResearch: vi
+      .fn()
+      .mockResolvedValue({ results: [], raw: {}, metadata: {} }),
+  };
+}
+
 function register(
   registry: ProviderRegistry,
   name: string,
@@ -57,6 +88,7 @@ function register(
     fetch?: FetchProvider;
     codeSearch?: CodeSearchProvider;
     docs?: DocsProvider;
+    research?: ResearchProvider;
   } = { search: search(name) },
   usageCost?: UsageCost,
   tier: 1 | 2 | 3 = 1,
@@ -359,7 +391,7 @@ describe("ProviderRegistry capability wrappers", () => {
       "second",
       "third",
     ]);
-    expect(registry.selectSearchCandidates("first")[0].name).toBe("first");
+    expect(registry.selectSearchCandidates("first")).toEqual([]);
   });
 
   it("preserves search filter support through the budget wrapper", () => {
@@ -384,5 +416,212 @@ describe("ProviderRegistry capability wrappers", () => {
     registry.recordOutcome("slow", { success: false });
     registry.recordOutcome("fast", { success: true, latencyMs: 10 });
     expect(registry.selectSearchByPerformance()!.name).toBe("fast");
+  });
+});
+
+describe("ProviderRegistry capability-aware selection", () => {
+  it("returns auto candidates in tier order for search, fetch, and research", () => {
+    const { registry } = memory();
+    // Register in non-tier order to prove tier wins over registration order.
+    register(
+      registry,
+      "tier3-search",
+      managed,
+      { search: search("tier3-search") },
+      undefined,
+      3,
+    );
+    register(
+      registry,
+      "tier1-search",
+      managed,
+      { search: search("tier1-search") },
+      undefined,
+      1,
+    );
+    register(registry, "tier2-search", managed, { search: search("tier2-search") }, undefined, 2);
+    register(registry, "tier3-fetch", managed, { fetch: fetch("tier3-fetch") }, undefined, 3);
+    register(registry, "tier1-fetch", managed, { fetch: fetch("tier1-fetch") }, undefined, 1);
+    register(registry, "tier2-fetch", managed, { fetch: fetch("tier2-fetch") }, undefined, 2);
+    register(registry, "tier3-research", managed, { research: research("tier3-research") }, undefined, 3);
+    register(
+      registry,
+      "tier1-research",
+      managed,
+      { research: research("tier1-research") },
+      undefined,
+      1,
+    );
+    register(
+      registry,
+      "tier2-research",
+      managed,
+      { research: research("tier2-research") },
+      undefined,
+      2,
+    );
+
+    expect(registry.selectSearchCandidates().map((p) => p.name)).toEqual([
+      "tier1-search",
+      "tier2-search",
+      "tier3-search",
+    ]);
+    expect(
+      registry.selectFetchCandidates().map((p) => p.name),
+    ).toEqual(["tier1-fetch", "tier2-fetch", "tier3-fetch"]);
+    expect(
+      registry.selectResearchCandidates().map((p) => p.name),
+    ).toEqual(["tier1-research", "tier2-research", "tier3-research"]);
+  });
+
+  it("returns best-performing eligible candidates for fetch and research", () => {
+    const { registry } = memory();
+    register(registry, "fast-fetch", managed, { fetch: fetch("fast-fetch") }, undefined, 1);
+    register(registry, "slow-fetch", managed, { fetch: fetch("slow-fetch") }, undefined, 2);
+    register(
+      registry,
+      "fast-research",
+      managed,
+      { research: research("fast-research") },
+      undefined,
+      1,
+    );
+    register(
+      registry,
+      "slow-research",
+      managed,
+      { research: research("slow-research") },
+      undefined,
+      2,
+    );
+    registry.recordOutcome("slow-fetch", { success: true, latencyMs: 500 });
+    registry.recordOutcome("fast-fetch", { success: true, latencyMs: 10 });
+    registry.recordOutcome("slow-research", { success: true, latencyMs: 800 });
+    registry.recordOutcome("fast-research", { success: true, latencyMs: 20 });
+
+    expect(
+      registry
+        .selectFetchCandidates("best-performing")
+        .map((p) => p.name),
+    ).toEqual(["fast-fetch", "slow-fetch"]);
+    expect(
+      registry
+        .selectResearchCandidates("best-performing")
+        .map((p) => p.name),
+    ).toEqual(["fast-research", "slow-research"]);
+  });
+
+  it("returns the highest-scored eligible provider for code-search and docs", () => {
+    const { registry } = memory();
+    register(registry, "low-code", managed, { codeSearch: codeSearch("low-code") }, undefined, 1);
+    register(registry, "high-code", managed, { codeSearch: codeSearch("high-code") }, undefined, 2);
+    register(registry, "low-docs", managed, { docs: docs("low-docs") }, undefined, 1);
+    register(registry, "high-docs", managed, { docs: docs("high-docs") }, undefined, 2);
+    registry.recordOutcome("low-code", { success: true, latencyMs: 500 });
+    registry.recordOutcome("high-code", { success: true, latencyMs: 20 });
+    registry.recordOutcome("low-docs", { success: true, latencyMs: 600 });
+    registry.recordOutcome("high-docs", { success: true, latencyMs: 30 });
+
+    expect(registry.selectCodeSearch("best-performing")?.name).toBe("high-code");
+    expect(registry.selectDocsByStrategy("best-performing")?.name).toBe("high-docs");
+  });
+
+  it("filters exhausted providers from every capability selector", () => {
+    // Pre-load counters at the limit so providers are immediately exhausted.
+    const save = vi.fn();
+    const registry = new ProviderRegistry({
+      load: () => ({ version: 2, counters: {} }),
+      save,
+    });
+    register(registry, "exhausted-search", hard(1), { search: search("exhausted-search") });
+    register(registry, "exhausted-fetch", hard(1), { fetch: fetch("exhausted-fetch") });
+    register(registry, "exhausted-code", hard(1), { codeSearch: codeSearch("exhausted-code") });
+    register(registry, "exhausted-docs", hard(1), { docs: docs("exhausted-docs") });
+    register(registry, "exhausted-research", hard(1), { research: research("exhausted-research") });
+    registry.consume("exhausted-search", { capability: "search", maxResults: 10 });
+    registry.consume("exhausted-fetch", { capability: "fetch" });
+    registry.consume("exhausted-code", { capability: "code-search", maxResults: 10 });
+    registry.consume("exhausted-docs", { capability: "docs-search" });
+    registry.consume("exhausted-research", {
+      capability: "research",
+      type: "deep-lite",
+      maxResults: 10,
+      contentTypes: 2,
+    });
+
+    expect(registry.selectSearchCandidates("exhausted-search")).toEqual([]);
+    expect(registry.selectFetchCandidates()).toEqual([]);
+    expect(registry.selectCodeSearch()).toBeUndefined();
+    expect(registry.selectDocs("exhausted-docs")).toBeUndefined();
+    expect(registry.selectResearchCandidates()).toEqual([]);
+  });
+
+  it("returns the eligible named docs provider from the existing compat wrapper", () => {
+    const { registry } = memory();
+    register(registry, "named-docs", managed, { docs: docs("named-docs") });
+    register(registry, "other-docs", managed, { docs: docs("other-docs") });
+
+    expect(registry.selectDocs("named-docs")?.name).toBe("named-docs");
+    expect(registry.selectDocs()?.name).toBe("named-docs");
+  });
+
+  it("calls usageCost with the exact research operation before delegation", async () => {
+    const { registry } = memory();
+    const client = research("exa");
+    let capturedOp: unknown = undefined;
+    register(
+      registry,
+      "exa",
+      hard(10),
+      { research: client },
+      function (op) {
+        capturedOp = op;
+        return 1;
+      },
+      1,
+    );
+    vi.mocked(client.deepResearch).mockResolvedValue({
+      results: [],
+      raw: {},
+      metadata: {},
+    });
+
+    await registry
+      .selectResearchCandidates()[0]
+      .deepResearch(
+        {
+          query: "test",
+          type: "deep",
+          numResults: 12,
+          summaryQuery: "summarize",
+        },
+      );
+
+    expect(capturedOp).toEqual({
+      capability: "research",
+      type: "deep",
+      maxResults: 12,
+      contentTypes: 3,
+    });
+  });
+
+  it("exposes fresh execution hook closures recording through registry", () => {
+    const { registry } = memory();
+    const hooksA = registry.getExecutionHooks();
+    const hooksB = registry.getExecutionHooks();
+    expect(hooksA).not.toBe(hooksB);
+    hooksA.onSuccess?.("exa", 100);
+    hooksA.onFailure?.("exa");
+    hooksB.onSuccess?.("exa", 50);
+    const metrics = registry.getMetrics("exa")!;
+    expect(metrics.successes).toBe(2);
+    expect(metrics.failures).toBe(1);
+    expect(metrics.avgLatency).toBeCloseTo((100 + 50) / 2);
+  });
+
+  it("does not include research methods when no research capability is registered", () => {
+    const { registry } = memory();
+    register(registry, "fetch-only", managed, { fetch: fetch("fetch-only") });
+    expect(registry.selectResearchCandidates()).toEqual([]);
   });
 });

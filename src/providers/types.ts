@@ -1,6 +1,10 @@
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { ProviderConfigEntry } from "../config.ts";
-import type { ExaDeepType } from "../research/types.ts";
+import type {
+  DeepResearchParams,
+  DeepResearchResponse,
+  ExaDeepType,
+} from "../research/types.ts";
 
 export interface SearchResult {
   title: string;
@@ -61,6 +65,15 @@ export interface CodeSearchProvider {
   codeSearch(query: string, maxResults: number, signal?: AbortSignal): Promise<CodeSearchResult[]>;
 }
 
+export interface ResearchProvider {
+  readonly name: string;
+  readonly label: string;
+  deepResearch(
+    params: DeepResearchParams,
+    signal?: AbortSignal,
+  ): Promise<DeepResearchResponse>;
+}
+
 export type ProviderTier = 1 | 2 | 3;
 
 export type ProviderOperation =
@@ -75,6 +88,8 @@ export type ProviderOperation =
       maxResults: number;
       contentTypes: number;
     };
+
+export type ProviderCapability = ProviderOperation["capability"];
 
 export type UsageCost = (operation: ProviderOperation, config: ProviderConfigEntry) => number;
 
@@ -92,6 +107,7 @@ export interface ProviderMeta {
     fetch?: FetchProvider;
     codeSearch?: CodeSearchProvider;
     docs?: DocsProvider;
+    research?: ResearchProvider;
   };
 }
 

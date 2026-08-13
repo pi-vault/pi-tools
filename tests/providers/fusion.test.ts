@@ -846,4 +846,76 @@ describe("executeWithFusion", () => {
       expect(result.degraded).toBe(false);
     });
   });
+
+  describe("signal propagation and shared hooks", () => {
+    it("rethrows pre-flight signal abort as a thrown error", async () => {
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        executeWithFusion({
+          candidates: [
+            {
+              name: "a",
+              execute: async (_n: number) =>
+                [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
+            },
+          ],
+          maxResults: 1,
+          mode: "all",
+          targetBackends: 1,
+          k: 60,
+          signal: controller.signal,
+        }),
+      ).rejects.toThrow("aborted");
+    });
+
+    it("invokes shared onSuccess exactly once per usable attempt", async () => {
+      const onSuccess = vi.fn();
+      await executeWithFusion({
+        candidates: [
+          {
+            name: "a",
+            execute: async (_n: number) =>
+              [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
+          },
+          {
+            name: "b",
+            execute: async (_n: number) =>
+              [{ title: "B", url: "https://b.com", snippet: "b" }] as SearchResult[],
+          },
+        ],
+        maxResults: 4,
+        mode: "all",
+        targetBackends: 2,
+        k: 60,
+        onSuccess,
+      });
+      expect(onSuccess).toHaveBeenCalledTimes(2);
+    });
+
+    it("records cancellation as no provider failure", async () => {
+      const onFailure = vi.fn();
+      const controller = new AbortController();
+      await expect(
+        executeWithFusion({
+          candidates: [
+            {
+              name: "a",
+              execute: async (_n: number): Promise<SearchResult[]> => {
+                controller.abort();
+                throw new Error("aborted");
+              },
+            },
+          ],
+          maxResults: 1,
+          mode: "all",
+          targetBackends: 1,
+          k: 60,
+          signal: controller.signal,
+          onFailure,
+        }),
+      ).rejects.toThrow();
+      expect(onFailure).not.toHaveBeenCalled();
+    });
+  });
 });

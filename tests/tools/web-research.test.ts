@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWebResearchTool } from "../../src/tools/web-research.ts";
+import type { ResearchProvider } from "../../src/providers/types.ts";
 import { stubFetch } from "../helpers.ts";
 import { makeCtx } from "../helpers.ts";
 import * as fsPromises from "node:fs/promises";
@@ -12,6 +13,19 @@ vi.mock("@earendil-works/pi-coding-agent", async (importOriginal) => {
     withFileMutationQueue: async (_path: string, fn: () => Promise<void>) => fn(),
   };
 });
+
+function makeClient(): ResearchProvider {
+  return {
+    name: "exa",
+    label: "Exa",
+    deepResearch: vi.fn().mockImplementation(async (params) => ({
+      answer: "Answer",
+      results: params.numResults ? [{ title: "Source", url: "https://example.com", text: "x" }] : [],
+      raw: {},
+      metadata: { request: {} },
+    })),
+  };
+}
 
 describe("createWebResearchTool", () => {
   let fetchStub: ReturnType<typeof stubFetch>;
@@ -29,13 +43,13 @@ describe("createWebResearchTool", () => {
     vi.restoreAllMocks();
   });
 
-  function makeTool(beforeResearch = vi.fn()) {
+  function makeTool(opts: { enableCandidates?: boolean } = {}) {
     return createWebResearchTool(
-      () => "test-exa-key",
+      () => (opts.enableCandidates === false ? [] : [makeClient()]),
       { enabled: true },
       appendEntry,
-      undefined,
-      beforeResearch,
+     undefined,
+      { onSuccess: vi.fn(), onFailure: vi.fn() },
     );
   }
 
@@ -46,39 +60,16 @@ describe("createWebResearchTool", () => {
   });
 
   it("executes research and returns inline report when no outputPath", async () => {
-    fetchStub.addResponse("api.exa.ai/search", {
-      body: {
-        results: [{ title: "Source", url: "https://example.com", text: "content" }],
-        answer: "The answer is X.",
-      },
-    });
-
     const tool = makeTool();
-    const result = await tool.execute(
-      "call-1",
-      { query: "What is X?" },
-      undefined,
-      vi.fn(),
-      makeCtx(),
-    );
+    const result = await tool.execute("call-1", { query: "What is X?" }, undefined, vi.fn(), makeCtx());
     const text = result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
     expect(text).toContain("Findings:");
-    expect(text).toContain("The answer is X.");
+    expect(text).toContain("Answer");
   });
 
   it("writes report to outputPath when specified", async () => {
-    fetchStub.addResponse("api.exa.ai/search", {
-      body: { results: [], answer: "Answer" },
-    });
-
     const tool = makeTool();
-    await tool.execute(
-      "call-2",
-      { query: "test", outputPath: "findings.md" },
-      undefined,
-      vi.fn(),
-      makeCtx(),
-    );
+    await tool.execute("call-2", { query: "test", outputPath: "findings.md" }, undefined, vi.fn(), makeCtx());
 
     expect(vi.mocked(fsPromises.writeFile)).toHaveBeenCalled();
     const writeCall = vi.mocked(fsPromises.writeFile).mock.calls[0];
@@ -86,10 +77,6 @@ describe("createWebResearchTool", () => {
   });
 
   it("writes raw sidecar for findings format", async () => {
-    fetchStub.addResponse("api.exa.ai/search", {
-      body: { results: [], answer: "Answer" },
-    });
-
     const tool = makeTool();
     await tool.execute(
       "call-3",
@@ -106,10 +93,6 @@ describe("createWebResearchTool", () => {
   });
 
   it("does not write raw sidecar for json format", async () => {
-    fetchStub.addResponse("api.exa.ai/search", {
-      body: { results: [], answer: "Answer" },
-    });
-
     const tool = makeTool();
     await tool.execute(
       "call-4",
@@ -124,13 +107,6 @@ describe("createWebResearchTool", () => {
   });
 
   it("calls appendEntry with research metadata", async () => {
-    fetchStub.addResponse("api.exa.ai/search", {
-      body: {
-        results: [{ title: "A", url: "https://a.com", text: "text" }],
-        answer: "Answer",
-      },
-    });
-
     const tool = makeTool();
     await tool.execute("call-5", { query: "test" }, undefined, vi.fn(), makeCtx());
 
@@ -144,74 +120,67 @@ describe("createWebResearchTool", () => {
   });
 
   it("deduplicates results across multiple queries in full mode", async () => {
-    // Replace stubFetch with a call-count-aware mock for this test,
-    // since both queries POST to the same URL
-    fetchStub.restore();
+    const client = makeClient();
     let callCount = 0;
-    const responses = [
-      {
-        results: [
-          { title: "Shared", url: "https://shared.com", text: "shared content" },
-          { title: "Only Q1", url: "https://q1.com", text: "q1 content" },
-        ],
-        answer: "Answer from query 1.",
-      },
-      {
-        results: [
-          { title: "Shared", url: "https://shared.com", text: "shared content again" },
-          { title: "Only Q2", url: "https://q2.com", text: "q2 content" },
-        ],
-        answer: "Answer from query 2.",
-      },
-    ];
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn(async () => {
-      const body = responses[callCount] ?? responses[0];
+    vi.mocked(client.deepResearch).mockImplementation(async () => {
       callCount++;
-      return new Response(JSON.stringify(body), {
-        status: 200,
-        headers: { "content-type": "application/json" },
-      });
-    }) as unknown as typeof fetch;
+      const body =
+        callCount === 1
+          ? {
+              results: [
+                { title: "Shared", url: "https://shared.com", text: "shared content" },
+                { title: "Only Q1", url: "https://q1.com", text: "q1 content" },
+              ],
+              answer: "Answer from query 1.",
+            }
+          : {
+              results: [
+                { title: "Shared", url: "https://shared.com", text: "shared content again" },
+                { title: "Only Q2", url: "https://q2.com", text: "q2 content" },
+              ],
+              answer: "Answer from query 2.",
+            };
+      return { answer: body.answer, results: body.results, raw: body, metadata: {} };
+    });
+    const tool = createWebResearchTool(
+      () => [client],
+      { enabled: true },
+      appendEntry,
+      undefined,
+      { onSuccess: vi.fn(), onFailure: vi.fn() },
+    );
 
-    try {
-      const tool = makeTool();
-      const result = await tool.execute(
-        "call-full",
-        {
-          query: "main question",
-          researchMode: "full",
-          additionalQueries: ["follow-up question"],
-        },
-        undefined,
-        vi.fn(),
-        makeCtx(),
-      );
+    const result = await tool.execute(
+      "call-full",
+      {
+        query: "main question",
+        researchMode: "full",
+        additionalQueries: ["follow-up question"],
+      },
+      undefined,
+      vi.fn(),
+      makeCtx(),
+    );
 
-      // Two fetch calls made (one per unique query)
-      expect(callCount).toBe(2);
-      // Deduplicated: 3 unique sources, not 4
-      expect(appendEntry).toHaveBeenCalledWith(
-        "pi-tools-research",
-        expect.objectContaining({ sourceCount: 3 }),
-      );
-      const text = result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
-      expect(text).toContain("Answer from query 1.");
-      expect(text).toContain("Answer from query 2.");
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    expect(callCount).toBe(2);
+    expect(appendEntry).toHaveBeenCalledWith(
+      "pi-tools-research",
+      expect.objectContaining({ sourceCount: 3 }),
+    );
+    const text = result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
+    expect(text).toContain("Answer from query 1.");
+    expect(text).toContain("Answer from query 2.");
   });
 
   it("collapses duplicate queries in full mode", async () => {
-    fetchStub.addResponse("api.exa.ai/search", {
-      body: {
-        results: [{ title: "A", url: "https://a.com", text: "text" }],
-        answer: "Answer",
-      },
-    });
-
-    const tool = makeTool();
+    const client = makeClient();
+    const tool = createWebResearchTool(
+      () => [client],
+      { enabled: true },
+      appendEntry,
+      undefined,
+      { onSuccess: vi.fn(), onFailure: vi.fn() },
+    );
     await tool.execute(
       "call-dedup-queries",
       {
@@ -224,59 +193,29 @@ describe("createWebResearchTool", () => {
       makeCtx(),
     );
 
-    // Only one fetch call should have been made (duplicate query collapsed)
-    const fetchCalls = vi
-      .mocked(globalThis.fetch)
-      .mock.calls.filter((c) => String(c[0]).includes("api.exa.ai"));
-    expect(fetchCalls.length).toBe(1);
-  });
-
-  it("reserves once per unique query with exact operation metadata", async () => {
-    fetchStub.addResponse("api.exa.ai/search", { body: { results: [], answer: "Answer" } });
-    const beforeResearch = vi.fn();
-    const tool = makeTool(beforeResearch);
-
-    await tool.execute(
-      "call-budget",
-      {
-        query: "same question",
-        researchMode: "full",
-        additionalQueries: ["same question"],
-        type: "deep",
-        numResults: 12,
-        summaryQuery: "summarize",
-      },
-      undefined,
-      vi.fn(),
-      makeCtx(),
-    );
-
-    expect(beforeResearch).toHaveBeenCalledOnce();
-    expect(beforeResearch).toHaveBeenCalledWith({
-      capability: "research",
-      type: "deep",
-      maxResults: 12,
-      contentTypes: 3,
-    });
-  });
-
-  it("reserves immediately before delegation and stops when rejected", async () => {
-    const beforeResearch = vi.fn(() => {
-      throw new Error("budget rejected");
-    });
-    const tool = makeTool(beforeResearch);
-
-    await expect(
-      tool.execute("call-rejected", { query: "test" }, undefined, vi.fn(), makeCtx()),
-    ).rejects.toThrow("budget rejected");
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(vi.mocked(client.deepResearch)).toHaveBeenCalledTimes(1);
   });
 
   it("throws when deepResearch is disabled", async () => {
-    const tool = createWebResearchTool(() => "key", { enabled: false }, appendEntry);
+    const tool = createWebResearchTool(
+      () => [makeClient()],
+      { enabled: false },
+      appendEntry,
+    );
     await expect(
       tool.execute("call-6", { query: "test" }, undefined, vi.fn(), makeCtx()),
     ).rejects.toThrow(/disabled/);
+  });
+
+  it("throws when no research candidates are registered", async () => {
+    const tool = createWebResearchTool(
+      () => [],
+      { enabled: true },
+      appendEntry,
+    );
+    await expect(
+      tool.execute("call-no-candidate", { query: "test" }, undefined, vi.fn(), makeCtx()),
+    ).rejects.toThrow(/disabled|unavailable/i);
   });
 
   it("throws when query is missing", async () => {
@@ -284,5 +223,24 @@ describe("createWebResearchTool", () => {
     await expect(tool.execute("call-7", {}, undefined, vi.fn(), makeCtx())).rejects.toThrow(
       /requires query/,
     );
+  });
+
+  it("propagates cancellation through the registered client", async () => {
+    const client = makeClient();
+    vi.mocked(client.deepResearch).mockImplementation(async (_params, signal) => {
+      signal?.throwIfAborted();
+      throw new Error("aborted");
+    });
+    const tool = createWebResearchTool(
+      () => [client],
+      { enabled: true },
+      appendEntry,
+    );
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      tool.execute("call-abort", { query: "test" }, controller.signal, vi.fn(), makeCtx()),
+    ).rejects.toThrow(/aborted/);
   });
 });

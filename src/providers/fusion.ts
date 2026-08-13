@@ -1,7 +1,7 @@
 import type { SearchResult } from "./types.ts";
-import { AggregateProviderError } from "../utils/errors.ts";
-import { activityMonitor } from "../monitor/activity-monitor.ts";
+import { AggregateProviderError, sanitizeError } from "../utils/errors.ts";
 import { BudgetExceededError } from "./registry.ts";
+import { type ExecutionHooks, executeAttempt } from "./execute.ts";
 
 export interface ProviderResults {
   providerName: string;
@@ -73,14 +73,13 @@ export interface FusionCandidate {
   execute: (numResults: number) => Promise<SearchResult[]>;
 }
 
-export interface FusionOptions {
+export interface FusionOptions extends ExecutionHooks {
   candidates: FusionCandidate[];
   maxResults: number;
   mode: "targeted" | "all";
   targetBackends: number;
   k: number;
-  onSuccess?: (providerName: string, latencyMs: number) => void;
-  onFailure?: (providerName: string) => void;
+  signal?: AbortSignal;
 }
 
 export interface FusionResult {
@@ -91,7 +90,8 @@ export interface FusionResult {
 }
 
 export async function executeWithFusion(options: FusionOptions): Promise<FusionResult> {
-  const { candidates, maxResults, mode, targetBackends, k, onSuccess, onFailure } = options;
+  const { candidates, maxResults, mode, targetBackends, k, signal, onSuccess, onFailure } =
+    options;
 
   if (candidates.length === 0) {
     throw new AggregateProviderError("search", [
@@ -100,7 +100,7 @@ export async function executeWithFusion(options: FusionOptions): Promise<FusionR
   }
 
   const effectiveTarget = mode === "all" ? candidates.length : targetBackends;
-  return executeTargeted(candidates, maxResults, effectiveTarget, k, onSuccess, onFailure);
+  return executeTargeted(candidates, maxResults, effectiveTarget, k, onSuccess, onFailure, signal);
 }
 
 async function executeTargeted(
@@ -108,8 +108,9 @@ async function executeTargeted(
   maxResults: number,
   targetBackends: number,
   k: number,
-  onSuccess?: (name: string, latencyMs: number) => void,
-  onFailure?: (name: string) => void,
+  onSuccess?: ExecutionHooks["onSuccess"],
+  onFailure?: ExecutionHooks["onFailure"],
+  signal?: AbortSignal,
 ): Promise<FusionResult> {
   const perProvider = Math.ceil(maxResults / targetBackends);
   const providersUsed: string[] = [];
@@ -126,25 +127,26 @@ async function executeTargeted(
     cursor += batchSize;
 
     const batchSettled = await Promise.all(
-      batch.map(async (candidate) => {
-        const entryId = activityMonitor.logStart({
-          type: "api",
-          query: `fusion:${candidate.name}`,
-        });
-        const startMs = Date.now();
+      batch.map(async (candidate): Promise<FusionBatchOutcome> => {
+        signal?.throwIfAborted();
         try {
-          const results = await candidate.execute(perProvider);
-          const latencyMs = Date.now() - startMs;
-          onSuccess?.(candidate.name, latencyMs);
-          activityMonitor.logComplete(entryId, 200);
+          const results = await executeAttempt({
+            candidate: {
+              name: candidate.name,
+              execute: () => candidate.execute(perProvider),
+            },
+            operation: "search",
+            signal,
+            activityQuery: `fusion:${candidate.name}`,
+            onSuccess,
+            onFailure,
+          });
           return { name: candidate.name, results, success: true as const };
-        } catch (err) {
-          const budgetRejected = err instanceof BudgetExceededError;
-          if (!budgetRejected) onFailure?.(candidate.name);
-          activityMonitor.logError(entryId, err instanceof Error ? err.message : String(err));
+        } catch (error) {
+          const budgetRejected = error instanceof BudgetExceededError;
           return {
             name: candidate.name,
-            error: err instanceof Error ? err.message : String(err),
+            error: sanitizeError(error),
             budgetRejected,
             success: false as const,
           };
@@ -166,6 +168,8 @@ async function executeTargeted(
         }
       }
     }
+
+    signal?.throwIfAborted();
   }
 
   if (usableResults.length === 0) {
@@ -191,3 +195,7 @@ async function executeTargeted(
     degraded: usableResults.length < Math.min(targetBackends, candidates.length),
   };
 }
+
+type FusionBatchOutcome =
+  | { success: true; name: string; results: SearchResult[] }
+  | { success: false; name: string; error: string; budgetRejected: boolean };

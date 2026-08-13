@@ -204,6 +204,7 @@ export function createWebSearchTool(
             mode: combineConfig.mode,
             targetBackends: combineConfig.targetBackends,
             k: combineConfig.k,
+            signal,
             onSuccess,
             onFailure,
           });

@@ -40,6 +40,8 @@ function synthesizeAnswer(raw: any): string | undefined {
 }
 
 export class ExaDeepResearchClient {
+  readonly name = "exa";
+  readonly label = "Exa";
   private readonly apiKey: string;
   private readonly baseUrl: string;
 

@@ -2,6 +2,8 @@ import { Type } from "typebox";
 import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { DocsProvider, DocsSearchResult } from "../providers/types.ts";
+import type { ExecutionHooks } from "../providers/execute.ts";
+import { executeAttempt } from "../providers/execute.ts";
 import type { GuidanceOverride } from "../config.ts";
 
 const MAX_SEARCH_RESULTS = 10;
@@ -89,6 +91,7 @@ function formatResultsTable(libraryName: string, results: DocsSearchResult[]): s
 export function createWebDocsSearchTool(
   resolveProvider: () => DocsProvider | undefined,
   guidance?: GuidanceOverride,
+  executionHooks?: ExecutionHooks,
 ): ToolDefinition<typeof WebDocsSearchParams, WebDocsSearchDetails> {
   return {
     name: "web_docs_search",
@@ -130,7 +133,16 @@ export function createWebDocsSearchTool(
 
       // API errors propagate as throws — Pi marks the tool result as failed.
       // This differs from code-search which catches and returns errors as text.
-      const results = await provider.searchLibrary(libraryName, query, signal ?? undefined);
+      const results = await executeAttempt({
+        candidate: {
+          name: provider.name,
+          execute: () => provider.searchLibrary(libraryName, query, signal ?? undefined),
+        },
+        operation: "docs-search",
+        signal: signal ?? undefined,
+        onSuccess: executionHooks?.onSuccess,
+        onFailure: executionHooks?.onFailure,
+      });
       const text = formatResultsTable(libraryName, results);
 
       return {

@@ -12,8 +12,10 @@ import type {
   CodeSearchProvider,
   DocsProvider,
   FetchProvider,
+  ProviderCapability,
   ProviderOperation,
   ProviderTier,
+  ResearchProvider,
   SearchProvider,
   UsageCost,
 } from "./types.ts";
@@ -63,6 +65,11 @@ interface RegisteredPolicy {
   usageCost?: UsageCost;
 }
 
+interface RegisteredProvider<T> {
+  provider: T;
+  tier: ProviderTier;
+}
+
 export interface ProviderMetrics {
   successes: number;
   failures: number;
@@ -71,6 +78,11 @@ export interface ProviderMetrics {
   avgResultRatio: number;
   resultSamples: number;
   windowStart: number;
+}
+
+export interface ExecutionHooks {
+  onSuccess?: (providerName: string, latencyMs: number) => void;
+  onFailure?: (providerName: string) => void;
 }
 
 const METRICS_WINDOW_MS = 60_000;
@@ -137,11 +149,19 @@ export class BudgetExceededError extends Error {
   }
 }
 
+type AnyRegistered =
+  | RegisteredProvider<SearchProvider>
+  | RegisteredProvider<FetchProvider>
+  | RegisteredProvider<CodeSearchProvider>
+  | RegisteredProvider<DocsProvider>
+  | RegisteredProvider<ResearchProvider>;
+
 export class ProviderRegistry {
-  private searchProviders = new Map<string, { provider: SearchProvider; tier: ProviderTier }>();
-  private fetchProviders = new Map<string, FetchProvider>();
-  private codeSearchProviders = new Map<string, CodeSearchProvider>();
-  private docsProviders = new Map<string, DocsProvider>();
+  private searchProviders = new Map<string, RegisteredProvider<SearchProvider>>();
+  private fetchProviders = new Map<string, RegisteredProvider<FetchProvider>>();
+  private codeSearchProviders = new Map<string, RegisteredProvider<CodeSearchProvider>>();
+  private docsProviders = new Map<string, RegisteredProvider<DocsProvider>>();
+  private researchProviders = new Map<string, RegisteredProvider<ResearchProvider>>();
   private policies = new Map<string, RegisteredPolicy>();
   private metrics = new Map<string, ProviderMetrics>();
   private counters: Record<string, UsageCounter> = {};
@@ -163,6 +183,7 @@ export class ProviderRegistry {
       fetch?: FetchProvider;
       codeSearch?: CodeSearchProvider;
       docs?: DocsProvider;
+      research?: ResearchProvider;
     },
     options: {
       name: string;
@@ -194,35 +215,63 @@ export class ProviderRegistry {
     if (instances.fetch) {
       const provider = instances.fetch;
       this.fetchProviders.set(options.name, {
-        name: provider.name,
-        fetch: async (url, signal) => {
-          this.consume(options.name, { capability: "fetch" });
-          return provider.fetch(url, signal);
+        tier: options.tier,
+        provider: {
+          name: provider.name,
+          fetch: async (url, signal) => {
+            this.consume(options.name, { capability: "fetch" });
+            return provider.fetch(url, signal);
+          },
         },
       });
     }
     if (instances.codeSearch) {
       const provider = instances.codeSearch;
       this.codeSearchProviders.set(options.name, {
-        name: provider.name,
-        codeSearch: async (query, maxResults, signal) => {
-          this.consume(options.name, { capability: "code-search", maxResults });
-          return provider.codeSearch(query, maxResults, signal);
+        tier: options.tier,
+        provider: {
+          name: provider.name,
+          codeSearch: async (query, maxResults, signal) => {
+            this.consume(options.name, { capability: "code-search", maxResults });
+            return provider.codeSearch(query, maxResults, signal);
+          },
         },
       });
     }
     if (instances.docs) {
       const provider = instances.docs;
       this.docsProviders.set(options.name, {
-        name: provider.name,
-        label: provider.label,
-        searchLibrary: async (libraryName, query, signal) => {
-          this.consume(options.name, { capability: "docs-search" });
-          return provider.searchLibrary(libraryName, query, signal);
+        tier: options.tier,
+        provider: {
+          name: provider.name,
+          label: provider.label,
+          searchLibrary: async (libraryName, query, signal) => {
+            this.consume(options.name, { capability: "docs-search" });
+            return provider.searchLibrary(libraryName, query, signal);
+          },
+          getContext: async (libraryId, query, signal) => {
+            this.consume(options.name, { capability: "docs-fetch" });
+            return provider.getContext(libraryId, query, signal);
+          },
         },
-        getContext: async (libraryId, query, signal) => {
-          this.consume(options.name, { capability: "docs-fetch" });
-          return provider.getContext(libraryId, query, signal);
+      });
+    }
+    if (instances.research) {
+      const provider = instances.research;
+      this.researchProviders.set(options.name, {
+        tier: options.tier,
+        provider: {
+          name: provider.name,
+          label: provider.label,
+          deepResearch: async (params, signal) => {
+            this.consume(options.name, {
+              capability: "research",
+              type: params.type,
+              maxResults: params.numResults ?? 10,
+              contentTypes: 2 + (params.summaryQuery ? 1 : 0),
+            });
+            return provider.deepResearch(params, signal);
+          },
         },
       });
     }
@@ -354,6 +403,7 @@ export class ProviderRegistry {
     this.fetchProviders.delete(name);
     this.codeSearchProviders.delete(name);
     this.docsProviders.delete(name);
+    this.researchProviders.delete(name);
     this.policies.delete(name);
   }
 
@@ -378,6 +428,15 @@ export class ProviderRegistry {
     metrics.avgResultRatio += (ratio - metrics.avgResultRatio) / metrics.resultSamples;
   }
 
+  /** Returns fresh closures so each shared attempt sees its own callback wiring. */
+  getExecutionHooks(): ExecutionHooks {
+    return {
+      onSuccess: (providerName, latencyMs) =>
+        this.recordOutcome(providerName, { success: true, latencyMs }),
+      onFailure: (providerName) => this.recordOutcome(providerName, { success: false }),
+    };
+  }
+
   private getOrCreateMetrics(providerName: string): ProviderMetrics {
     const existing = this.getActiveMetrics(providerName);
     if (existing) return existing;
@@ -399,59 +458,105 @@ export class ProviderRegistry {
     return metrics && Date.now() - metrics.windowStart <= METRICS_WINDOW_MS ? metrics : undefined;
   }
 
-  private scoreEligibleProviders(): Array<{ provider: SearchProvider; score: number }> {
-    const eligible = [...this.searchProviders.entries()].filter(([name]) => this.isEligible(name));
-    const measured = eligible.flatMap(([name, registration]) => {
-      const metrics = this.getActiveMetrics(name);
-      if (!metrics || metrics.successes + metrics.failures === 0) return [];
-      return [
-        {
-          provider: registration.provider,
+  private capabilityMap<T>(capability: ProviderCapability): Map<string, RegisteredProvider<T>> {
+    switch (capability) {
+      case "search":
+        return this.searchProviders as unknown as Map<string, RegisteredProvider<T>>;
+      case "fetch":
+        return this.fetchProviders as unknown as Map<string, RegisteredProvider<T>>;
+      case "code-search":
+        return this.codeSearchProviders as unknown as Map<string, RegisteredProvider<T>>;
+      case "docs-search":
+      case "docs-fetch":
+        return this.docsProviders as unknown as Map<string, RegisteredProvider<T>>;
+      case "research":
+        return this.researchProviders as unknown as Map<string, RegisteredProvider<T>>;
+    }
+  }
+
+  private genericByTier<T>(capability: ProviderCapability): RegisteredProvider<T>[] {
+    const map = this.capabilityMap<T>(capability);
+    const order: AnyRegistered[] = [];
+    for (const tier of [1, 2, 3] as const) {
+      for (const registration of map.values()) {
+        if (registration.tier === tier) order.push(registration as AnyRegistered);
+      }
+    }
+    return order as RegisteredProvider<T>[];
+  }
+
+  private genericEligible<T>(capability: ProviderCapability): Array<[string, RegisteredProvider<T>]> {
+    const map = this.capabilityMap<T>(capability);
+    return [...map.entries()].filter(([name]) => this.isEligible(name)) as Array<
+      [string, RegisteredProvider<T>]
+    >;
+  }
+
+  private scoreRegistered<T>(
+    entries: Array<[string, RegisteredProvider<T>]>,
+  ): Array<{ name: string; provider: T; score: number }> {
+    const measured = entries
+      .map(([name, registration]) => {
+        const metrics = this.getActiveMetrics(name);
+        if (!metrics || metrics.successes + metrics.failures === 0) return undefined;
+        return {
+          name,
+          registration,
           successRate: metrics.successes / (metrics.successes + metrics.failures),
           latency: metrics.latencySamples ? metrics.avgLatency : Infinity,
           quality: metrics.resultSamples ? metrics.avgResultRatio : 0.5,
-        },
-      ];
-    });
+        };
+      })
+      .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
     const finite = measured.map((entry) => entry.latency).filter(Number.isFinite);
     const maxLatency = finite.length ? Math.max(...finite) : 1;
 
-    return eligible
+    return entries
       .map(([name, registration]) => {
-        const entry = measured.find((candidate) => candidate.provider.name === name);
-        if (!entry) return { provider: registration.provider, score: 0.5 };
-        const speed = entry.latency === Infinity ? 0 : Math.max(0, 1 - entry.latency / maxLatency);
+        const entry = measured.find((candidate) => candidate.name === name);
+        if (!entry) return { name, provider: registration.provider, score: 0.5 };
+        const speed =
+          entry.latency === Infinity ? 0 : Math.max(0, 1 - entry.latency / maxLatency);
         return {
+          name,
           provider: registration.provider,
           score: entry.successRate * 0.5 + speed * 0.3 + entry.quality * 0.2,
         };
       })
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        // Stable: map insertion order tie-break happens via registration index
+        return 0;
+      });
   }
+
+  // ---- Search (legacy compatibility) ----
 
   selectSearchCandidates(name?: string): SearchProvider[] {
     if (name && name !== "auto") {
-      const provider = this.searchProviders.get(name)?.provider;
-      return provider ? [provider] : [];
+      const registration = this.searchProviders.get(name);
+      if (!registration) return [];
+      if (!this.isEligible(name)) return [];
+      return [registration.provider];
     }
-    const candidates: SearchProvider[] = [];
-    for (const tier of [1, 2, 3] as const) {
-      for (const [providerName, registration] of this.searchProviders) {
-        if (registration.tier === tier && this.isEligible(providerName)) {
-          candidates.push(registration.provider);
-        }
-      }
-    }
-    return candidates;
+    return this.genericByTier<SearchProvider>("search")
+      .filter((registration) => this.isEligible(registration.provider.name))
+      .map((registration) => registration.provider);
   }
 
   selectSearchByPerformance(name?: string): SearchProvider | undefined {
-    if (name && name !== "auto") return this.searchProviders.get(name)?.provider;
-    return this.scoreEligibleProviders()[0]?.provider;
+    if (name && name !== "auto") {
+      const registration = this.searchProviders.get(name);
+      if (!registration || !this.isEligible(name)) return undefined;
+      return registration.provider;
+    }
+    return this.scoreRegistered(this.genericEligible<SearchProvider>("search"))[0]?.provider;
   }
 
   selectSearchByPerformanceAll(): SearchProvider[] {
-    return this.scoreEligibleProviders().map(({ provider }) => provider);
+    return this.scoreRegistered(this.genericEligible<SearchProvider>("search")).map(
+      ({ provider }) => provider,
+    );
   }
 
   selectSearchForFusion(strategy: SelectionStrategy, name?: string): SearchProvider[] {
@@ -461,21 +566,82 @@ export class ProviderRegistry {
       : this.selectSearchCandidates();
   }
 
-  selectFetchCandidates(): FetchProvider[] {
-    return [...this.fetchProviders.entries()]
-      .filter(([name]) => this.isEligible(name))
-      .map(([, provider]) => provider);
+  // ---- Fetch ----
+
+  selectFetchCandidates(strategy: SelectionStrategy = "auto"): FetchProvider[] {
+    const eligible = this.genericEligible<FetchProvider>("fetch");
+    const ordered =
+      strategy === "best-performing"
+        ? this.scoreRegistered(eligible).map(({ provider }) => provider)
+        : this.genericByTier<FetchProvider>("fetch")
+            .filter((registration) => this.isEligible(registration.provider.name))
+            .map((registration) => registration.provider);
+    return ordered;
   }
 
-  selectCodeSearch(): CodeSearchProvider | undefined {
-    return [...this.codeSearchProviders.entries()].find(([name]) => this.isEligible(name))?.[1];
+  // ---- Code search ----
+
+  selectCodeSearch(strategy: SelectionStrategy = "auto"): CodeSearchProvider | undefined {
+    const eligible = this.genericEligible<CodeSearchProvider>("code-search");
+    if (eligible.length === 0) return undefined;
+    if (strategy === "best-performing") {
+      return this.scoreRegistered(eligible)[0]?.provider;
+    }
+    return this.genericByTier<CodeSearchProvider>("code-search").find((registration) =>
+      this.isEligible(registration.provider.name),
+    )?.provider;
   }
+
+  // ---- Docs ----
 
   selectDocs(name?: string): DocsProvider | undefined {
-    if (name) return this.docsProviders.get(name);
-    return [...this.docsProviders.entries()].find(([providerName]) =>
-      this.isEligible(providerName),
-    )?.[1];
+    if (name) {
+      const registration = this.docsProviders.get(name);
+      if (!registration || !this.isEligible(name)) return undefined;
+      return registration.provider;
+    }
+    return this.genericByTier<DocsProvider>("docs-search").find((registration) =>
+      this.isEligible(registration.provider.name),
+    )?.provider;
+  }
+
+  selectDocsByStrategy(
+    strategy: SelectionStrategy = "auto",
+    name?: string,
+  ): DocsProvider | undefined {
+    if (name) {
+      const registration = this.docsProviders.get(name);
+      if (!registration || !this.isEligible(name)) return undefined;
+      return registration.provider;
+    }
+    const eligible = this.genericEligible<DocsProvider>("docs-search");
+    if (eligible.length === 0) return undefined;
+    if (strategy === "best-performing") {
+      return this.scoreRegistered(eligible)[0]?.provider;
+    }
+    return this.genericByTier<DocsProvider>("docs-search").find((registration) =>
+      this.isEligible(registration.provider.name),
+    )?.provider;
+  }
+
+  // ---- Research ----
+
+  selectResearchCandidates(
+    strategy: SelectionStrategy = "auto",
+    name?: string,
+  ): ResearchProvider[] {
+    if (name) {
+      const registration = this.researchProviders.get(name);
+      if (!registration || !this.isEligible(name)) return [];
+      return [registration.provider];
+    }
+    const eligible = this.genericEligible<ResearchProvider>("research");
+    if (strategy === "best-performing") {
+      return this.scoreRegistered(eligible).map(({ provider }) => provider);
+    }
+    return this.genericByTier<ResearchProvider>("research")
+      .filter((registration) => this.isEligible(registration.provider.name))
+      .map((registration) => registration.provider);
   }
 
   getSearchProviderNames(): string[] {

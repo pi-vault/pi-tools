@@ -4,11 +4,11 @@ import { Type } from "typebox";
 import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { ExaDeepResearchClient } from "../providers/exa-deep-research.ts";
 import type { DeepResearchConfig, GuidanceOverride } from "../config.ts";
 import type { AppendEntryFn } from "../storage.ts";
-import type { ExaDeepType, ReportFormat } from "../research/types.ts";
-import type { ProviderOperation } from "../providers/types.ts";
+import type { ReportFormat } from "../research/types.ts";
+import type { ResearchProvider } from "../providers/types.ts";
+import { executeWithFallback, type ExecutionHooks } from "../providers/execute.ts";
 import { applyResearchMode, prepareResearchInput, resolveOutputPath } from "../research/prepare.ts";
 import { buildRawSidecar, defaultRawOutputPath, renderFindingsReport } from "../research/report.ts";
 
@@ -115,11 +115,11 @@ function displayPath(cwd: string | undefined, filePath: string): string {
 }
 
 export function createWebResearchTool(
-  resolveExaApiKey: () => string | undefined,
+  resolveResearchCandidates: () => ResearchProvider[],
   deepResearchConfig: DeepResearchConfig,
   appendEntry: AppendEntryFn,
   guidance?: GuidanceOverride,
-  beforeResearch?: (operation: Extract<ProviderOperation, { capability: "research" }>) => void,
+  executionHooks?: ExecutionHooks,
 ): ToolDefinition<typeof WebResearchParams, WebResearchDetails> {
   return {
     name: "web_research",
@@ -136,8 +136,10 @@ export function createWebResearchTool(
     ],
     parameters: WebResearchParams,
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const currentExaApiKey = resolveExaApiKey();
-      if (!currentExaApiKey) throw new Error("web_research is disabled or unavailable.");
+      const candidates = resolveResearchCandidates();
+      if (candidates.length === 0) {
+        throw new Error("web_research is disabled or unavailable.");
+      }
 
       // Defense-in-depth: config is captured at registration time
       if (!deepResearchConfig.enabled) {
@@ -148,8 +150,6 @@ export function createWebResearchTool(
       const prepared = await prepareResearchInput(cwd, params);
       const mode = applyResearchMode(prepared, deepResearchConfig.modeDefaults);
 
-      const client = new ExaDeepResearchClient(currentExaApiKey);
-
       // Full mode runs multiple queries with deduplication
       const queryList =
         mode.researchMode === "full"
@@ -159,40 +159,43 @@ export function createWebResearchTool(
           : [prepared.query];
       const uniqueQueries = Array.from(new Set(queryList));
 
-      // Execute research queries
+      // Execute research queries through shared fallback
       const responses = [];
       for (const query of uniqueQueries) {
-        beforeResearch?.({
-          capability: "research",
-          type: mode.type,
-          maxResults: mode.numResults,
-          contentTypes: 2 + (mode.summaryQuery ? 1 : 0),
+        const { result } = await executeWithFallback({
+          candidates: candidates.map((provider) => ({
+            name: provider.name,
+            execute: () =>
+              provider.deepResearch(
+                {
+                  query,
+                  type: mode.type,
+                  numResults: mode.numResults,
+                  textMaxCharacters: mode.textMaxCharacters,
+                  highlightsMaxCharacters: mode.highlightsMaxCharacters,
+                  highlightNumSentences: mode.highlightNumSentences,
+                  highlightsPerUrl: mode.highlightsPerUrl,
+                  summaryQuery: mode.summaryQuery,
+                  maxAgeHours: mode.maxAgeHours,
+                  category: mode.category,
+                  includeDomains: prepared.includeDomains,
+                  excludeDomains: prepared.excludeDomains,
+                  startPublishedDate: prepared.startPublishedDate,
+                  endPublishedDate: prepared.endPublishedDate,
+                  additionalQueries:
+                    mode.researchMode === "full" ? undefined : prepared.additionalQueries,
+                  systemPrompt: prepared.systemPrompt,
+                  outputSchema: mode.outputSchema,
+                },
+                signal ?? undefined,
+              ),
+          })),
+          operation: "research",
+          signal,
+          onSuccess: executionHooks?.onSuccess,
+          onFailure: executionHooks?.onFailure,
         });
-        responses.push(
-          await client.deepResearch(
-            {
-              query,
-              type: mode.type as ExaDeepType,
-              numResults: mode.numResults,
-              textMaxCharacters: mode.textMaxCharacters,
-              highlightsMaxCharacters: mode.highlightsMaxCharacters,
-              highlightNumSentences: mode.highlightNumSentences,
-              highlightsPerUrl: mode.highlightsPerUrl,
-              summaryQuery: mode.summaryQuery,
-              maxAgeHours: mode.maxAgeHours,
-              category: mode.category,
-              includeDomains: prepared.includeDomains,
-              excludeDomains: prepared.excludeDomains,
-              startPublishedDate: prepared.startPublishedDate,
-              endPublishedDate: prepared.endPublishedDate,
-              additionalQueries:
-                mode.researchMode === "full" ? undefined : prepared.additionalQueries,
-              systemPrompt: prepared.systemPrompt,
-              outputSchema: mode.outputSchema,
-            },
-            signal ?? undefined,
-          ),
-        );
+        responses.push(result);
       }
 
       // Deduplicate results across queries
