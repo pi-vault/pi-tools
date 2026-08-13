@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { allProviders } from "../../src/providers/all.ts";
+import { allProviders, providerCatalog } from "../../src/providers/all.ts";
+import { defaultProviderConfigs } from "../../src/providers/catalog.ts";
 
 describe("allProviders barrel", () => {
   it("exports exactly 23 providers", () => {
@@ -90,5 +91,12 @@ describe("allProviders barrel", () => {
       "websearchapi",
       "youcom",
     ]);
+  });
+
+  it("re-exports the catalog and shares the same provider set", () => {
+    const barrelNames = new Set(allProviders.map((m) => m.name));
+    const catalogNames = new Set(providerCatalog.map(({ meta }) => meta.name));
+    expect(catalogNames).toEqual(barrelNames);
+    expect(new Set(Object.keys(defaultProviderConfigs))).toEqual(barrelNames);
   });
 });

@@ -2,6 +2,7 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { defaultProviderConfigs, fallbackEnvMap } from "./providers/catalog.ts";
 import { deepMerge } from "./utils/deep-merge.ts";
 import { parseAllowRanges } from "./utils/ssrf.ts";
 import type { ResearchMode, ResearchModeDefaults } from "./research/types.ts";
@@ -120,29 +121,7 @@ export function clearCredentialCache(): void {
   commandValueCache.clear();
 }
 
-export const FALLBACK_ENV_MAP: Record<string, string> = {
-  brave: "BRAVE_API_KEY",
-  "brave-llm": "BRAVE_API_KEY",
-  exa: "EXA_API_KEY",
-  jina: "JINA_API_KEY",
-  tavily: "TAVILY_API_KEY",
-  serper: "SERPER_API_KEY",
-  firecrawl: "FIRECRAWL_API_KEY",
-  perplexity: "PERPLEXITY_API_KEY",
-  langsearch: "LANGSEARCH_API_KEY",
-  linkup: "LINKUP_API_KEY",
-  youcom: "YOUCOM_API_KEY",
-  fastcrw: "FASTCRW_API_KEY",
-  sofya: "SOFYA_API_KEY",
-  websearchapi: "WEBSEARCHAPI_API_KEY",
-  marginalia: "MARGINALIA_API_KEY",
-  context7: "CONTEXT7_API_KEY",
-  parallel: "PARALLEL_API_KEY",
-  tinyfish: "TINYFISH_API_KEY",
-  ollama: "OLLAMA_API_KEY",
-  "openai-web-search": "OPENAI_API_KEY",
-  gemini: "GEMINI_API_KEY",
-};
+export const FALLBACK_ENV_MAP: Record<string, string> = fallbackEnvMap;
 
 export const DEFAULT_GITHUB_CONFIG: GitHubConfig = {
   enabled: true,
@@ -183,107 +162,7 @@ export const DEFAULT_VIDEO_CONFIG: Required<VideoConfig> = {
 const DEFAULT_CONFIG: PiToolsConfig = {
   defaultProvider: "auto",
   selectionStrategy: "auto",
-  providers: {
-    brave: {
-      enabled: true,
-      budget: { mode: "hard", limit: 5, period: "month", unit: "usd", pool: "brave" },
-      apiKey: "BRAVE_API_KEY",
-    },
-    "brave-llm": {
-      enabled: true,
-      budget: { mode: "hard", limit: 5, period: "month", unit: "usd", pool: "brave" },
-      apiKey: "BRAVE_API_KEY",
-    },
-    context7: {
-      enabled: true,
-      budget: { mode: "hard", limit: 1000, period: "month", unit: "request" },
-      apiKey: "CONTEXT7_API_KEY",
-    },
-    duckduckgo: { enabled: true, budget: { mode: "unlimited" } },
-    exa: {
-      enabled: true,
-      budget: { mode: "hard", limit: 10, period: "month", unit: "usd", pool: "exa" },
-      apiKey: "EXA_API_KEY",
-    },
-    fastcrw: {
-      enabled: false,
-      budget: { mode: "hard", limit: 500, period: "lifetime", unit: "credit" },
-      apiKey: "FASTCRW_API_KEY",
-    },
-    firecrawl: {
-      enabled: true,
-      budget: { mode: "hard", limit: 1000, period: "month", unit: "credit" },
-      apiKey: "FIRECRAWL_API_KEY",
-    },
-    jina: { enabled: true, budget: { mode: "managed" } },
-    langsearch: {
-      enabled: false,
-      budget: { mode: "hard", limit: 1000, period: "day", unit: "request" },
-      apiKey: "LANGSEARCH_API_KEY",
-    },
-    linkup: {
-      enabled: false,
-      budget: { mode: "hard", limit: 20, period: "month", unit: "usd" },
-      apiKey: "LINKUP_API_KEY",
-    },
-    marginalia: { enabled: false, budget: { mode: "managed" } },
-    ollama: {
-      enabled: false,
-      budget: { mode: "unlimited" },
-      apiKey: "OLLAMA_API_KEY",
-    },
-    "openai-codex": { enabled: true, budget: { mode: "managed" } },
-    "openai-web-search": {
-      enabled: true,
-      budget: { mode: "managed" },
-      apiKey: "OPENAI_API_KEY",
-    },
-    parallel: {
-      enabled: false,
-      budget: { mode: "managed" },
-      apiKey: "PARALLEL_API_KEY",
-    },
-    perplexity: {
-      enabled: true,
-      budget: { mode: "managed" },
-      apiKey: "PERPLEXITY_API_KEY",
-    },
-    searxng: {
-      enabled: false,
-      budget: { mode: "unlimited" },
-      instanceUrl: "http://localhost:8080",
-    },
-    serper: {
-      enabled: false,
-      budget: { mode: "hard", limit: 2500, period: "lifetime", unit: "request" },
-      apiKey: "SERPER_API_KEY",
-    },
-    sofya: {
-      enabled: false,
-      budget: { mode: "managed" },
-      apiKey: "SOFYA_API_KEY",
-    },
-    tavily: {
-      enabled: false,
-      budget: { mode: "hard", limit: 1000, period: "month", unit: "credit" },
-      apiKey: "TAVILY_API_KEY",
-    },
-    tinyfish: {
-      enabled: true,
-      budget: { mode: "unlimited" },
-      apiKey: "TINYFISH_API_KEY",
-    },
-    websearchapi: {
-      enabled: false,
-      budget: { mode: "hard", limit: 2000, period: "month", unit: "credit" },
-      apiKey: "WEBSEARCHAPI_API_KEY",
-    },
-    youcom: {
-      enabled: false,
-      budget: { mode: "hard", limit: 100, period: "lifetime", unit: "usd" },
-      apiKey: "YOUCOM_API_KEY",
-    },
-  },
+  providers: defaultProviderConfigs,
   github: DEFAULT_GITHUB_CONFIG,
   ssrf: { allowRanges: [] },
   combine: DEFAULT_COMBINE_CONFIG,

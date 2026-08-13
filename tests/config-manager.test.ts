@@ -17,6 +17,7 @@ vi.mock("../src/config.ts", async (importOriginal) => {
 
 import { loadMergedConfig, resolveApiKey } from "../src/config.ts";
 import { providerMeta as tinyfishMeta } from "../src/providers/tinyfish.ts";
+import { stubFetch } from "./helpers.ts";
 
 const managed: ProviderBudget = { mode: "managed" };
 const hard: ProviderBudget = { mode: "hard", limit: 5, period: "month", unit: "usd" };
@@ -232,5 +233,37 @@ describe("ConfigManager", () => {
     expect(instances.fetch).toBeDefined();
     expect(registry.getSearchProviderNames()).toEqual(["tinyfish"]);
     expect(registry.getBudgetStatus("tinyfish")).toEqual({ mode: "unlimited" });
+  });
+
+  it("injects the resolved searxng key into the factory", async () => {
+    vi.mocked(loadMergedConfig).mockReturnValue(
+      makeConfig({
+        searxng: {
+          enabled: true,
+          budget: { mode: "unlimited" },
+          instanceUrl: "http://my-searx.local:9090",
+          apiKey: "SEARXNG_API_KEY",
+        },
+      }),
+    );
+    vi.mocked(resolveApiKey).mockImplementation((key) =>
+      key === "SEARXNG_API_KEY" ? "resolved-searxng-key" : key,
+    );
+
+    const searxngModule = await import("../src/providers/searxng.ts");
+    const searxngMeta = searxngModule.providerMeta;
+    const fetchStub = stubFetch();
+    fetchStub.addResponse("my-searx.local:9090", { body: { results: [] } });
+
+    const registry = memory();
+    const manager = new ConfigManager("/cwd", registry, [searxngMeta]);
+    const candidates = registry.selectSearchCandidates("searxng");
+    await candidates[0].search("test", 5);
+
+    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const headers = fetchCall[1]?.headers as Record<string, string>;
+    expect(headers["Authorization"]).toBe("Bearer resolved-searxng-key");
+    expect(manager.current.providers.searxng.enabled).toBe(true);
+    fetchStub.restore();
   });
 });

@@ -4,6 +4,7 @@ import { ContentCache } from "./cache.ts";
 import { createToolsCommand } from "./commands/tools.ts";
 import { ConfigManager } from "./config-manager.ts";
 import { allProviders } from "./providers/all.ts";
+import { providerCatalog } from "./providers/catalog.ts";
 import { createFilePersistence, ProviderRegistry } from "./providers/registry.ts";
 import type { ProviderTier } from "./providers/types.ts";
 import { ContentStore } from "./storage.ts";
@@ -139,10 +140,9 @@ export default function createExtension(pi: ExtensionAPI): void {
   );
 
   // Build tier map for status display
-  const tierMap = new Map<string, ProviderTier>();
-  for (const meta of allProviders) {
-    tierMap.set(meta.name, meta.tier);
-  }
+  const tierMap = new Map<string, ProviderTier>(
+    providerCatalog.map(({ meta }) => [meta.name, meta.tier] as const),
+  );
 
   // Register /tools command
   const allProviderNames = allProviders.map((m) => m.name);
