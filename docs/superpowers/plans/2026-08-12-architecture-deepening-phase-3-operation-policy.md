@@ -2,116 +2,167 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make provider selection, budgets, activity logging, fallback, fusion, and outcome metrics follow one capability-aware policy.
+**Goal:** Make provider selection, budgets, activity logging, fallback, fusion, and outcome metrics follow one capability-aware policy for search, fetch, code search, docs, and research.
 
-**Architecture:** Keep provider registration and budget ownership in `ProviderRegistry`. Store tier metadata for every registered capability, not only search. Give fetch, code-search, and docs selection the same tier/performance policy as search. Extract one attempt runner from `executeWithFallback`; use it for fallback, fusion, code-search, docs, and research so activity and outcome hooks cannot drift between tools.
+**Architecture:** Keep provider registration and budget ownership in `ProviderRegistry`. Store tier metadata for every registered capability, including research. Add one shared attempt runner for activity and outcome hooks. Route every provider-backed operation through registry wrappers and the shared runner. Research becomes a first-class registered capability backed by the existing `ProviderOperation` cost model; it is not a special direct Exa client path.
 
-**Tech Stack:** TypeScript, native `AbortSignal`, existing activity monitor and budget registry, Vitest.
+**Tech stack:** TypeScript, native `AbortSignal`, existing activity monitor and budget registry, Vitest.
 
----
+## Readiness decision
+
+The original plan was not ready to implement. This revision resolves the following issues found against the clean Phase 3 branch at commit `4e35d6e`:
+
+- `fetch`, `code-search`, and `docs` registrations discard tier metadata, so automatic selection still depends on registration order.
+- Explicit search and docs selections can bypass budget eligibility.
+- `best-performing` exists only for search; fetch, code search, docs, and research cannot use the configured strategy.
+- Fallback and fusion duplicate activity/timing/outcome instrumentation.
+- `web_fetch`, code search, and docs tools bypass the shared attempt path.
+- Research already has a `ProviderOperation` cost model, but the tool bypasses the registry and reserves through `beforeResearch`.
+- Fusion does not define cancellation propagation when concurrent attempts are active.
+- The previous file map omitted `tests/tools/web-search.test.ts` and the Exa research/provider tests needed for the new registration contract.
+- The documented baseline was stale. The current clean branch passes 89 test files and 1,427 tests; the environment is Node 23.11.0 while the package requires Node >=24.15.0.
 
 ## Atomic result
 
 After this phase:
 
-- `auto` selects eligible providers in tier order for search, fetch, code-search, and docs.
-- `best-performing` ranks every capability that has active metrics; explicit provider selection still wins when requested and eligible.
-- Hard budgets are consumed by the registered wrapper before delegation for every capability.
-- A successful attempt, ordinary provider failure, budget rejection, cancellation, and activity record have the same semantics in fallback, fusion, and direct capability tools.
-- Search fusion keeps its targeted/all batching and RRF output unchanged.
+- `auto` selects eligible providers in tier order for search, fetch, code search, docs, and research.
+- `best-performing` ranks eligible providers for every capability with active provider metrics; providers without samples retain the existing neutral score and stable registration order.
+- An explicit provider name wins only when that registered capability exists and is budget-eligible; an exhausted explicit provider returns no candidate instead of bypassing the budget or silently selecting another provider.
+- Hard budgets are consumed by the registered wrapper before delegation for search, fetch, code search, docs, and research.
+- One shared attempt runner owns API activity start/completion/error logging and success/failure hooks for sequential fallback, fusion, direct capability tools, and research.
+- Budget rejections are not failure metrics. Caller cancellation is rethrown and is not a provider failure.
+- Search fusion retains its targeted/all batching, concurrency, provider-used/failed semantics, and RRF output.
+- Research keeps its query deduplication, mode defaults, report rendering, output files, trust/key gating, and response shape while using registered research candidates.
 
-No tool is re-registered dynamically in this phase; that is phase 4.
+No tool is re-registered dynamically in this phase; that remains Phase 4.
+
+## Locked boundaries
+
+This phase may change:
+
+- provider capability types and registry wrappers;
+- provider selection helpers and their budget eligibility;
+- shared execution instrumentation;
+- provider-backed tool factory seams and strategy routing;
+- Exa research registration.
+
+This phase must not change:
+
+- ConfigManager refresh/listener behavior or tool re-registration;
+- extraction fallback routing or the Phase 5 extraction seam;
+- search filter support and post-filtering introduced in Phase 1;
+- search fusion batching, target calculation, RRF scoring, or output formatting;
+- result/error shapes, error sanitization, trust gating, credential resolution, or hard-budget rollback behavior;
+- package dependencies, Node engine requirements, or unrelated lint warnings.
+
+Research budgeting is intentionally moved from the tool-local `beforeResearch` callback into the first-class registry wrapper. Adding a new research provider later will use the same `ResearchProvider` interface and selection path.
 
 ## File map
 
-Create:
-
-- None. Reuse `ProviderRegistry`, `execute.ts`, and `fusion.ts` as the operation-policy seam.
-
 Modify:
 
-- `src/providers/types.ts` — define the capability type used by selection helpers.
-- `src/providers/registry.ts` — retain tier metadata for all capability maps, centralize eligible/performance selection, and expose execution hooks.
-- `src/providers/execute.ts` — add the shared single-attempt runner and use it in fallback execution.
-- `src/providers/fusion.ts` — use the shared attempt runner without changing fusion batching.
-- `src/tools/web-search.ts` — accept the shared execution hooks while preserving filter behavior from phase 1.
-- `src/tools/web-fetch.ts` — pass hooks through provider fallback.
-- `src/tools/code-search.ts` — execute through the shared attempt runner.
-- `src/tools/web-docs-search.ts` — execute through the shared attempt runner.
-- `src/tools/web-docs-fetch.ts` — execute through the shared attempt runner.
-- `src/tools/web-research.ts` — execute each Exa request through the shared attempt runner while preserving the budget callback.
-- `src/index.ts` — construct one registry hook set and pass it to every tool factory.
-- `tests/providers/registry.test.ts` — test selection order and metrics for every capability.
-- `tests/providers/execute.test.ts` — test the shared attempt runner and fallback delegation.
-- `tests/providers/fusion.test.ts` — test shared activity/outcome behavior in fusion.
-- `tests/tools/web-fetch.test.ts`, `tests/tools/code-search.test.ts`, `tests/tools/web-docs-search.test.ts`, `tests/tools/web-docs-fetch.test.ts`, `tests/tools/web-research.test.ts` — cover direct capability execution.
-- `tests/index.test.ts`, `tests/index-strategy.test.ts` — verify one hook set and strategy routing.
+- `src/providers/types.ts` — add `ResearchProvider`, extend `ProviderMeta.create`, and define the shared capability alias.
+- `src/providers/exa-deep-research.ts` — implement the registered research-provider shape without changing the HTTP request/response behavior.
+- `src/providers/exa.ts` — return the Exa research client from the Exa metadata factory.
+- `src/providers/registry.ts` — retain tier metadata for every capability map, add research registration/wrapping, centralize selection, expose execution hooks, and preserve budget semantics.
+- `src/providers/execute.ts` — export fallback candidates/hooks, add `executeAttempt`, and use it in `executeWithFallback`.
+- `src/providers/fusion.ts` — use `executeAttempt`, add signal propagation, and preserve concurrent fusion behavior.
+- `src/tools/web-search.ts` — pass shared hooks to fallback/fusion while preserving Phase 1 filter eligibility.
+- `src/tools/web-fetch.ts` — pass shared hooks through the existing registered-provider fallback.
+- `src/tools/code-search.ts` — execute through `executeAttempt`.
+- `src/tools/web-docs-search.ts` — execute through `executeAttempt`.
+- `src/tools/web-docs-fetch.ts` — execute through `executeAttempt`.
+- `src/tools/web-research.ts` — resolve registered research candidates and execute each unique query through shared fallback/hooks.
+- `src/index.ts` — construct one registry hook set, pass it to all provider-backed tools, and route fetch/code/docs/research selection through the current strategy.
+- `tests/providers/registry.test.ts` — cover all capability maps, selection order, explicit eligibility, research operation metadata, and budgets.
+- `tests/providers/execute.test.ts` — cover the shared attempt contract and fallback delegation.
+- `tests/providers/fusion.test.ts` — cover shared hooks, activity behavior, cancellation, and existing fusion semantics.
+- `tests/providers/exa.test.ts` — verify the Exa factory exposes the research capability without changing search/fetch/code behavior.
+- `tests/providers/exa-deep-research.test.ts` — preserve the research client HTTP contract and assert it satisfies the provider shape.
+- `tests/tools/web-search.test.ts` — verify shared-hook injection remains compatible with filter and fusion behavior.
+- `tests/tools/web-fetch.test.ts` — cover shared hooks through provider fallback.
+- `tests/tools/code-search.test.ts` — cover attempt success/failure and unchanged rendered error output.
+- `tests/tools/web-docs-search.test.ts` — cover attempt execution and unchanged propagated provider errors.
+- `tests/tools/web-docs-fetch.test.ts` — cover attempt execution and unchanged propagated provider errors.
+- `tests/tools/web-research.test.ts` — cover registered candidates, fallback, operation budget metadata, cancellation, and unchanged reports.
+- `tests/index.test.ts` — verify tool construction remains unchanged and conditional research registration still follows current availability.
+- `tests/index-strategy.test.ts` — verify the configured strategy reaches every capability resolver.
 
-## Tasks
+Create: None.
 
-### Task 1: Give every registered capability a common selection policy
+Delete: None.
 
-**Files:**
+## Contracts to implement
 
-- Modify: `src/providers/types.ts`
-- Modify: `src/providers/registry.ts`
-- Modify: `tests/providers/registry.test.ts`
+### Capability and registered provider contracts
 
-- [ ] **Step 1: Define the capability union once.**
-
-Add this type beside `ProviderOperation` in `src/providers/types.ts`:
+In `src/providers/types.ts`:
 
 ```ts
+import type {
+  DeepResearchParams,
+  DeepResearchResponse,
+  ExaDeepType,
+} from "../research/types.ts";
+
+export interface ResearchProvider {
+  readonly name: string;
+  readonly label: string;
+  deepResearch(
+    params: DeepResearchParams,
+    signal?: AbortSignal,
+  ): Promise<DeepResearchResponse>;
+}
+
 export type ProviderCapability = ProviderOperation["capability"];
 ```
 
-Use it for selection helpers and hook operation labels. Do not replace the discriminated `ProviderOperation`; its operation-specific fields still drive usage-cost calculation.
+Extend the return type of `ProviderMeta.create()` with `research?: ResearchProvider`. Keep `ProviderOperation` discriminated and unchanged in meaning. `DeepResearchParams.numResults` is resolved by `web_research` before delegation, so the registry can derive the exact existing cost operation from the request:
 
-- [ ] **Step 2: Store tier metadata for every capability map.**
+```ts
+{
+  capability: "research",
+  type: params.type,
+  maxResults: params.numResults ?? 10,
+  contentTypes: 2 + (params.summaryQuery ? 1 : 0),
+}
+```
 
-Replace the search-only registration shape with a reusable internal shape:
+In `src/providers/exa-deep-research.ts`, add `name = "exa"` and `label = "Exa"` and keep `deepResearch()` behavior unchanged. In `src/providers/exa.ts`, return one `ExaDeepResearchClient` as `research` from the metadata factory alongside the existing `ExaProvider` capabilities. The factory still receives the resolved key from ConfigManager; it must not resolve credentials itself.
+
+### Registry selection contract
+
+Replace the search-only tier registration shape with one internal reusable shape:
 
 ```ts
 interface RegisteredProvider<T> {
   provider: T;
   tier: ProviderTier;
 }
+```
 
+Use it for search, fetch, code-search, docs, and research maps. Every registered capability must retain the `options.tier` supplied by `registerProvider()`. Preserve Phase 1 search `filterSupport` metadata on the wrapped search provider.
+
+The registry must have these capability maps:
+
+```ts
 private searchProviders = new Map<string, RegisteredProvider<SearchProvider>>();
 private fetchProviders = new Map<string, RegisteredProvider<FetchProvider>>();
 private codeSearchProviders = new Map<string, RegisteredProvider<CodeSearchProvider>>();
 private docsProviders = new Map<string, RegisteredProvider<DocsProvider>>();
+private researchProviders = new Map<string, RegisteredProvider<ResearchProvider>>();
 ```
 
-When `registerProvider()` stores fetch, code-search, or docs instances, store `{ provider, tier: options.tier }`. Keep the existing wrapper functions and their `consume()` calls. Phase 1’s `filterSupport` metadata must remain on wrapped search providers.
+Generalize eligibility and performance selection over a capability map keyed by the registered policy name. Use the existing score exactly:
 
-- [ ] **Step 3: Factor eligibility and scoring without changing the search formula.**
-
-Keep `isEligible()` and the existing score weights (`successRate * 0.5 + speed * 0.3 + quality * 0.2`). Generalize the implementation over a map of `RegisteredProvider<T>` and the provider-name key:
-
-```ts
-private selectByTier<T>(
-  entries: Map<string, RegisteredProvider<T>>,
-  name?: string,
-): T[] {
-  if (name && name !== "auto") {
-    const entry = entries.get(name);
-    return entry && this.isEligible(name) ? [entry.provider] : [];
-  }
-
-  return ([1, 2, 3] as const).flatMap((tier) =>
-    [...entries].flatMap(([providerName, entry]) =>
-      entry.tier === tier && this.isEligible(providerName) ? [entry.provider] : [],
-    ),
-  );
-}
+```text
+successRate * 0.5 + speed * 0.3 + quality * 0.2
 ```
 
-Add a generic performance sorter that uses the map key for metrics and returns only budget-eligible entries. Providers without active samples retain the existing neutral score and stable map order. Do not score a provider from metrics belonging to a different capability operation if the registered provider name is absent from the capability map.
+Use the registry key, not `provider.name`, to look up metrics and budgets. A capability is scored only when its registered map contains that key. Providers without active samples receive the existing neutral score of `0.5`; stable map order breaks ties. All automatic and performance selections filter through `isEligible()`.
 
-- [ ] **Step 4: Preserve existing search APIs and extend other capabilities.**
-
-Keep these existing methods as compatibility wrappers:
+Keep these search methods as compatibility wrappers:
 
 ```ts
 selectSearchCandidates(name?: string): SearchProvider[];
@@ -120,7 +171,9 @@ selectSearchByPerformanceAll(): SearchProvider[];
 selectSearchForFusion(strategy: SelectionStrategy, name?: string): SearchProvider[];
 ```
 
-Update them to use the generalized helpers. Add strategy-aware methods for the other registered capabilities:
+Their explicit-name behavior must now return a provider only if it exists in the search map and is budget-eligible. Automatic search retains tier order; best-performing search retains the current score formula.
+
+Add strategy-aware methods:
 
 ```ts
 selectFetchCandidates(strategy: SelectionStrategy = "auto"): FetchProvider[];
@@ -130,41 +183,29 @@ selectDocsByStrategy(
   strategy: SelectionStrategy,
   name?: string,
 ): DocsProvider | undefined;
+selectResearchCandidates(
+  strategy: SelectionStrategy = "auto",
+  name?: string,
+): ResearchProvider[];
 ```
 
-For `best-performing`, `selectFetchCandidates()` returns all scored eligible fetch providers, while `selectCodeSearch()` and `selectDocsByStrategy()` return the first scored eligible provider. For `auto`, all methods use tier order. `selectDocs(name?)` remains the compatibility wrapper for the current auto/name API, and an explicit docs name is returned only when that provider is eligible. No new strategy is added.
+`auto` returns all eligible candidates in tier order for fetch and research, and the first eligible candidate for code search and docs. `best-performing` returns all scored eligible fetch/research candidates, and the first scored eligible code/docs candidate. Explicit names return only the named eligible provider. `selectDocs(name?)` remains the existing auto/name compatibility wrapper.
 
-- [ ] **Step 5: Test capability selection and budget eligibility.**
+### Budget wrapper contract
 
-Add registry tests with three providers at tiers 1, 2, and 3, each exposing search/fetch/code/docs. Assert:
+Keep each wrapper’s existing `consume()` call before provider delegation. Add the research wrapper with the exact operation derivation above. `unregisterAll()` must delete research registrations as well as the other capability maps, while leaving usage counters available for re-registration.
 
-1. `auto` returns `1 → 2 → 3` for fetch and search even when registration order differs.
-2. `best-performing` returns the provider with the highest existing metrics for fetch and code-search.
-3. An over-budget provider is absent from every capability selection, including an explicit name.
-4. `selectDocsByStrategy("best-performing")` uses metrics and `selectDocsByStrategy("auto", "named")` retains the explicit provider only when eligible; the old `selectDocs("named")` call remains compatible.
-5. Existing search fusion strategy tests still return the same candidate order.
+The wrapper must preserve:
 
-Run:
+- hard-budget persistence before delegation;
+- rollback when persistence fails;
+- `BudgetExceededError` identity and message;
+- managed/unlimited behavior; and
+- shared pool counters.
 
-```bash
-pnpm exec vitest run tests/providers/registry.test.ts
-```
+### Shared attempt contract
 
-Expected: focused registry tests pass with the existing selection behavior preserved for search.
-
-### Task 2: Centralize one provider-attempt execution path
-
-**Files:**
-
-- Modify: `src/providers/execute.ts`
-- Modify: `src/providers/fusion.ts`
-- Modify: `src/providers/registry.ts`
-- Modify: `tests/providers/execute.test.ts`
-- Modify: `tests/providers/fusion.test.ts`
-
-- [ ] **Step 1: Extract the single-attempt contract.**
-
-Export the existing candidate shape and add an execution hook type:
+In `src/providers/execute.ts`, export:
 
 ```ts
 export interface FallbackCandidate<T> {
@@ -183,55 +224,43 @@ export interface ExecuteAttemptOptions<T> extends ExecutionHooks {
   signal?: AbortSignal;
   activityQuery?: string;
 }
+
+export async function executeAttempt<T>(
+  options: ExecuteAttemptOptions<T>,
+): Promise<T>;
 ```
 
-Implement `executeAttempt()` so it:
+`executeAttempt()` must:
 
-1. checks `signal.throwIfAborted()` before work;
-2. logs one API activity entry using `activityQuery ?? operation`;
-3. measures latency and calls `onSuccess` only after the result and post-result abort check succeed;
-4. logs completion with status 200 on success;
-5. logs the sanitized activity error and calls `onFailure` for ordinary errors;
-6. never calls `onFailure` for `BudgetExceededError`; and
-7. rethrows the original error so the caller decides whether to continue, aggregate, or render it.
+1. call `signal?.throwIfAborted()` before logging or delegating;
+2. log one API activity start with `activityQuery ?? operation`;
+3. measure latency around the candidate;
+4. check cancellation after the candidate resolves and before calling `onSuccess`;
+5. call `onSuccess` and log status 200 only for a completed, non-cancelled result;
+6. log a sanitized error with `sanitizeError()` for a rejected attempt;
+7. call `onFailure` only for ordinary provider errors, never for `BudgetExceededError` or caller cancellation; and
+8. rethrow the original error so the caller controls fallback, aggregation, or tool rendering.
 
-The implementation must not catch and convert cancellation into a provider failure. Keep `BudgetExceededError` imported from the registry and preserve the existing `AggregateProviderError` messages.
+Do not convert cancellation into an `AggregateProviderError`. A pre-attempt cancellation produces no activity entry, matching the current fallback behavior. An in-flight cancellation may complete its activity entry as an error but must not call the failure hook.
 
-- [ ] **Step 2: Make fallback use the shared attempt.**
+Reduce `executeWithFallback()` to candidate iteration, `executeAttempt()` delegation, and its existing empty-candidate/final `AggregateProviderError` behavior. Keep the existing operation names and error aggregation shape.
 
-Reduce `executeWithFallback()` to candidate iteration and aggregation:
+### Fusion contract
 
-```ts
-for (const candidate of candidates) {
-  try {
-    const result = await executeAttempt({
-      candidate,
-      operation,
-      signal,
-      onSuccess,
-      onFailure,
-    });
-    return { result, providerName: candidate.name };
-  } catch (error) {
-    errors.push({
-      provider: candidate.name,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-```
+Add `signal?: AbortSignal` to `FusionOptions`. Check it before each batch and pass it to every `executeAttempt()` call. Use `activityQuery: \`fusion:${candidate.name}\``. Keep batches concurrent with `Promise.all`; do not route fusion through sequential fallback.
 
-Leave the empty-candidate `AggregateProviderError` and final aggregation unchanged.
+Preserve these existing rules:
 
-- [ ] **Step 3: Make fusion use the shared attempt.**
+- successful empty results call `onSuccess`, complete activity with status 200, and are not added to `providersUsed`;
+- ordinary errors are added to `providersFailed` and the aggregate error list;
+- budget rejections are added to the aggregate error list but not `providersFailed` and do not call `onFailure`;
+- cancellation rejects the fusion operation instead of becoming a provider failure;
+- targeted/all batch sizing, provider order, `degraded`, and RRF output do not change; and
+- a run with no usable results throws `AggregateProviderError("search", errors)` with the existing messages.
 
-Add an optional `signal?: AbortSignal` to `FusionOptions`, pass it through `executeWithFusion()` to `executeTargeted()`, and check it before each batch. Replace the duplicated activity/timing/try-catch wrapper with `executeAttempt({ candidate: { name: candidate.name, execute: () => candidate.execute(perProvider) }, operation: "search", activityQuery: `fusion:${candidate.name}`, signal, onSuccess, onFailure })`.
+### Tool factory contracts
 
-Preserve fusion’s existing behavior: batches run concurrently, empty results are successful but not usable, budget rejections are recorded in errors but not `providersFailed`, and a no-usable-result batch throws `AggregateProviderError("search", errors)`. Do not route fusion through sequential `executeWithFallback`; concurrency is part of the fusion contract.
-
-- [ ] **Step 4: Expose registry hooks instead of repeating outcome wiring.**
-
-Import `ExecutionHooks` as a type in `registry.ts` and add:
+Use one production `ExecutionHooks` object from `registry.getExecutionHooks()`. The registry method returns fresh closures:
 
 ```ts
 getExecutionHooks(): ExecutionHooks {
@@ -244,25 +273,117 @@ getExecutionHooks(): ExecutionHooks {
 }
 ```
 
-Return fresh closures so tests can replace registry instances without sharing state. Keep `recordResultQuality()` separate because it is search-result-specific, not generic provider execution.
+Add an optional `ExecutionHooks` argument to provider-backed factories without removing their existing callback arguments unless the current factory has no compatibility value. Production code must pass the shared object, while existing direct factory tests may keep their legacy callback arguments. The factory behavior must be:
 
-- [ ] **Step 5: Test one activity/outcome event per attempt.**
+- `web_search`: pass the shared hooks to both `executeWithFallback()` and `executeWithFusion()`; keep the existing result-quality callback separate; retain filter eligibility before candidate execution.
+- `web_fetch`: pass the shared hooks into the existing registered-provider `executeWithFallback()` path; do not move fallback into extraction before Phase 5.
+- `code_search`: wrap the one selected provider with `executeAttempt(operation: "code-search")`; retain its sanitized error-as-text result and missing-provider message.
+- `web_docs_search`: wrap `searchLibrary()` with `executeAttempt(operation: "docs-search")`; retain provider errors as thrown tool failures.
+- `web_docs_fetch`: wrap `getContext()` with `executeAttempt(operation: "docs-fetch")`; retain provider errors as thrown tool failures.
+- `web_research`: accept research candidates, not an API-key resolver or `beforeResearch`; wrap each unique query with `executeWithFallback(operation: "research")` and the shared hooks.
 
-Add tests that prove:
+`web_research` must keep the existing request construction, query deduplication, mode defaults, response merge, source deduplication, report formats, file writes, append-entry record, and output text. A missing candidate list continues to produce the existing disabled/unavailable error. Budget reservation occurs inside the selected registry wrapper immediately before the Exa client call.
 
-1. fallback success logs one start/complete pair and one success hook;
-2. fallback failure then success logs one error and one success, with one failure hook;
-3. `BudgetExceededError` is aggregated without a failure hook;
-4. cancellation is rethrown and does not call a failure hook; and
-5. fusion uses the same hooks while preserving concurrent batch behavior and `providersFailed` semantics.
+In `src/index.ts`:
+
+1. construct `const executionHooks = registry.getExecutionHooks()` once after the registry;
+2. pass that object to web search, web fetch, code search, docs search, docs fetch, and web research;
+3. pass `configManager.current.selectionStrategy` to fetch, code-search, docs, and research resolvers;
+4. keep search’s current default-provider, explicit-provider, combine, filter, and fusion behavior;
+5. keep current session-start conditional registration for docs and research; and
+6. remove the direct research `resolveApiKey`/`beforeResearch` wiring from the tool factory while preserving current key/trust gating through the registered Exa capability.
+
+## Tasks
+
+### Task 1: Register and select every provider capability
+
+**Files:**
+
+- Modify: `src/providers/types.ts`
+- Modify: `src/providers/exa-deep-research.ts`
+- Modify: `src/providers/exa.ts`
+- Modify: `src/providers/registry.ts`
+- Modify: `tests/providers/registry.test.ts`
+- Modify: `tests/providers/exa.test.ts`
+- Modify: `tests/providers/exa-deep-research.test.ts`
+
+- [ ] **Step 1: Add the research provider interface and Exa registration.**
+
+Add `ResearchProvider`, extend `ProviderMeta.create()`, and make `ExaDeepResearchClient` satisfy the interface. Return the client from Exa’s metadata factory. Do not change the Exa request body, headers, response normalization, or error behavior.
+
+- [ ] **Step 2: Generalize registered capability storage.**
+
+Replace the search-only tier shape with `RegisteredProvider<T>` for all five maps. Add the research map, wrapper, unregister behavior, and the research operation derivation. Keep all existing wrapper method signatures and budget semantics.
+
+- [ ] **Step 3: Generalize tier and performance selection.**
+
+Factor the existing eligibility and score calculation over a capability map. Preserve the score weights, neutral score, stable tie order, and search compatibility methods. Make every explicit selection budget-aware.
+
+- [ ] **Step 4: Add strategy-aware capability selectors.**
+
+Implement the fetch, code-search, docs, and research methods with the exact contracts above. Automatic fetch/research candidates must be tier ordered even when registration order differs. Performance selection must exclude exhausted providers.
+
+- [ ] **Step 5: Add registry and Exa tests.**
+
+Use at least three providers at tiers 1, 2, and 3 with intentionally different registration order. Assert:
+
+1. auto search/fetch/research order is tier 1 → 2 → 3;
+2. best-performing fetch/research order follows existing metrics;
+3. best-performing code/docs return the highest-scored eligible provider;
+4. explicit exhausted providers return no candidate for every capability;
+5. `selectDocs("named")` remains compatible when the named provider is eligible;
+6. the research wrapper calls `usageCost` with the exact type/result/content-count operation before delegation;
+7. Exa metadata returns search, fetch, code-search, and research instances; and
+8. existing search filter support, search ordering, and budget tests remain valid.
+
+Run:
+
+```bash
+pnpm exec vitest run tests/providers/registry.test.ts tests/providers/exa.test.ts tests/providers/exa-deep-research.test.ts
+```
+
+### Task 2: Centralize one provider-attempt execution path
+
+**Files:**
+
+- Modify: `src/providers/execute.ts`
+- Modify: `src/providers/fusion.ts`
+- Modify: `src/providers/registry.ts`
+- Modify: `tests/providers/execute.test.ts`
+- Modify: `tests/providers/fusion.test.ts`
+
+- [ ] **Step 1: Implement `executeAttempt()`.**
+
+Move the current fallback activity/timing/hook logic into the shared function. Add sanitized activity errors, budget exclusion, and cancellation propagation without changing the aggregate error text.
+
+- [ ] **Step 2: Delegate sequential fallback to the shared attempt.**
+
+Keep `executeWithFallback()` responsible only for empty-candidate validation, iteration, error collection, and returning the first successful result/provider name.
+
+- [ ] **Step 3: Delegate fusion attempts to the shared attempt.**
+
+Replace the duplicated fusion instrumentation with `executeAttempt()`, pass the signal, and preserve concurrent batches and budget/provider-failure semantics.
+
+- [ ] **Step 4: Expose registry outcome hooks.**
+
+Add `getExecutionHooks()` with fresh closures. Keep `recordResultQuality()` separate because it remains search-specific.
+
+- [ ] **Step 5: Test the attempt lifecycle.**
+
+Prove:
+
+1. success creates one activity start/completion pair and one success hook;
+2. failure then success creates one error and one completion, with one failure and one success hook;
+3. budget rejection is aggregated without a failure hook;
+4. pre-attempt and in-flight cancellation are rethrown without a failure hook;
+5. activity errors are sanitized; and
+6. fusion uses the same hooks while retaining concurrent batching, empty-result success, budget rejection, and `providersFailed` behavior.
 
 Run:
 
 ```bash
 pnpm exec vitest run tests/providers/execute.test.ts tests/providers/fusion.test.ts
 ```
-
-Expected: the focused execution tests pass with no duplicate activity entries.
 
 ### Task 3: Route direct capability tools through the policy
 
@@ -275,6 +396,7 @@ Expected: the focused execution tests pass with no duplicate activity entries.
 - Modify: `src/tools/web-docs-fetch.ts`
 - Modify: `src/tools/web-research.ts`
 - Modify: `src/index.ts`
+- Modify: `tests/tools/web-search.test.ts`
 - Modify: `tests/tools/web-fetch.test.ts`
 - Modify: `tests/tools/code-search.test.ts`
 - Modify: `tests/tools/web-docs-search.test.ts`
@@ -283,115 +405,81 @@ Expected: the focused execution tests pass with no duplicate activity entries.
 - Modify: `tests/index.test.ts`
 - Modify: `tests/index-strategy.test.ts`
 
-- [ ] **Step 1: Pass one hook set to tool factories.**
+- [ ] **Step 1: Add shared hook seams to tool factories.**
 
-Update factories that execute providers to accept `ExecutionHooks` as an optional argument. Keep existing argument order where possible and update tests at the call site. In `src/index.ts`, create the hooks once after the registry:
+Pass one registry hook set from `src/index.ts` to all provider-backed factories. Preserve direct factory-test compatibility where the existing callback arguments are part of the current test/API seam.
 
-```ts
-const executionHooks = registry.getExecutionHooks();
-```
+- [ ] **Step 2: Update search and fetch.**
 
-Pass it to web search, web fetch, code search, docs search, docs fetch, and web research. Keep the existing result-quality callback only on web search.
+Pass hooks to both search execution paths and the registered fetch fallback. Preserve Phase 1 filter filtering, result quality recording, current fetch pipeline fallback boundary, sanitized combined errors, cache behavior, multi-URL concurrency, and result shapes.
 
-- [ ] **Step 2: Use shared attempts in `web_search` and `web_fetch`.**
+- [ ] **Step 3: Update code search and docs tools.**
 
-Pass `executionHooks` to both `executeWithFallback()` and `executeWithFusion()` in `web-search.ts`. Keep phase 1 filter eligibility/post-filtering before the candidate’s `execute` function.
+Use `executeAttempt()` with operation names `code-search`, `docs-search`, and `docs-fetch`. Preserve missing-provider messages, code-search error-as-text behavior, docs thrown-error behavior, progress updates, truncation, storage, and signal forwarding.
 
-In `web-fetch.ts`, pass `executionHooks` into the existing provider fallback. Do not move provider fallback into the extraction pipeline yet; phase 5 owns that seam. The current retryable pipeline error and sanitized combined error remain unchanged.
+- [ ] **Step 4: Make research first-class at the tool boundary.**
 
-- [ ] **Step 3: Wrap code-search and docs calls.**
+Resolve registered research candidates from the registry, construct the same `DeepResearchParams` as today, and run each unique query through shared sequential fallback. Remove `resolveExaApiKey` and `beforeResearch` from the research factory. Do not instantiate `ExaDeepResearchClient` in the tool.
 
-Replace direct provider calls with `executeAttempt()`:
+- [ ] **Step 5: Route all non-search strategies and test integration.**
 
-```ts
-const results = await executeAttempt({
-  candidate: {
-    name: provider.name,
-    execute: () => provider.codeSearch(params.query, maxResults, signal ?? undefined),
-  },
-  operation: "code-search",
-  signal: signal ?? undefined,
-  ...executionHooks,
-});
-```
-
-Use operation names `docs-search` and `docs-fetch` for Context7. Preserve each tool’s current error contract: code-search renders a sanitized error result, docs tools allow the provider error to propagate as a failed tool result, and missing-provider messages remain unchanged.
-
-- [ ] **Step 4: Wrap each Exa research request.**
-
-Keep `beforeResearch` as the budget reservation callback, but place it inside the candidate execution passed to `executeAttempt()`:
-
-```ts
-responses.push(
-  await executeAttempt({
-    candidate: {
-      name: "exa",
-      execute: () => {
-        beforeResearch?.({
-          capability: "research",
-          type: mode.type,
-          maxResults: mode.numResults,
-          contentTypes: 2 + (mode.summaryQuery ? 1 : 0),
-        });
-        return client.deepResearch(request, signal ?? undefined);
-      },
-    },
-    operation: "research",
-    signal: signal ?? undefined,
-    ...executionHooks,
-  }),
-);
-```
-
-Preserve the existing query deduplication, output paths, report rendering, and Exa key checks. A budget rejection must remain a budget rejection rather than becoming a provider failure metric.
-
-- [ ] **Step 5: Use strategy-aware selection for non-search tools.**
-
-Update resolver callbacks in `src/index.ts` to pass `configManager.current.selectionStrategy` to fetch, code-search, and `selectDocsByStrategy`. Keep the compatibility `selectDocs()` wrapper for callers that do not need an explicit strategy. Keep search’s existing explicit/default/combine behavior, and pass the tool `signal` through `executeWithFusion`. Add tests proving a runtime strategy of `best-performing` reaches each capability resolver.
+Use the current `selectionStrategy` for fetch, code-search, docs, and research. Add index tests that spy on each selector under `auto` and `best-performing`; use configured Exa/Context7 availability where necessary so the conditional tools are exercised. Add tool tests for hook invocation, research fallback, cancellation, and unchanged output/error contracts.
 
 Run:
 
 ```bash
-pnpm exec vitest run tests/tools/web-fetch.test.ts tests/tools/code-search.test.ts tests/tools/web-docs-search.test.ts tests/tools/web-docs-fetch.test.ts tests/tools/web-research.test.ts tests/index.test.ts tests/index-strategy.test.ts
+pnpm exec vitest run tests/tools/web-search.test.ts tests/tools/web-fetch.test.ts tests/tools/code-search.test.ts tests/tools/web-docs-search.test.ts tests/tools/web-docs-fetch.test.ts tests/tools/web-research.test.ts tests/index.test.ts tests/index-strategy.test.ts
 ```
-
-Expected: direct tools retain their result/error shapes while recording outcomes through the same hooks.
 
 ### Task 4: Complete the phase gate and commit
 
-- [ ] **Step 1: Search for duplicate execution instrumentation.**
+- [ ] **Step 1: Search for stale direct or duplicate paths.**
 
 Run:
 
 ```bash
-rg -n "activityMonitor\.log(Start|Complete|Error)|recordOutcome\(" src/providers src/tools src/index.ts
+rg -n "activityMonitor\\.log(Start|Complete|Error)|recordOutcome\\(|beforeResearch|resolveExaApiKey|new ExaDeepResearchClient|selectFetchCandidates\\(|selectCodeSearch\\(|selectDocs\\(" src/providers src/tools src/index.ts
 ```
 
-Expected: attempt lifecycle logging is implemented in `executeAttempt()`; tool code only supplies hooks or search quality recording. The fusion module contains no second timing/callback implementation.
+Expected:
 
-- [ ] **Step 2: Run the complete phase gate.**
+- provider attempt activity lifecycle is implemented in `executeAttempt()`;
+- production tools receive registry hooks rather than recording outcomes themselves;
+- `beforeResearch` and direct `ExaDeepResearchClient` construction are absent from `web-research.ts` and `index.ts`;
+- registry selectors are called with the configured strategy where applicable; and
+- fusion contains no second timing/callback implementation.
+
+- [ ] **Step 2: Run the focused phase gate.**
 
 ```bash
-pnpm exec vitest run tests/providers/registry.test.ts tests/providers/execute.test.ts tests/providers/fusion.test.ts tests/tools/web-search.test.ts tests/tools/web-fetch.test.ts tests/tools/code-search.test.ts tests/tools/web-docs-search.test.ts tests/tools/web-docs-fetch.test.ts tests/tools/web-research.test.ts tests/index.test.ts tests/index-strategy.test.ts
-pnpm check
-git diff --check
+pnpm exec vitest run tests/providers/registry.test.ts tests/providers/execute.test.ts tests/providers/fusion.test.ts tests/providers/exa.test.ts tests/providers/exa-deep-research.test.ts tests/tools/web-search.test.ts tests/tools/web-fetch.test.ts tests/tools/code-search.test.ts tests/tools/web-docs-search.test.ts tests/tools/web-docs-fetch.test.ts tests/tools/web-research.test.ts tests/index.test.ts tests/index-strategy.test.ts
 ```
 
-Expected: focused tests and the full suite pass with only the documented pre-existing Biome and Node-engine warnings.
+- [ ] **Step 3: Run repository verification.**
 
-- [ ] **Step 3: Commit the atomic phase.**
+```bash
+pnpm check
+git diff --check
+git status --short
+```
+
+Expected in the current environment: 89 test files and 1,427 tests pass; Node 23.11.0 emits the existing package-engine warning; Biome reports only documented pre-existing warnings. Do not fix unrelated warnings or change the engine declaration.
+
+- [ ] **Step 4: Commit the atomic phase.**
 
 ```bash
 git add src/providers src/tools src/index.ts tests
 git commit -m "refactor: unify provider operation policy"
 ```
 
-The commit must not include ConfigManager listeners, tool re-registration, or extraction fallback changes.
+The commit must not include ConfigManager listeners, tool re-registration, extraction fallback changes, new dependencies, or unrelated formatting/lint cleanup.
 
 ## Phase completion gate
 
-- Tier and performance selection is capability-aware and budget-aware.
+- Tier and performance selection is capability-aware and budget-aware for search, fetch, code search, docs, and research.
+- Research is a registered, resolved-key, budget-wrapped provider capability; no tool-local reservation callback remains.
 - Fallback, fusion, direct capability calls, and research share one attempt lifecycle.
-- Budget rejections and cancellations preserve their existing non-failure semantics.
+- Budget rejections and cancellations preserve their non-failure semantics.
 - Search fusion concurrency and output behavior are unchanged.
-- Focused tests, `pnpm check`, and `git diff --check` pass.
+- Existing tool output/error, trust, credential, cache, and storage contracts remain intact.
+- Focused tests, `pnpm check`, `git diff --check`, and intended-file status pass.
