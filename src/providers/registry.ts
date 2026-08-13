@@ -183,6 +183,7 @@ export class ProviderRegistry {
         provider: {
           name: provider.name,
           label: provider.label,
+          filterSupport: provider.filterSupport,
           search: async (query, maxResults, signal, filters) => {
             this.consume(options.name, { capability: "search", maxResults });
             return provider.search(query, maxResults, signal, filters);

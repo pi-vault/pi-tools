@@ -13,6 +13,7 @@ const SOFYA_BASE = "https://sofya.co";
 class SofyaProvider implements SearchProvider, FetchProvider {
   readonly name = "sofya";
   readonly label = "Sofya";
+  readonly filterSupport = { domains: "unsupported", dates: "unsupported" } as const;
   private readonly apiKey: string;
   private readonly searchDepth: string;
   private readonly topic: string;

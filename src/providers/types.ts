@@ -27,9 +27,22 @@ export interface SearchFilters {
   endDate?: string; // ISO 8601 date
 }
 
+export type SearchFilterMode = "native" | "post-filter" | "unsupported";
+
+export interface SearchFilterSupport {
+  domains: SearchFilterMode;
+  dates: Exclude<SearchFilterMode, "post-filter">;
+}
+
+export const UNSUPPORTED_SEARCH_FILTERS: SearchFilterSupport = {
+  domains: "unsupported",
+  dates: "unsupported",
+};
+
 export interface SearchProvider {
   readonly name: string;
   readonly label: string;
+  readonly filterSupport: SearchFilterSupport;
   search(
     query: string,
     maxResults: number,

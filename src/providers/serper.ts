@@ -3,6 +3,8 @@ import { applyDomainFilters } from "../utils/filters.ts";
 import { parseSerperResults } from "./parsers.ts";
 import type { ProviderMeta, SearchFilters } from "./types.ts";
 
+const NATIVE_DOMAIN_DATE_FILTERS = { domains: "native", dates: "native" } as const;
+
 /** Converts "YYYY-MM-DD" to "MM/DD/YYYY" for Google's tbs format. */
 function isoToMDY(iso: string): string {
   const [year, month, day] = iso.split("-");
@@ -42,6 +44,7 @@ export const providerMeta: ProviderMeta = {
         return body;
       },
       extractResults: parseSerperResults,
+      filterSupport: NATIVE_DOMAIN_DATE_FILTERS,
     }),
   }),
 };

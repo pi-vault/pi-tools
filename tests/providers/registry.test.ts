@@ -13,6 +13,7 @@ import type {
   SearchProvider,
   UsageCost,
 } from "../../src/providers/types.ts";
+import { UNSUPPORTED_SEARCH_FILTERS } from "../../src/providers/types.ts";
 
 const managed: ProviderBudget = { mode: "managed" };
 const hard = (
@@ -26,6 +27,7 @@ function search(name: string): SearchProvider {
   return {
     name,
     label: name,
+    filterSupport: UNSUPPORTED_SEARCH_FILTERS,
     search: vi
       .fn()
       .mockResolvedValue([{ title: name, url: `https://${name}.test`, snippet: name }]),

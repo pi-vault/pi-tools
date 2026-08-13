@@ -16,6 +16,7 @@ interface TavilyExtractResponse {
 export class TavilyProvider implements SearchProvider, FetchProvider {
   readonly name = "tavily";
   readonly label = "Tavily";
+  readonly filterSupport = { domains: "native", dates: "unsupported" } as const;
   private apiKey: string;
 
   constructor(apiKey: string) {

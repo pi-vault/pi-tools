@@ -5,6 +5,7 @@ import type { SearchFilters, SearchProvider, SearchResult } from "../providers/t
 import { executeWithFallback } from "../providers/execute.ts";
 import type { GuidanceOverride, CombineConfig } from "../config.ts";
 import { executeWithFusion } from "../providers/fusion.ts";
+import { filterResultsByDomains, unsupportedSearchFilters } from "../utils/filters.ts";
 
 const WebSearchParams = Type.Object({
   query: Type.String({ description: "Search query" }),
@@ -54,6 +55,7 @@ const WebSearchParams = Type.Object({
 interface WebSearchDetails {
   provider: string;
   resultCount: number;
+  unsupportedFilters?: string[];
   fusionMeta?: {
     providersUsed: string[];
     degraded: boolean;
@@ -96,6 +98,22 @@ function buildFilters(params: {
   };
 }
 
+function executeSearch(
+  provider: SearchProvider,
+  query: string,
+  maxResults: number,
+  signal: AbortSignal | undefined,
+  filters: SearchFilters | undefined,
+): Promise<SearchResult[]> {
+  return provider
+    .search(query, maxResults, signal, filters)
+    .then((results) =>
+      provider.filterSupport.domains === "post-filter"
+        ? filterResultsByDomains(results, filters)
+        : results,
+    );
+}
+
 function formatFusionOutput(
   results: SearchResult[],
   degraded: boolean,
@@ -130,9 +148,9 @@ export function createWebSearchTool(
     parameters: WebSearchParams,
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
       const combineActive = params.combine ?? combineConfig?.enabled === true;
-      const candidates = resolveCandidates(params.provider, combineActive);
+      const allCandidates = resolveCandidates(params.provider, combineActive);
 
-      if (candidates.length === 0) {
+      if (allCandidates.length === 0) {
         return {
           content: [{ type: "text" as const, text: "Search error: No search providers available" }],
           details: { provider: "none", resultCount: 0 },
@@ -142,14 +160,37 @@ export function createWebSearchTool(
       const maxResults = params.numResults ?? 5;
       const filters = buildFilters(params);
 
+      const eligibleCandidates = allCandidates.filter(
+        (provider) => unsupportedSearchFilters(filters, provider.filterSupport).length === 0,
+      );
+
+      if (eligibleCandidates.length === 0 && allCandidates.length > 0) {
+        const groups = Array.from(
+          new Set(
+            allCandidates.flatMap((p) =>
+              unsupportedSearchFilters(filters, p.filterSupport),
+            ),
+          ),
+        );
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `Search error: no eligible provider supports requested filters: ${groups.join(", ")}`,
+            },
+          ],
+          details: { provider: "none", resultCount: 0, unsupportedFilters: groups },
+        };
+      }
+
       // Fusion path
-      if (combineActive && candidates.length > 1 && combineConfig) {
+      if (combineActive && eligibleCandidates.length > 1 && combineConfig) {
         try {
           const fusionResult = await executeWithFusion({
-            candidates: candidates.map((provider) => ({
+            candidates: eligibleCandidates.map((provider) => ({
               name: provider.name,
               execute: (n: number) =>
-                provider.search(params.query, n, signal ?? undefined, filters),
+                executeSearch(provider, params.query, n, signal ?? undefined, filters),
             })),
             maxResults,
             mode: combineConfig.mode,
@@ -201,9 +242,10 @@ export function createWebSearchTool(
       // Fallback path
       try {
         const { result: results, providerName } = await executeWithFallback({
-          candidates: candidates.map((provider) => ({
+          candidates: eligibleCandidates.map((provider) => ({
             name: provider.name,
-            execute: () => provider.search(params.query, maxResults, signal ?? undefined, filters),
+            execute: () =>
+              executeSearch(provider, params.query, maxResults, signal ?? undefined, filters),
           })),
           operation: "search",
           signal,

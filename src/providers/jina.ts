@@ -12,6 +12,7 @@ import { parseJinaResults } from "./parsers.ts";
 export class JinaProvider implements SearchProvider, FetchProvider {
   readonly name = "jina";
   readonly label = "Jina";
+  readonly filterSupport = { domains: "unsupported", dates: "unsupported" } as const;
   private apiKey?: string;
 
   constructor(apiKey?: string) {

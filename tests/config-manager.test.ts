@@ -4,6 +4,7 @@ import { ConfigManager, diffConfig } from "../src/config-manager.ts";
 import type { PiToolsConfig, ProviderBudget } from "../src/config.ts";
 import { ProviderRegistry } from "../src/providers/registry.ts";
 import type { ProviderMeta } from "../src/providers/types.ts";
+import { UNSUPPORTED_SEARCH_FILTERS } from "../src/providers/types.ts";
 
 vi.mock("../src/config.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/config.ts")>();
@@ -42,7 +43,12 @@ function meta(name: string, overrides: Partial<ProviderMeta> = {}): ProviderMeta
     tier: 1,
     requiresKey: false,
     create: () => ({
-      search: { name, label: name, search: vi.fn().mockResolvedValue([]) },
+      search: {
+        name,
+        label: name,
+        filterSupport: UNSUPPORTED_SEARCH_FILTERS,
+        search: vi.fn().mockResolvedValue([]),
+      },
     }),
     ...overrides,
   };
@@ -105,7 +111,12 @@ describe("ConfigManager", () => {
     const providers = { all: entry(hard) };
     vi.mocked(loadMergedConfig).mockReturnValue(makeConfig(providers));
     const instances = {
-      search: { name: "all", label: "all", search: vi.fn().mockResolvedValue([]) },
+      search: {
+        name: "all",
+        label: "all",
+        filterSupport: UNSUPPORTED_SEARCH_FILTERS,
+        search: vi.fn().mockResolvedValue([]),
+      },
       fetch: { name: "all", fetch: vi.fn().mockResolvedValue({ text: "ok" }) },
       codeSearch: { name: "all", codeSearch: vi.fn().mockResolvedValue([]) },
       docs: {

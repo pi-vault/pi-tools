@@ -43,6 +43,7 @@ const SUBMIT_SEARCH_RESULTS_TOOL = {
 class OpenAICodexProvider implements SearchProvider {
   readonly name = "openai-codex";
   readonly label = "OpenAI Codex";
+  readonly filterSupport = { domains: "unsupported", dates: "unsupported" } as const;
 
   constructor(
     private readonly model?: string,
