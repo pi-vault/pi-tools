@@ -147,7 +147,7 @@ Provider configuration refreshes automatically every 30 seconds. The dashboard's
 | WebSearchAPI      | Search                        | `WEBSEARCHAPI_API_KEY`             |
 | You.com           | Search                        | `YOUCOM_API_KEY`                   |
 
-Pi Tools ranks providers by tier and availability, and optionally by recent session performance. Automatic selection skips exhausted hard budgets. Provider-specific date and domain filters depend on the upstream API; unsupported filters are applied locally where possible.
+Pi Tools ranks providers by tier and availability, and optionally by recent session performance. Automatic selection skips exhausted hard budgets. Provider-specific date and domain filters depend on the upstream API; declared post-filters are applied locally where possible, and a request is rejected when no eligible provider can enforce its filters.
 
 `openai-codex` uses the active Pi OAuth session. Run `/login` and select `openai-codex` before using it; the provider no longer accepts `OPENAI_API_KEY` as a fallback. To search with `OPENAI_API_KEY` instead, configure `openai-web-search`.
 
