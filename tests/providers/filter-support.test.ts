@@ -49,4 +49,20 @@ describe("search filter support", () => {
       ),
     ).toEqual([]);
   });
+
+  it("does not match malformed URLs and supports post-filter domains", () => {
+    expect(
+      filterResultsByDomains(
+        [{ title: "Bad", url: "not-a-url", snippet: "bad" }],
+        { includeDomains: ["example.com"] },
+      ),
+    ).toEqual([]);
+
+    expect(
+      unsupportedSearchFilters(
+        { includeDomains: ["example.com"], endDate: "2026-08-12" },
+        { domains: "post-filter", dates: "unsupported" },
+      ),
+    ).toEqual(["dates"]);
+  });
 });

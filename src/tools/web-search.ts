@@ -165,13 +165,21 @@ export function createWebSearchTool(
       );
 
       if (eligibleCandidates.length === 0 && allCandidates.length > 0) {
-        const groups = Array.from(
-          new Set(
-            allCandidates.flatMap((p) =>
-              unsupportedSearchFilters(filters, p.filterSupport),
-            ),
-          ),
+        const unsupportedGroups = allCandidates.flatMap((provider) =>
+          unsupportedSearchFilters(filters, provider.filterSupport),
         );
+        const groups = (["domains", "dates"] as const).filter((group) =>
+          unsupportedGroups.includes(group),
+        );
+        try {
+          signal?.throwIfAborted();
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          return {
+            content: [{ type: "text" as const, text: `Search error: ${msg}` }],
+            details: { provider: "none", resultCount: 0 },
+          };
+        }
         return {
           content: [
             {

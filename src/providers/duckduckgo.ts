@@ -4,11 +4,6 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ProviderMeta, SearchFilters, SearchProvider, SearchResult } from "./types.ts";
-
-const POST_FILTER_DOMAIN_FILTERS = {
-  domains: "post-filter",
-  dates: "unsupported",
-} as const;
 import { applyDomainFilters } from "../utils/filters.ts";
 import { parseDuckDuckGoResults } from "./parsers.ts";
 
@@ -32,7 +27,7 @@ const EXEC_TIMEOUT_MS = 15_000;
 export class DuckDuckGoProvider implements SearchProvider {
   readonly name = "duckduckgo";
   readonly label = "DuckDuckGo";
-  readonly filterSupport = POST_FILTER_DOMAIN_FILTERS;
+  readonly filterSupport = { domains: "post-filter", dates: "unsupported" } as const;
 
   private readonly execFile: ExecFileFn;
   private readonly ddgsOptions: DDGSOptions;

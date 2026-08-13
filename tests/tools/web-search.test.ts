@@ -903,4 +903,58 @@ describe("web_search explicit filter support", () => {
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toContain("[Result]");
   });
+
+  it("reports unsupported filter groups in a stable order", async () => {
+    const datesOnly: SearchProvider = {
+      name: "dates-only",
+      label: "Dates Only",
+      filterSupport: { domains: "native", dates: "unsupported" },
+      search: vi.fn().mockResolvedValue([]),
+    };
+    const domainsOnly: SearchProvider = {
+      name: "domains-only",
+      label: "Domains Only",
+      filterSupport: { domains: "unsupported", dates: "native" },
+      search: vi.fn().mockResolvedValue([]),
+    };
+    const tool = createWebSearchTool(() => [datesOnly, domainsOnly]);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-uf-order",
+      { query: "test", includeDomains: ["example.com"], startDate: "2025-01-01" },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(result.details.unsupportedFilters).toEqual(["domains", "dates"]);
+    expect((result.content[0] as { type: "text"; text: string }).text).toContain(
+      "domains, dates",
+    );
+  });
+
+  it("honors cancellation before returning an unsupported-filter error", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const provider: SearchProvider = {
+      name: "unsupported",
+      label: "Unsupported",
+      filterSupport: UNSUPPORTED_SEARCH_FILTERS,
+      search: vi.fn().mockResolvedValue([]),
+    };
+    const tool = createWebSearchTool(() => [provider]);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-uf-abort",
+      { query: "test", startDate: "2025-01-01" },
+      controller.signal,
+      undefined,
+      ctx,
+    );
+
+    expect(provider.search).not.toHaveBeenCalled();
+    expect((result.content[0] as { type: "text"; text: string }).text.toLowerCase()).toContain(
+      "aborted",
+    );
+  });
 });
