@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Text } from "@earendil-works/pi-tui";
 import { createWebSearchTool } from "../../src/tools/web-search.ts";
+import type { CombineConfig } from "../../src/config.ts";
 import { makeCtx } from "../helpers.ts";
 import type { SearchFilters, SearchProvider, SearchResult } from "../../src/providers/types.ts";
 import { UNSUPPORTED_SEARCH_FILTERS } from "../../src/providers/types.ts";
@@ -501,6 +502,62 @@ describe("web_search fusion mode", () => {
     const result = await tool.execute("call-fuse-3", { query: "test" }, undefined, undefined, ctx);
 
     expect(result.details.provider).toBe("fusion");
+  });
+
+  it("reads updated fusion config including targetBackends and honors combine=false", async () => {
+    const x = { title: "X", url: "https://x.com", snippet: "x" };
+    const y = { title: "Y", url: "https://y.com", snippet: "y" };
+    const firstFillers = Array.from({ length: 5 }, (_, i) => ({
+      title: `F${i}`,
+      url: `https://f${i}.com`,
+      snippet: "f",
+    }));
+    const secondFillers = Array.from({ length: 6 }, (_, i) => ({
+      title: `G${i}`,
+      url: `https://g${i}.com`,
+      snippet: "g",
+    }));
+    const first = makeProvider("first", [x, ...firstFillers, y]);
+    const second = makeProvider("second", [...secondFillers, y]);
+    const third = makeProvider("third", [resultC]);
+    const fourth = makeProvider("fourth", [resultB]);
+    const firstSearch = vi.spyOn(first, "search");
+    let current: CombineConfig = { enabled: false, mode: "targeted", targetBackends: 2, k: 1 };
+    const tool = createWebSearchTool(
+      (_name, combine) => (combine ? [first, second, third, fourth] : [first]),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      current,
+      () => current,
+    );
+    const ctx = makeCtx();
+
+    expect((await tool.execute("initial", { query: "test" }, undefined, undefined, ctx)).details.provider).toBe(
+      "first",
+    );
+
+    current = { ...current, enabled: true };
+    let result = await tool.execute("enabled", { query: "test", numResults: 20 }, undefined, undefined, ctx);
+    expect(result.details.fusionMeta?.providersUsed).toEqual(["first", "second"]);
+    expect((result.content[0] as { type: "text"; text: string }).text.split("\n")[0]).toContain("[X]");
+
+    current = { ...current, targetBackends: 3 };
+    result = await tool.execute("new-target", { query: "test", numResults: 20 }, undefined, undefined, ctx);
+    expect(result.details.fusionMeta?.providersUsed).toEqual(["first", "second", "third"]);
+    expect(firstSearch).toHaveBeenLastCalledWith("test", 7, undefined, undefined);
+
+    current = { ...current, k: 60 };
+    result = await tool.execute("new-k", { query: "test", numResults: 20 }, undefined, undefined, ctx);
+    expect((result.content[0] as { type: "text"; text: string }).text.split("\n")[0]).toContain("[Y]");
+
+    current = { ...current, mode: "all" };
+    result = await tool.execute("all", { query: "test", numResults: 20 }, undefined, undefined, ctx);
+    expect(result.details.fusionMeta?.providersUsed).toEqual(["first", "second", "third", "fourth"]);
+
+    result = await tool.execute("override", { query: "test", combine: false }, undefined, undefined, ctx);
+    expect(result.details.provider).toBe("first");
   });
 
   it("combine=false forces fallback even when config has enabled=true", async () => {

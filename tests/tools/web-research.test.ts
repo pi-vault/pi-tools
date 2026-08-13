@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWebResearchTool } from "../../src/tools/web-research.ts";
+import type { DeepResearchConfig } from "../../src/config.ts";
 import type { ResearchProvider } from "../../src/providers/types.ts";
 import { stubFetch } from "../helpers.ts";
 import { makeCtx } from "../helpers.ts";
@@ -216,6 +217,33 @@ describe("createWebResearchTool", () => {
     );
 
     expect(vi.mocked(client.deepResearch)).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads updated deep research config between executions", async () => {
+    const client = makeClient();
+    let current: DeepResearchConfig = {
+      enabled: true,
+      modeDefaults: { standard: { type: "deep-lite", numResults: 7 } },
+    };
+    const tool = createWebResearchTool(
+      () => [client],
+      { enabled: true },
+      appendEntry,
+      undefined,
+      undefined,
+      () => current,
+    );
+
+    await tool.execute("updated-defaults", { query: "test" }, undefined, vi.fn(), makeCtx());
+    expect(client.deepResearch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "deep-lite", numResults: 7 }),
+      undefined,
+    );
+
+    current = { enabled: false, modeDefaults: {} };
+    await expect(
+      tool.execute("disabled", { query: "test" }, undefined, vi.fn(), makeCtx()),
+    ).rejects.toThrow("web_research is disabled via deepResearch.enabled config.");
   });
 
   it("throws when deepResearch is disabled", async () => {

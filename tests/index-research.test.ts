@@ -60,20 +60,20 @@ describe("web_research registration", () => {
     expect(registeredToolNames()).toContain("web_research");
   });
 
-  it("does not register web_research when exa API key is missing", () => {
+  it("registers web_research when exa API key is missing", () => {
     vi.mocked(loadMergedConfig).mockReturnValue(
       mockConfig({ providers: { exa: { enabled: true, apiKey: "EXA_API_KEY" } } }),
     );
     delete process.env.EXA_API_KEY;
-    expect(registeredToolNames()).not.toContain("web_research");
+    expect(registeredToolNames()).toContain("web_research");
   });
 
-  it("does not register web_research when deepResearch.enabled is false", () => {
+  it("registers web_research when deepResearch.enabled is false", () => {
     vi.mocked(loadMergedConfig).mockReturnValue(mockConfig({ deepResearch: { enabled: false } }));
-    expect(registeredToolNames()).not.toContain("web_research");
+    expect(registeredToolNames()).toContain("web_research");
   });
 
-  it("does not register web_research when Exa is disabled", () => {
+  it("registers web_research when Exa is disabled", () => {
     vi.mocked(loadMergedConfig).mockReturnValue(
       mockConfig({
         providers: {
@@ -85,7 +85,38 @@ describe("web_research registration", () => {
         },
       }),
     );
-    expect(registeredToolNames()).not.toContain("web_research");
+    expect(registeredToolNames()).toContain("web_research");
+  });
+
+  it("keeps unavailable docs and research definitions executable with their existing errors", async () => {
+    vi.mocked(loadMergedConfig).mockReturnValue(
+      mockConfig({
+        providers: { exa: { enabled: true, apiKey: "EXA_API_KEY" } },
+      }),
+    );
+    delete process.env.EXA_API_KEY;
+    delete process.env.CONTEXT7_API_KEY;
+
+    const pi = createMockPi();
+    createExtension(pi as never);
+    const ctx = makeCtx();
+    pi.events.get("session_start")?.[0]?.({ type: "session_start", reason: "startup" }, ctx);
+
+    const docs = pi.tools.find((tool) => tool.name === "web_docs_search");
+    const research = pi.tools.find((tool) => tool.name === "web_research");
+    if (!docs || !research) throw new Error("stable optional tools not registered");
+
+    const docsResult = await docs.execute(
+      "docs",
+      { libraryName: "react", query: "hooks" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    expect((docsResult.content[0] as { text: string }).text).toContain("CONTEXT7_API_KEY");
+    await expect(research.execute("research", { query: "test" }, undefined, undefined, ctx)).rejects.toThrow(
+      "disabled or unavailable",
+    );
   });
 
   it("passes research operation metadata to the registry", async () => {

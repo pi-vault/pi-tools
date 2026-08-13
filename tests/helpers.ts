@@ -43,7 +43,9 @@ export function createMockPi(): MockPi {
     events,
     entries,
     registerTool(tool: ToolDefinition) {
-      tools.push(tool);
+      const index = tools.findIndex((existing) => existing.name === tool.name);
+      if (index === -1) tools.push(tool);
+      else tools[index] = tool;
     },
     registerCommand(
       name: string,
