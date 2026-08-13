@@ -139,10 +139,7 @@ export default function createExtension(pi: ExtensionAPI): void {
   );
 
   // Build tier map for status display
-  const tierMap = new Map<string, ProviderTier>();
-  for (const meta of allProviders) {
-    tierMap.set(meta.name, meta.tier);
-  }
+  const tierMap = new Map<string, ProviderTier>(allProviders.map((meta) => [meta.name, meta.tier]));
 
   // Register /tools command
   const allProviderNames = allProviders.map((m) => m.name);

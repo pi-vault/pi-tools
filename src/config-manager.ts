@@ -70,7 +70,7 @@ export class ConfigManager {
   constructor(
     cwd: string,
     registry: ProviderRegistry,
-    providerMetas: ProviderMeta[],
+    providerMetas: readonly ProviderMeta[],
     modelRegistry?: ModelRegistry,
   ) {
     this.cwd = cwd;

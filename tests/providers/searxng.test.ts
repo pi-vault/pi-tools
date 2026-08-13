@@ -179,14 +179,13 @@ describe("SearXNGProvider", () => {
       expect((instance.search as SearXNGProvider).instanceUrl).toBe("http://my-searx.local:9090");
     });
 
-    it("creates provider with apiKey resolved from config", async () => {
+    it("creates provider with the resolved key injected by the factory", async () => {
       fetchStub.addResponse("my-searx.local:9090", { body: { results: [] } });
 
-      const instance = providerMeta.create(undefined, {
+      const instance = providerMeta.create("my-token", {
         enabled: true,
         budget: { mode: "unlimited" },
         instanceUrl: "http://my-searx.local:9090",
-        apiKey: "my-token",
       });
       await instance.search!.search("test", 5);
 
@@ -194,7 +193,7 @@ describe("SearXNGProvider", () => {
       expect(fetchCall[1].headers["Authorization"]).toBe("Bearer my-token");
     });
 
-    it("creates provider without apiKey when not in config", async () => {
+    it("creates provider without apiKey when not injected", async () => {
       fetchStub.addResponse("localhost:8080", { body: { results: [] } });
 
       const instance = providerMeta.create(undefined, {

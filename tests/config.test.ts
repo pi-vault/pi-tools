@@ -11,6 +11,7 @@ import {
   getConfigPath,
   loadMergedConfig,
 } from "../src/config.ts";
+import { defaultProviderConfigs } from "../src/providers/catalog.ts";
 import * as path from "node:path";
 
 vi.mock("node:fs");
@@ -48,6 +49,8 @@ describe("loadConfig", () => {
     vi.mocked(fs.readFileSync).mockImplementation(() => {
       throw new Error("ENOENT");
     });
+
+    expect(Object.keys(loadConfig().providers)).toEqual(Object.keys(defaultProviderConfigs));
 
     expect(
       Object.fromEntries(
