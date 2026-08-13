@@ -1,5 +1,5 @@
 import type { SearchResult } from "./types.ts";
-import { AggregateProviderError, sanitizeError } from "../utils/errors.ts";
+import { AggregateProviderError } from "../utils/errors.ts";
 import { BudgetExceededError } from "./registry.ts";
 import { type ExecutionHooks, executeAttempt } from "./execute.ts";
 
@@ -93,6 +93,8 @@ export async function executeWithFusion(options: FusionOptions): Promise<FusionR
   const { candidates, maxResults, mode, targetBackends, k, signal, onSuccess, onFailure } =
     options;
 
+  signal?.throwIfAborted();
+
   if (candidates.length === 0) {
     throw new AggregateProviderError("search", [
       { provider: "none", error: "No search providers available" },
@@ -146,7 +148,7 @@ async function executeTargeted(
           const budgetRejected = error instanceof BudgetExceededError;
           return {
             name: candidate.name,
-            error: sanitizeError(error),
+            error: error instanceof Error ? error.message : String(error),
             budgetRejected,
             success: false as const,
           };

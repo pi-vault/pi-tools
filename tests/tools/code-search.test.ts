@@ -60,6 +60,17 @@ describe("code_search tool", () => {
     expect(onSuccess).toHaveBeenCalledWith("exa");
   });
 
+  it("passes shared execution hooks through the attempt runner", async () => {
+    const hooks = { onSuccess: vi.fn(), onFailure: vi.fn() };
+    const tool = createCodeSearchTool(() => mockCodeSearch(), undefined, undefined, hooks);
+    const ctx = makeCtx();
+
+    await tool.execute("call-hooks", { query: "hooks" }, undefined, undefined, ctx);
+
+    expect(hooks.onSuccess).toHaveBeenCalledWith("exa", expect.any(Number));
+    expect(hooks.onFailure).not.toHaveBeenCalled();
+  });
+
   it("does not call onSuccess when provider throws", async () => {
     const failingProvider: CodeSearchProvider = {
       name: "exa",

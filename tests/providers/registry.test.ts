@@ -624,4 +624,44 @@ describe("ProviderRegistry capability-aware selection", () => {
     register(registry, "fetch-only", managed, { fetch: fetch("fetch-only") });
     expect(registry.selectResearchCandidates()).toEqual([]);
   });
+
+  it("uses registered policy keys when filtering automatic candidates", () => {
+    const { registry } = memory();
+    register(registry, "search-policy", hard(1), { search: search("search-provider") });
+    register(registry, "fetch-policy", hard(1), { fetch: fetch("fetch-provider") });
+    register(registry, "code-policy", hard(1), { codeSearch: codeSearch("code-provider") });
+    register(registry, "docs-policy", hard(1), { docs: docs("docs-provider") });
+    register(registry, "research-policy", hard(1), {
+      research: research("research-provider"),
+    });
+
+    registry.consume("search-policy", { capability: "search", maxResults: 1 });
+    registry.consume("fetch-policy", { capability: "fetch" });
+    registry.consume("code-policy", { capability: "code-search", maxResults: 1 });
+    registry.consume("docs-policy", { capability: "docs-search" });
+    registry.consume("research-policy", {
+      capability: "research",
+      type: "deep-lite",
+      maxResults: 1,
+      contentTypes: 2,
+    });
+
+    expect(registry.selectSearchCandidates()).toEqual([]);
+    expect(registry.selectFetchCandidates()).toEqual([]);
+    expect(registry.selectCodeSearch()).toBeUndefined();
+    expect(registry.selectDocs()).toBeUndefined();
+    expect(registry.selectResearchCandidates()).toEqual([]);
+  });
+
+  it("keeps the registered policy key on wrapped provider identities", () => {
+    const { registry } = memory();
+    register(registry, "search-policy", managed, { search: search("search-provider") });
+
+    const provider = registry.selectSearchCandidates()[0];
+    expect(provider.name).toBe("search-policy");
+
+    registry.getExecutionHooks().onSuccess?.(provider.name, 10);
+    expect(registry.getMetrics("search-policy")).toMatchObject({ successes: 1 });
+    expect(registry.getMetrics("search-provider")).toBeUndefined();
+  });
 });

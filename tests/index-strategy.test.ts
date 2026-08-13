@@ -194,4 +194,33 @@ describe("selectionStrategy routing", () => {
 
     fetchStub.restore();
   });
+
+  it("records one outcome for a successful indexed code search", async () => {
+    const fetchStub = stubFetch();
+    fetchStub.addResponse("api.exa.ai/search", {
+      body: {
+        results: [{ title: "Result", url: "https://example.com", text: "snippet" }],
+      },
+    });
+    const outcomeSpy = vi.spyOn(ProviderRegistry.prototype, "recordOutcome");
+
+    try {
+      const pi = createMockPi();
+      createExtension(pi as unknown as ExtensionAPI);
+      const ctx = makeCtx();
+      pi.events.get("session_start")?.[0]?.({ type: "session_start", reason: "startup" }, ctx);
+
+      const codeSearch = pi.tools.find((tool) => tool.name === "code_search");
+      expect(codeSearch).toBeDefined();
+      await codeSearch?.execute("id", { query: "test" }, undefined, undefined, ctx);
+
+      expect(outcomeSpy).toHaveBeenCalledTimes(1);
+      expect(outcomeSpy).toHaveBeenCalledWith("exa", {
+        success: true,
+        latencyMs: expect.any(Number),
+      });
+    } finally {
+      fetchStub.restore();
+    }
+  });
 });

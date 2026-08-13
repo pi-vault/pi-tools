@@ -5,7 +5,6 @@ import type {
   FetchProvider,
   FetchResult,
   ProviderMeta,
-  ResearchProvider,
   SearchFilters,
   SearchProvider,
   SearchResult,

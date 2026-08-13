@@ -172,6 +172,28 @@ describe("createWebResearchTool", () => {
     expect(text).toContain("Answer from query 2.");
   });
 
+  it("falls back between registered candidates through shared hooks", async () => {
+    const failing: ResearchProvider = {
+      name: "first",
+      label: "First",
+      deepResearch: vi.fn().mockRejectedValue(new Error("first failed")),
+    };
+    const working = makeClient();
+    const hooks = { onSuccess: vi.fn(), onFailure: vi.fn() };
+    const tool = createWebResearchTool(
+      () => [failing, working],
+      { enabled: true },
+      appendEntry,
+      undefined,
+      hooks,
+    );
+
+    await tool.execute("call-fallback", { query: "test" }, undefined, vi.fn(), makeCtx());
+
+    expect(hooks.onFailure).toHaveBeenCalledWith("first");
+    expect(hooks.onSuccess).toHaveBeenCalledWith("exa", expect.any(Number));
+  });
+
   it("collapses duplicate queries in full mode", async () => {
     const client = makeClient();
     const tool = createWebResearchTool(

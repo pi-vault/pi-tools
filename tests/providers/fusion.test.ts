@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { reciprocalRankFusion, executeWithFusion } from "../../src/providers/fusion.ts";
 import type { SearchResult } from "../../src/providers/types.ts";
 import { BudgetExceededError } from "../../src/providers/registry.ts";
+import { AggregateProviderError } from "../../src/utils/errors.ts";
 
 describe("reciprocalRankFusion", () => {
   it("merges results from two providers and orders by RRF score", () => {
@@ -869,6 +870,22 @@ describe("executeWithFusion", () => {
       ).rejects.toThrow("aborted");
     });
 
+    it("prioritizes pre-flight cancellation over an empty candidate list", async () => {
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        executeWithFusion({
+          candidates: [],
+          maxResults: 1,
+          mode: "all",
+          targetBackends: 1,
+          k: 60,
+          signal: controller.signal,
+        }),
+      ).rejects.toThrow("aborted");
+    });
+
     it("invokes shared onSuccess exactly once per usable attempt", async () => {
       const onSuccess = vi.fn();
       await executeWithFusion({
@@ -916,6 +933,33 @@ describe("executeWithFusion", () => {
         }),
       ).rejects.toThrow();
       expect(onFailure).not.toHaveBeenCalled();
+    });
+
+    it("preserves the original error in aggregate details", async () => {
+      const originalError = "x".repeat(301);
+
+      try {
+        await executeWithFusion({
+          candidates: [
+            {
+              name: "failing",
+              execute: async (_n: number): Promise<SearchResult[]> => {
+                throw new Error(originalError);
+              },
+            },
+          ],
+          maxResults: 1,
+          mode: "all",
+          targetBackends: 1,
+          k: 60,
+        });
+        throw new Error("expected fusion to fail");
+      } catch (error) {
+        expect(error).toBeInstanceOf(AggregateProviderError);
+        expect((error as AggregateProviderError).errors).toEqual([
+          { provider: "failing", error: originalError },
+        ]);
+      }
     });
   });
 });

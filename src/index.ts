@@ -80,9 +80,7 @@ export default function createExtension(pi: ExtensionAPI): void {
           configManager.refresh();
           return registry.selectCodeSearch(configManager.current.selectionStrategy);
         },
-        // Search-quality success hook — code-search has no failure callback, so the
-        // shared success hook drives the recorded outcome.
-        (name) => executionHooks.onSuccess?.(name, 0),
+        undefined,
         configManager.current.guidance?.code_search,
         executionHooks,
       ),

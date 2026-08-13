@@ -19,6 +19,7 @@ import type {
   SearchProvider,
   UsageCost,
 } from "./types.ts";
+import type { ExecutionHooks } from "./execute.ts";
 
 export interface UsageCounter {
   used: number;
@@ -78,11 +79,6 @@ export interface ProviderMetrics {
   avgResultRatio: number;
   resultSamples: number;
   windowStart: number;
-}
-
-export interface ExecutionHooks {
-  onSuccess?: (providerName: string, latencyMs: number) => void;
-  onFailure?: (providerName: string) => void;
 }
 
 const METRICS_WINDOW_MS = 60_000;
@@ -149,13 +145,6 @@ export class BudgetExceededError extends Error {
   }
 }
 
-type AnyRegistered =
-  | RegisteredProvider<SearchProvider>
-  | RegisteredProvider<FetchProvider>
-  | RegisteredProvider<CodeSearchProvider>
-  | RegisteredProvider<DocsProvider>
-  | RegisteredProvider<ResearchProvider>;
-
 export class ProviderRegistry {
   private searchProviders = new Map<string, RegisteredProvider<SearchProvider>>();
   private fetchProviders = new Map<string, RegisteredProvider<FetchProvider>>();
@@ -202,7 +191,7 @@ export class ProviderRegistry {
       this.searchProviders.set(options.name, {
         tier: options.tier,
         provider: {
-          name: provider.name,
+          name: options.name,
           label: provider.label,
           filterSupport: provider.filterSupport,
           search: async (query, maxResults, signal, filters) => {
@@ -217,7 +206,7 @@ export class ProviderRegistry {
       this.fetchProviders.set(options.name, {
         tier: options.tier,
         provider: {
-          name: provider.name,
+          name: options.name,
           fetch: async (url, signal) => {
             this.consume(options.name, { capability: "fetch" });
             return provider.fetch(url, signal);
@@ -230,7 +219,7 @@ export class ProviderRegistry {
       this.codeSearchProviders.set(options.name, {
         tier: options.tier,
         provider: {
-          name: provider.name,
+          name: options.name,
           codeSearch: async (query, maxResults, signal) => {
             this.consume(options.name, { capability: "code-search", maxResults });
             return provider.codeSearch(query, maxResults, signal);
@@ -243,7 +232,7 @@ export class ProviderRegistry {
       this.docsProviders.set(options.name, {
         tier: options.tier,
         provider: {
-          name: provider.name,
+          name: options.name,
           label: provider.label,
           searchLibrary: async (libraryName, query, signal) => {
             this.consume(options.name, { capability: "docs-search" });
@@ -261,7 +250,7 @@ export class ProviderRegistry {
       this.researchProviders.set(options.name, {
         tier: options.tier,
         provider: {
-          name: provider.name,
+          name: options.name,
           label: provider.label,
           deepResearch: async (params, signal) => {
             this.consume(options.name, {
@@ -474,15 +463,12 @@ export class ProviderRegistry {
     }
   }
 
-  private genericByTier<T>(capability: ProviderCapability): RegisteredProvider<T>[] {
-    const map = this.capabilityMap<T>(capability);
-    const order: AnyRegistered[] = [];
-    for (const tier of [1, 2, 3] as const) {
-      for (const registration of map.values()) {
-        if (registration.tier === tier) order.push(registration as AnyRegistered);
-      }
-    }
-    return order as RegisteredProvider<T>[];
+  private genericByTier<T>(
+    capability: ProviderCapability,
+  ): Array<[string, RegisteredProvider<T>]> {
+    return [...this.capabilityMap<T>(capability).entries()].sort(
+      ([, a], [, b]) => a.tier - b.tier,
+    );
   }
 
   private genericEligible<T>(capability: ProviderCapability): Array<[string, RegisteredProvider<T>]> {
@@ -540,8 +526,8 @@ export class ProviderRegistry {
       return [registration.provider];
     }
     return this.genericByTier<SearchProvider>("search")
-      .filter((registration) => this.isEligible(registration.provider.name))
-      .map((registration) => registration.provider);
+      .filter(([name]) => this.isEligible(name))
+      .map(([, registration]) => registration.provider);
   }
 
   selectSearchByPerformance(name?: string): SearchProvider | undefined {
@@ -574,8 +560,8 @@ export class ProviderRegistry {
       strategy === "best-performing"
         ? this.scoreRegistered(eligible).map(({ provider }) => provider)
         : this.genericByTier<FetchProvider>("fetch")
-            .filter((registration) => this.isEligible(registration.provider.name))
-            .map((registration) => registration.provider);
+            .filter(([name]) => this.isEligible(name))
+            .map(([, registration]) => registration.provider);
     return ordered;
   }
 
@@ -587,9 +573,9 @@ export class ProviderRegistry {
     if (strategy === "best-performing") {
       return this.scoreRegistered(eligible)[0]?.provider;
     }
-    return this.genericByTier<CodeSearchProvider>("code-search").find((registration) =>
-      this.isEligible(registration.provider.name),
-    )?.provider;
+    return this.genericByTier<CodeSearchProvider>("code-search").find(([name]) =>
+      this.isEligible(name),
+    )?.[1].provider;
   }
 
   // ---- Docs ----
@@ -600,9 +586,9 @@ export class ProviderRegistry {
       if (!registration || !this.isEligible(name)) return undefined;
       return registration.provider;
     }
-    return this.genericByTier<DocsProvider>("docs-search").find((registration) =>
-      this.isEligible(registration.provider.name),
-    )?.provider;
+    return this.genericByTier<DocsProvider>("docs-search").find(([name]) =>
+      this.isEligible(name),
+    )?.[1].provider;
   }
 
   selectDocsByStrategy(
@@ -619,9 +605,9 @@ export class ProviderRegistry {
     if (strategy === "best-performing") {
       return this.scoreRegistered(eligible)[0]?.provider;
     }
-    return this.genericByTier<DocsProvider>("docs-search").find((registration) =>
-      this.isEligible(registration.provider.name),
-    )?.provider;
+    return this.genericByTier<DocsProvider>("docs-search").find(([name]) =>
+      this.isEligible(name),
+    )?.[1].provider;
   }
 
   // ---- Research ----
@@ -640,8 +626,8 @@ export class ProviderRegistry {
       return this.scoreRegistered(eligible).map(({ provider }) => provider);
     }
     return this.genericByTier<ResearchProvider>("research")
-      .filter((registration) => this.isEligible(registration.provider.name))
-      .map((registration) => registration.provider);
+      .filter(([name]) => this.isEligible(name))
+      .map(([, registration]) => registration.provider);
   }
 
   getSearchProviderNames(): string[] {
