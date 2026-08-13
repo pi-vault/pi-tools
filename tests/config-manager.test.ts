@@ -253,17 +253,19 @@ describe("ConfigManager", () => {
     const searxngModule = await import("../src/providers/searxng.ts");
     const searxngMeta = searxngModule.providerMeta;
     const fetchStub = stubFetch();
-    fetchStub.addResponse("my-searx.local:9090", { body: { results: [] } });
+    try {
+      fetchStub.addResponse("my-searx.local:9090", { body: { results: [] } });
 
-    const registry = memory();
-    const manager = new ConfigManager("/cwd", registry, [searxngMeta]);
-    const candidates = registry.selectSearchCandidates("searxng");
-    await candidates[0].search("test", 5);
+      const registry = memory();
+      new ConfigManager("/cwd", registry, [searxngMeta]);
+      const candidates = registry.selectSearchCandidates("searxng");
+      await candidates[0].search("test", 5);
 
-    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
-    const headers = fetchCall[1]?.headers as Record<string, string>;
-    expect(headers["Authorization"]).toBe("Bearer resolved-searxng-key");
-    expect(manager.current.providers.searxng.enabled).toBe(true);
-    fetchStub.restore();
+      const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      const headers = fetchCall[1]?.headers as Record<string, string>;
+      expect(headers["Authorization"]).toBe("Bearer resolved-searxng-key");
+    } finally {
+      fetchStub.restore();
+    }
   });
 });

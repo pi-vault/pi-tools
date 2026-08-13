@@ -22,11 +22,6 @@ export interface ProviderCatalogEntry {
   readonly fallbackEnv?: string;
 }
 
-interface ServiceEnvironmentEntry {
-  readonly name: string;
-  readonly fallbackEnv: string;
-}
-
 const providerMetas: readonly ProviderMeta[] = [
   ...httpProviders,
   context7,
@@ -45,9 +40,7 @@ const providerMetas: readonly ProviderMeta[] = [
   tinyfish,
 ];
 
-const providerMetaByName = new Map(
-  providerMetas.map((meta) => [meta.name, meta] as const),
-);
+const providerMetaByName = new Map(providerMetas.map((meta) => [meta.name, meta] as const));
 
 function catalogEntry(
   name: string,
@@ -56,7 +49,7 @@ function catalogEntry(
 ): ProviderCatalogEntry {
   const meta = providerMetaByName.get(name);
   if (!meta) throw new Error(`Missing provider metadata for ${name}`);
-  return Object.freeze({ meta, defaultConfig, fallbackEnv });
+  return { meta, defaultConfig, fallbackEnv };
 }
 
 const providerCatalog: readonly ProviderCatalogEntry[] = [
@@ -133,11 +126,7 @@ const providerCatalog: readonly ProviderCatalogEntry[] = [
     },
     "FIRECRAWL_API_KEY",
   ),
-  catalogEntry(
-    "jina",
-    { enabled: true, budget: { mode: "managed" } },
-    "JINA_API_KEY",
-  ),
+  catalogEntry("jina", { enabled: true, budget: { mode: "managed" } }, "JINA_API_KEY"),
   catalogEntry(
     "langsearch",
     {
@@ -156,11 +145,7 @@ const providerCatalog: readonly ProviderCatalogEntry[] = [
     },
     "LINKUP_API_KEY",
   ),
-  catalogEntry(
-    "marginalia",
-    { enabled: false, budget: { mode: "managed" } },
-    "MARGINALIA_API_KEY",
-  ),
+  catalogEntry("marginalia", { enabled: false, budget: { mode: "managed" } }, "MARGINALIA_API_KEY"),
   catalogEntry(
     "ollama",
     {
@@ -264,10 +249,6 @@ const providerCatalog: readonly ProviderCatalogEntry[] = [
   ),
 ];
 
-const serviceEnvironmentEntries: readonly ServiceEnvironmentEntry[] = [
-  { name: "gemini", fallbackEnv: "GEMINI_API_KEY" },
-];
-
 const catalogNames = new Set(providerCatalog.map(({ meta }) => meta.name));
 if (catalogNames.size !== providerCatalog.length)
   throw new Error("Duplicate provider catalog name");
@@ -278,17 +259,9 @@ for (const meta of providerMetas) {
     throw new Error(`Provider ${meta.name} is missing from catalog`);
 }
 
-const catalogMetaByName = new Map(
-  providerCatalog.map(({ meta }) => [meta.name, meta] as const),
-);
-
 export { providerCatalog };
 
-export const allProviders: ProviderMeta[] = providerMetas.map(({ name }) => {
-  const meta = catalogMetaByName.get(name);
-  if (!meta) throw new Error(`Provider ${name} is missing from catalog`);
-  return meta;
-});
+export const allProviders: ProviderMeta[] = [...providerMetas];
 
 export const defaultProviderConfigs: Record<string, ProviderConfigEntry> = Object.fromEntries(
   providerCatalog.map(({ meta, defaultConfig }) => [meta.name, defaultConfig]),
@@ -298,7 +271,5 @@ export const fallbackEnvMap: Record<string, string> = Object.fromEntries([
   ...providerCatalog.flatMap(({ meta, fallbackEnv }) =>
     fallbackEnv ? [[meta.name, fallbackEnv] as const] : [],
   ),
-  ...serviceEnvironmentEntries.map(
-    ({ name, fallbackEnv }) => [name, fallbackEnv] as const,
-  ),
+  ["gemini", "GEMINI_API_KEY"] as const,
 ]);

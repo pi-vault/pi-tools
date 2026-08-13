@@ -11,9 +11,7 @@ describe("provider catalog", () => {
     const names = providerCatalog.map(({ meta }) => meta.name);
     expect(names.length).toBe(23);
     expect(new Set(names).size).toBe(names.length);
-    expect(new Set(allProviders.map(({ name }) => name))).toEqual(
-      new Set(names),
-    );
+    expect(new Set(allProviders.map(({ name }) => name))).toEqual(new Set(names));
     expect(names).toEqual([
       "brave",
       "brave-llm",

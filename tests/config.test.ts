@@ -50,9 +50,7 @@ describe("loadConfig", () => {
       throw new Error("ENOENT");
     });
 
-    expect(Object.keys(loadConfig().providers)).toEqual(
-      Object.keys(defaultProviderConfigs),
-    );
+    expect(Object.keys(loadConfig().providers)).toEqual(Object.keys(defaultProviderConfigs));
 
     expect(
       Object.fromEntries(

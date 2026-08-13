@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { allProviders, providerCatalog } from "../../src/providers/all.ts";
-import { defaultProviderConfigs } from "../../src/providers/catalog.ts";
 
 describe("allProviders barrel", () => {
   it("exports exactly 23 providers", () => {
@@ -97,6 +96,5 @@ describe("allProviders barrel", () => {
     const barrelNames = new Set(allProviders.map((m) => m.name));
     const catalogNames = new Set(providerCatalog.map(({ meta }) => meta.name));
     expect(catalogNames).toEqual(barrelNames);
-    expect(new Set(Object.keys(defaultProviderConfigs))).toEqual(barrelNames);
   });
 });
