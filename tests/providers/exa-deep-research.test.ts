@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ExaDeepResearchClient } from "../../src/providers/exa-deep-research.ts";
+import type { ResearchProvider } from "../../src/providers/types.ts";
 import { stubFetch } from "../helpers.ts";
 
 describe("ExaDeepResearchClient", () => {
@@ -10,6 +11,14 @@ describe("ExaDeepResearchClient", () => {
   });
   afterEach(() => {
     fetchStub.restore();
+  });
+
+  it("exposes registered research provider identity", () => {
+    const client = new ExaDeepResearchClient("key");
+    const asProvider: ResearchProvider = client;
+    expect(asProvider.name).toBe("exa");
+    expect(asProvider.label).toBe("Exa");
+    expect(typeof asProvider.deepResearch).toBe("function");
   });
 
   it("sends correct headers with API key", async () => {

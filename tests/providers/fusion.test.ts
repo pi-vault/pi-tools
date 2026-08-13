@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { reciprocalRankFusion, executeWithFusion } from "../../src/providers/fusion.ts";
 import type { SearchResult } from "../../src/providers/types.ts";
 import { BudgetExceededError } from "../../src/providers/registry.ts";
+import { AggregateProviderError } from "../../src/utils/errors.ts";
 
 describe("reciprocalRankFusion", () => {
   it("merges results from two providers and orders by RRF score", () => {
@@ -844,6 +845,121 @@ describe("executeWithFusion", () => {
 
       expect(result.providersUsed).toHaveLength(2);
       expect(result.degraded).toBe(false);
+    });
+  });
+
+  describe("signal propagation and shared hooks", () => {
+    it("rethrows pre-flight signal abort as a thrown error", async () => {
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        executeWithFusion({
+          candidates: [
+            {
+              name: "a",
+              execute: async (_n: number) =>
+                [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
+            },
+          ],
+          maxResults: 1,
+          mode: "all",
+          targetBackends: 1,
+          k: 60,
+          signal: controller.signal,
+        }),
+      ).rejects.toThrow("aborted");
+    });
+
+    it("prioritizes pre-flight cancellation over an empty candidate list", async () => {
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        executeWithFusion({
+          candidates: [],
+          maxResults: 1,
+          mode: "all",
+          targetBackends: 1,
+          k: 60,
+          signal: controller.signal,
+        }),
+      ).rejects.toThrow("aborted");
+    });
+
+    it("invokes shared onSuccess exactly once per usable attempt", async () => {
+      const onSuccess = vi.fn();
+      await executeWithFusion({
+        candidates: [
+          {
+            name: "a",
+            execute: async (_n: number) =>
+              [{ title: "A", url: "https://a.com", snippet: "a" }] as SearchResult[],
+          },
+          {
+            name: "b",
+            execute: async (_n: number) =>
+              [{ title: "B", url: "https://b.com", snippet: "b" }] as SearchResult[],
+          },
+        ],
+        maxResults: 4,
+        mode: "all",
+        targetBackends: 2,
+        k: 60,
+        onSuccess,
+      });
+      expect(onSuccess).toHaveBeenCalledTimes(2);
+    });
+
+    it("records cancellation as no provider failure", async () => {
+      const onFailure = vi.fn();
+      const controller = new AbortController();
+      await expect(
+        executeWithFusion({
+          candidates: [
+            {
+              name: "a",
+              execute: async (_n: number): Promise<SearchResult[]> => {
+                controller.abort();
+                throw new Error("aborted");
+              },
+            },
+          ],
+          maxResults: 1,
+          mode: "all",
+          targetBackends: 1,
+          k: 60,
+          signal: controller.signal,
+          onFailure,
+        }),
+      ).rejects.toThrow();
+      expect(onFailure).not.toHaveBeenCalled();
+    });
+
+    it("preserves the original error in aggregate details", async () => {
+      const originalError = "x".repeat(301);
+
+      try {
+        await executeWithFusion({
+          candidates: [
+            {
+              name: "failing",
+              execute: async (_n: number): Promise<SearchResult[]> => {
+                throw new Error(originalError);
+              },
+            },
+          ],
+          maxResults: 1,
+          mode: "all",
+          targetBackends: 1,
+          k: 60,
+        });
+        throw new Error("expected fusion to fail");
+      } catch (error) {
+        expect(error).toBeInstanceOf(AggregateProviderError);
+        expect((error as AggregateProviderError).errors).toEqual([
+          { provider: "failing", error: originalError },
+        ]);
+      }
     });
   });
 });

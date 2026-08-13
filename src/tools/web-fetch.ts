@@ -13,7 +13,7 @@ import {
 import { truncateContent } from "../utils/truncate.ts";
 import { fetchWithConcurrencyLimit } from "../utils/concurrency.ts";
 import { sanitizeError } from "../utils/errors.ts";
-import { executeWithFallback } from "../providers/execute.ts";
+import { executeWithFallback, type ExecutionHooks } from "../providers/execute.ts";
 import type { ContentCache } from "../cache.ts";
 import type { GuidanceOverride } from "../config.ts";
 
@@ -88,6 +88,7 @@ export function createWebFetchTool(
   resolveFetchCandidates?: () => FetchProvider[],
   cache?: ContentCache,
   guidance?: GuidanceOverride,
+  executionHooks?: ExecutionHooks,
 ): ToolDefinition<typeof WebFetchParams, WebFetchDetails> {
   async function fetchUrl(
     url: string,
@@ -128,6 +129,8 @@ export function createWebFetchTool(
           })),
           operation: "fetch",
           signal,
+          onSuccess: executionHooks?.onSuccess,
+          onFailure: executionHooks?.onFailure,
         });
         extracted = {
           text: result.text,

@@ -127,9 +127,10 @@ describe("web_fetch fallback to FetchProvider", () => {
       text: "Content from Exa provider",
       title: "Exa Title",
     });
+    const hooks = { onSuccess: vi.fn(), onFailure: vi.fn() };
 
     const store = new ContentStore(() => {});
-    const tool = createWebFetchTool(store, () => [provider]);
+    const tool = createWebFetchTool(store, () => [provider], undefined, undefined, hooks);
     const ctx = makeCtx();
     const result = await tool.execute(
       "call-fb-1",
@@ -141,6 +142,8 @@ describe("web_fetch fallback to FetchProvider", () => {
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toContain("Content from Exa provider");
     expect(result.details.extractionChain).toContain("fetch-provider:exa");
+    expect(hooks.onSuccess).toHaveBeenCalledWith("exa", expect.any(Number));
+    expect(hooks.onFailure).not.toHaveBeenCalled();
   });
 
   it("falls back to second FetchProvider when first also fails", async () => {

@@ -1,6 +1,6 @@
 // tests/providers/exa.test.ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ExaProvider } from "../../src/providers/exa.ts";
+import { ExaProvider, providerMeta } from "../../src/providers/exa.ts";
 import { stubFetch } from "../helpers.ts";
 import type { SearchFilters } from "../../src/providers/types.ts";
 
@@ -156,6 +156,40 @@ describe("ExaProvider", () => {
       const body = JSON.parse(fetchCall[1].body);
       expect(body.includeDomains).toBeUndefined();
       expect(body.excludeDomains).toBeUndefined();
+    });
+  });
+
+  describe("Exa providerMeta factory", () => {
+    it("returns search, fetch, codeSearch, and research from a single key", () => {
+      const instances = providerMeta.create("exa-key");
+      expect(instances.search?.name).toBe("exa");
+      expect(instances.fetch?.name).toBe("exa");
+      expect(instances.codeSearch?.name).toBe("exa");
+      expect(instances.research?.name).toBe("exa");
+      expect(instances.research?.label).toBe("Exa");
+    });
+
+    it("search, fetch, codeSearch behavior is unchanged after research is added", async () => {
+      const instances = providerMeta.create("exa-key");
+      fetchStub.addResponse("api.exa.ai/search", {
+        body: { results: [{ title: "Result", url: "https://exa.ai", text: "x" }] },
+      });
+      const searchResults = await instances.search!.search("test", 1);
+      expect(searchResults).toHaveLength(1);
+
+      fetchStub.addResponse("api.exa.ai/contents", {
+        body: { results: [{ text: "page text" }] },
+      });
+      const fetched = await instances.fetch!.fetch("https://example.com");
+      expect(fetched.text).toBe("page text");
+
+      fetchStub.restore();
+      fetchStub = stubFetch();
+      fetchStub.addResponse("api.exa.ai/search", {
+        body: { results: [{ title: "Code", url: "https://github.com", text: "code" }] },
+      });
+      const code = await instances.codeSearch!.codeSearch("react", 1);
+      expect(code).toHaveLength(1);
     });
   });
 });

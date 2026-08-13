@@ -83,6 +83,23 @@ describe("web_docs_search tool", () => {
     expect(onUpdate).toHaveBeenCalled();
   });
 
+  it("passes shared execution hooks through the attempt runner", async () => {
+    const hooks = { onSuccess: vi.fn(), onFailure: vi.fn() };
+    const tool = createWebDocsSearchTool(() => mockDocsProvider(), undefined, hooks);
+    const ctx = makeCtx();
+
+    await tool.execute(
+      "call-hooks",
+      { libraryName: "react", query: "hooks" },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(hooks.onSuccess).toHaveBeenCalledWith("context7", expect.any(Number));
+    expect(hooks.onFailure).not.toHaveBeenCalled();
+  });
+
   it("trims libraryName before calling provider", async () => {
     const provider = mockDocsProvider([]);
     const tool = createWebDocsSearchTool(() => provider);

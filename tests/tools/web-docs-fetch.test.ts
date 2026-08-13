@@ -70,6 +70,23 @@ describe("web_docs_fetch tool", () => {
     expect(onUpdate).toHaveBeenCalled();
   });
 
+  it("passes shared execution hooks through the attempt runner", async () => {
+    const hooks = { onSuccess: vi.fn(), onFailure: vi.fn() };
+    const tool = createWebDocsFetchTool(() => mockDocsProvider("docs"), createStore(), undefined, hooks);
+    const ctx = makeCtx();
+
+    await tool.execute(
+      "call-hooks",
+      { libraryId: "/facebook/react", query: "hooks" },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(hooks.onSuccess).toHaveBeenCalledWith("context7", expect.any(Number));
+    expect(hooks.onFailure).not.toHaveBeenCalled();
+  });
+
   it("trims libraryId before calling provider", async () => {
     const provider = mockDocsProvider("docs");
     const tool = createWebDocsFetchTool(() => provider, createStore());

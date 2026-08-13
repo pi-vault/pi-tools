@@ -9,6 +9,7 @@ import type {
   SearchProvider,
   SearchResult,
 } from "./types.ts";
+import { ExaDeepResearchClient } from "./exa-deep-research.ts";
 import { parseExaResults } from "./parsers.ts";
 
 interface ExaSearchResponse {
@@ -132,6 +133,11 @@ export const providerMeta: ProviderMeta = {
   },
   create: (key) => {
     const p = new ExaProvider(key!);
-    return { search: p, fetch: p, codeSearch: p };
+    return {
+      search: p,
+      fetch: p,
+      codeSearch: p,
+      research: new ExaDeepResearchClient(key!),
+    };
   },
 };

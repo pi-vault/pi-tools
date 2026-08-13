@@ -4,6 +4,7 @@ import { Text } from "@earendil-works/pi-tui";
 import type { DocsProvider } from "../providers/types.ts";
 import type { ContentStore } from "../storage.ts";
 import { truncateContent } from "../utils/truncate.ts";
+import { executeAttempt, type ExecutionHooks } from "../providers/execute.ts";
 import type { GuidanceOverride } from "../config.ts";
 
 const INLINE_LIMIT = 15_000;
@@ -29,6 +30,7 @@ export function createWebDocsFetchTool(
   resolveProvider: () => DocsProvider | undefined,
   store: ContentStore,
   guidance?: GuidanceOverride,
+  executionHooks?: ExecutionHooks,
 ): ToolDefinition<typeof WebDocsFetchParams, WebDocsFetchDetails> {
   return {
     name: "web_docs_fetch",
@@ -73,7 +75,16 @@ export function createWebDocsFetchTool(
         details: { provider: provider.name, libraryId, chars: 0, truncated: false },
       });
 
-      const text = await provider.getContext(libraryId, query, signal ?? undefined);
+      const text = await executeAttempt({
+        candidate: {
+          name: provider.name,
+          execute: () => provider.getContext(libraryId, query, signal ?? undefined),
+        },
+        operation: "docs-fetch",
+        signal: signal ?? undefined,
+        onSuccess: executionHooks?.onSuccess,
+        onFailure: executionHooks?.onFailure,
+      });
       const chars = text.length;
       let outputText: string;
       let contentId: string | undefined;

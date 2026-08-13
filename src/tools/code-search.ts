@@ -3,6 +3,7 @@ import type { Theme, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import type { CodeSearchProvider, CodeSearchResult } from "../providers/types.ts";
 import { sanitizeError } from "../utils/errors.ts";
+import { executeAttempt, type ExecutionHooks } from "../providers/execute.ts";
 import type { GuidanceOverride } from "../config.ts";
 
 const CodeSearchParams = Type.Object({
@@ -31,6 +32,7 @@ export function createCodeSearchTool(
   resolveProvider: () => CodeSearchProvider | undefined,
   onSuccess?: (providerName: string) => void,
   guidance?: GuidanceOverride,
+  executionHooks?: ExecutionHooks,
 ): ToolDefinition<typeof CodeSearchParams, CodeSearchDetails> {
   return {
     name: "code_search",
@@ -60,10 +62,21 @@ export function createCodeSearchTool(
 
       try {
         const maxResults = params.numResults ?? 5;
-        const results = await provider.codeSearch(params.query, maxResults, signal ?? undefined);
-        const text = formatCodeResults(results);
+        const results = await executeAttempt({
+          candidate: {
+            name: provider.name,
+            execute: () => provider.codeSearch(params.query, maxResults, signal ?? undefined),
+          },
+          operation: "code-search",
+          signal: signal ?? undefined,
+          onSuccess: (name, latencyMs) => {
+            onSuccess?.(name);
+            executionHooks?.onSuccess?.(name, latencyMs);
+          },
+          onFailure: executionHooks?.onFailure,
+        });
 
-        onSuccess?.(provider.name);
+        const text = formatCodeResults(results);
 
         return {
           content: [{ type: "text" as const, text }],
