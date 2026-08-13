@@ -11,7 +11,11 @@ import {
   parseWebSearchApiResults,
   parseYouComResults,
 } from "./parsers.ts";
-import type { ProviderMeta, SearchFilters } from "./types.ts";
+import {
+  UNSUPPORTED_SEARCH_FILTERS,
+  type ProviderMeta,
+  type SearchFilters,
+} from "./types.ts";
 
 function buildFreshness(filters?: SearchFilters): string | null {
   if (!filters) return null;
@@ -44,6 +48,7 @@ export const httpProviders: ProviderMeta[] = [
           "X-Subscription-Token": apiKey,
         }),
         extractResults: parseBraveResults,
+        filterSupport: { domains: "native", dates: "native" },
       }),
     }),
   },
@@ -69,6 +74,7 @@ export const httpProviders: ProviderMeta[] = [
           return body;
         },
         extractResults: parseBraveLlmResults,
+        filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       }),
     }),
   },
@@ -88,6 +94,7 @@ export const httpProviders: ProviderMeta[] = [
           limit: Math.min(maxResults, 20),
         }),
         extractResults: parseFastcrwResults,
+        filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       }),
     }),
   },
@@ -107,6 +114,7 @@ export const httpProviders: ProviderMeta[] = [
           max_results: Math.min(maxResults, 20),
         }),
         extractResults: parseLangSearchResults,
+        filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       }),
     }),
   },
@@ -128,6 +136,7 @@ export const httpProviders: ProviderMeta[] = [
           depth: providerConfig?.depth ?? "standard",
         }),
         extractResults: parseLinkupResults,
+        filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       }),
     }),
   },
@@ -152,6 +161,7 @@ export const httpProviders: ProviderMeta[] = [
           "API-Key": apiKey,
         }),
         extractResults: parseMarginaliaResults,
+        filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       }),
     }),
   },
@@ -171,6 +181,7 @@ export const httpProviders: ProviderMeta[] = [
           messages: [{ role: "user", content: query }],
         }),
         extractResults: parsePerplexityResults,
+        filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       }),
     }),
   },
@@ -187,6 +198,7 @@ export const httpProviders: ProviderMeta[] = [
         authPrefix: "Bearer ",
         buildBody: (query, maxResults) => ({ query, maxResults }),
         extractResults: parseWebSearchApiResults,
+        filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       }),
     }),
   },
@@ -209,6 +221,7 @@ export const httpProviders: ProviderMeta[] = [
         method: "GET",
         buildHeaders: (apiKey) => ({ "X-API-Key": apiKey }),
         extractResults: parseYouComResults,
+        filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       }),
     }),
   },

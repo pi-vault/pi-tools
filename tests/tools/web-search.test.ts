@@ -3,6 +3,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { createWebSearchTool } from "../../src/tools/web-search.ts";
 import { makeCtx } from "../helpers.ts";
 import type { SearchFilters, SearchProvider, SearchResult } from "../../src/providers/types.ts";
+import { UNSUPPORTED_SEARCH_FILTERS } from "../../src/providers/types.ts";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 
 function makeMockTheme(): Theme {
@@ -16,6 +17,7 @@ function makeProvider(name: string, results: SearchResult[]): SearchProvider {
   return {
     name,
     label: name,
+    filterSupport: UNSUPPORTED_SEARCH_FILTERS,
     async search(_query: string, maxResults: number, _signal?: AbortSignal) {
       return results.slice(0, maxResults);
     },
@@ -26,6 +28,7 @@ function makeFailingProvider(name: string, message: string): SearchProvider {
   return {
     name,
     label: name,
+    filterSupport: UNSUPPORTED_SEARCH_FILTERS,
     async search() {
       throw new Error(message);
     },
@@ -136,6 +139,7 @@ function makeCapturingProvider(): {
   const provider: SearchProvider = {
     name: "capturing",
     label: "Capturing",
+    filterSupport: { domains: "native", dates: "native" },
     async search(
       query: string,
       maxResults: number,
@@ -685,6 +689,7 @@ describe("web_search metrics callbacks", () => {
     const provider: SearchProvider = {
       name: "brave",
       label: "Brave",
+      filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       search: vi.fn().mockRejectedValue(new Error("API error")),
     };
     const tool = createWebSearchTool(() => [provider], undefined, undefined, onFailure);
@@ -769,5 +774,187 @@ describe("web_search metrics callbacks", () => {
     await tool.execute("id", { query: "test" }, undefined, undefined, ctx);
 
     expect(onResult).toHaveBeenCalledWith("brave", 0, 5);
+  });
+});
+
+describe("web_search explicit filter support", () => {
+  it("skips an unsupported date provider and reports the unsupported group", async () => {
+    const unsupported: SearchProvider = {
+      name: "unsupported",
+      label: "Unsupported",
+      filterSupport: UNSUPPORTED_SEARCH_FILTERS,
+      search: vi.fn().mockResolvedValue([]),
+    };
+    const tool = createWebSearchTool(() => [unsupported], vi.fn());
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-uf-1",
+      { query: "test", startDate: "2025-01-01" },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(unsupported.search).not.toHaveBeenCalled();
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("Search error");
+    expect(text).toContain("dates");
+    expect(result.details.unsupportedFilters).toEqual(["dates"]);
+    expect(result.details.resultCount).toBe(0);
+  });
+
+  it("post-filter provider returns only exact-domain and subdomain results", async () => {
+    const postFiltered: SearchProvider = {
+      name: "post-filtered",
+      label: "Post-filtered",
+      filterSupport: { domains: "post-filter", dates: "unsupported" },
+      search: vi.fn().mockResolvedValue([
+        { title: "good", url: "https://docs.example.com/a", snippet: "good" },
+        { title: "bad", url: "https://other.example/a", snippet: "bad" },
+      ]),
+    };
+    const tool = createWebSearchTool(() => [postFiltered]);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-pf-1",
+      { query: "test", includeDomains: ["example.com"] },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("docs.example.com");
+    expect(text).not.toContain("other.example");
+  });
+
+  it("fusion excludes unsupported candidates and fuses the eligible providers", async () => {
+    const unsupported: SearchProvider = {
+      name: "unsupported",
+      label: "Unsupported",
+      filterSupport: UNSUPPORTED_SEARCH_FILTERS,
+      search: vi.fn().mockResolvedValue([]),
+    };
+    const nativeA: SearchProvider = {
+      name: "native-a",
+      label: "Native A",
+      filterSupport: { domains: "native", dates: "native" },
+      search: vi.fn().mockResolvedValue([
+        { title: "Hit A", url: "https://a.example.com/a", snippet: "hit" },
+      ]),
+    };
+    const nativeB: SearchProvider = {
+      name: "native-b",
+      label: "Native B",
+      filterSupport: { domains: "native", dates: "native" },
+      search: vi.fn().mockResolvedValue([
+        { title: "Hit B", url: "https://b.example.com/b", snippet: "hit" },
+      ]),
+    };
+    const combineConfig = { enabled: true, mode: "targeted" as const, targetBackends: 2, k: 60 };
+    const tool = createWebSearchTool(
+      () => [unsupported, nativeA, nativeB],
+      vi.fn(),
+      undefined,
+      vi.fn(),
+      vi.fn(),
+      combineConfig,
+    );
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-fuse-filt",
+      { query: "test", combine: true, startDate: "2025-01-01" },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(unsupported.search).not.toHaveBeenCalled();
+    expect(result.details.provider).toBe("fusion");
+    expect(result.details.fusionMeta?.providersUsed).toContain("native-a");
+    expect(result.details.fusionMeta?.providersUsed).toContain("native-b");
+  });
+
+  it("unfiltered calls still send the same candidate list and result formatting", async () => {
+    const providerA: SearchProvider = {
+      name: "a",
+      label: "A",
+      filterSupport: UNSUPPORTED_SEARCH_FILTERS,
+      search: vi.fn().mockResolvedValue([
+        { title: "Result", url: "https://a.com", snippet: "snip" },
+      ]),
+    };
+    const providerB: SearchProvider = {
+      name: "b",
+      label: "B",
+      filterSupport: UNSUPPORTED_SEARCH_FILTERS,
+      search: vi.fn().mockResolvedValue([
+        { title: "Result", url: "https://b.com", snippet: "snip" },
+      ]),
+    };
+    const tool = createWebSearchTool(() => [providerA, providerB]);
+    const ctx = makeCtx();
+    const result = await tool.execute("call-unfilt", { query: "test" }, undefined, undefined, ctx);
+
+    expect(providerA.search).toHaveBeenCalled();
+    expect(providerB.search).not.toHaveBeenCalled();
+    expect(result.details.provider).toBe("a");
+    expect(result.details.unsupportedFilters).toBeUndefined();
+    const text = (result.content[0] as { type: "text"; text: string }).text;
+    expect(text).toContain("[Result]");
+  });
+
+  it("reports unsupported filter groups in a stable order", async () => {
+    const datesOnly: SearchProvider = {
+      name: "dates-only",
+      label: "Dates Only",
+      filterSupport: { domains: "native", dates: "unsupported" },
+      search: vi.fn().mockResolvedValue([]),
+    };
+    const domainsOnly: SearchProvider = {
+      name: "domains-only",
+      label: "Domains Only",
+      filterSupport: { domains: "unsupported", dates: "native" },
+      search: vi.fn().mockResolvedValue([]),
+    };
+    const tool = createWebSearchTool(() => [datesOnly, domainsOnly]);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-uf-order",
+      { query: "test", includeDomains: ["example.com"], startDate: "2025-01-01" },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(result.details.unsupportedFilters).toEqual(["domains", "dates"]);
+    expect((result.content[0] as { type: "text"; text: string }).text).toContain(
+      "domains, dates",
+    );
+  });
+
+  it("honors cancellation before returning an unsupported-filter error", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const provider: SearchProvider = {
+      name: "unsupported",
+      label: "Unsupported",
+      filterSupport: UNSUPPORTED_SEARCH_FILTERS,
+      search: vi.fn().mockResolvedValue([]),
+    };
+    const tool = createWebSearchTool(() => [provider]);
+    const ctx = makeCtx();
+    const result = await tool.execute(
+      "call-uf-abort",
+      { query: "test", startDate: "2025-01-01" },
+      controller.signal,
+      undefined,
+      ctx,
+    );
+
+    expect(provider.search).not.toHaveBeenCalled();
+    expect((result.content[0] as { type: "text"; text: string }).text.toLowerCase()).toContain(
+      "aborted",
+    );
   });
 });

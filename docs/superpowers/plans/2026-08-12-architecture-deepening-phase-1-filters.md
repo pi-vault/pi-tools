@@ -72,13 +72,23 @@ Add `readonly filterSupport: SearchFilterSupport;` to `SearchProvider`. Requirin
 Append these functions to `src/utils/filters.ts`:
 
 ```ts
-import type { SearchFilterSupport, SearchFilters, SearchResult } from "../providers/types.ts";
+import type {
+  SearchFilterSupport,
+  SearchFilters,
+  SearchResult,
+} from "../providers/types.ts";
 
 function hostMatchesDomain(urlValue: string, domain: string): boolean {
   try {
     const host = new URL(urlValue).hostname.toLowerCase();
-    const normalized = domain.trim().toLowerCase().replace(/^\.+|\.+$/g, "");
-    return normalized.length > 0 && (host === normalized || host.endsWith(`.${normalized}`));
+    const normalized = domain
+      .trim()
+      .toLowerCase()
+      .replace(/^\.+|\.+$/g, "");
+    return (
+      normalized.length > 0 &&
+      (host === normalized || host.endsWith(`.${normalized}`))
+    );
   } catch {
     return false;
   }
@@ -88,14 +98,19 @@ export function filterResultsByDomains(
   results: SearchResult[],
   filters?: SearchFilters,
 ): SearchResult[] {
-  if (!filters?.includeDomains?.length && !filters?.excludeDomains?.length) return results;
+  if (!filters?.includeDomains?.length && !filters?.excludeDomains?.length)
+    return results;
 
   return results.filter((result) => {
     const included =
       !filters.includeDomains?.length ||
-      filters.includeDomains.some((domain) => hostMatchesDomain(result.url, domain));
+      filters.includeDomains.some((domain) =>
+        hostMatchesDomain(result.url, domain),
+      );
     const excluded =
-      filters.excludeDomains?.some((domain) => hostMatchesDomain(result.url, domain)) ?? false;
+      filters.excludeDomains?.some((domain) =>
+        hostMatchesDomain(result.url, domain),
+      ) ?? false;
     return included && !excluded;
   });
 }
@@ -105,10 +120,16 @@ export function unsupportedSearchFilters(
   support: SearchFilterSupport,
 ): string[] {
   const unsupported: string[] = [];
-  if ((filters?.includeDomains?.length || filters?.excludeDomains?.length) && support.domains === "unsupported") {
+  if (
+    (filters?.includeDomains?.length || filters?.excludeDomains?.length) &&
+    support.domains === "unsupported"
+  ) {
     unsupported.push("domains");
   }
-  if ((filters?.startDate || filters?.endDate) && support.dates === "unsupported") {
+  if (
+    (filters?.startDate || filters?.endDate) &&
+    support.dates === "unsupported"
+  ) {
     unsupported.push("dates");
   }
   return unsupported;
@@ -141,15 +162,15 @@ const results: SearchResult[] = [
 
 describe("search filter support", () => {
   it("filters included domains by host and subdomain", () => {
-    expect(filterResultsByDomains(results, { includeDomains: ["example.com"] })).toEqual(
-      results.slice(0, 2),
-    );
+    expect(
+      filterResultsByDomains(results, { includeDomains: ["example.com"] }),
+    ).toEqual(results.slice(0, 2));
   });
 
   it("filters excluded domains without matching lookalike hosts", () => {
-    expect(filterResultsByDomains(results, { excludeDomains: ["example.com"] })).toEqual([
-      results[2],
-    ]);
+    expect(
+      filterResultsByDomains(results, { excludeDomains: ["example.com"] }),
+    ).toEqual([results[2]]);
   });
 
   it("reports unsupported domain and date groups", () => {
@@ -218,7 +239,10 @@ export interface HttpSearchConfig {
   filterSupport?: SearchFilterSupport;
 }
 
-export function createHttpSearchProvider(apiKey: string, config: HttpSearchConfig): SearchProvider {
+export function createHttpSearchProvider(
+  apiKey: string,
+  config: HttpSearchConfig,
+): SearchProvider {
   return {
     name: config.name,
     label: config.label,
@@ -338,11 +362,13 @@ function executeSearch(
   signal: AbortSignal | undefined,
   filters: SearchFilters | undefined,
 ): Promise<SearchResult[]> {
-  return provider.search(query, maxResults, signal, filters).then((results) =>
-    provider.filterSupport.domains === "post-filter"
-      ? filterResultsByDomains(results, filters)
-      : results,
-  );
+  return provider
+    .search(query, maxResults, signal, filters)
+    .then((results) =>
+      provider.filterSupport.domains === "post-filter"
+        ? filterResultsByDomains(results, filters)
+        : results,
+    );
 }
 ```
 

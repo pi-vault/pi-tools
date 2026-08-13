@@ -1,4 +1,10 @@
-import type { SearchFilters, SearchProvider, SearchResult } from "./types.ts";
+import type {
+  SearchFilterSupport,
+  SearchFilters,
+  SearchProvider,
+  SearchResult,
+} from "./types.ts";
+import { UNSUPPORTED_SEARCH_FILTERS } from "./types.ts";
 
 export interface HttpSearchConfig {
   name: string;
@@ -13,12 +19,15 @@ export interface HttpSearchConfig {
 
   buildBody?: (query: string, maxResults: number, filters?: SearchFilters) => unknown;
   extractResults: (data: unknown) => Array<{ title: string; url: string; snippet: string }>;
+
+  filterSupport?: SearchFilterSupport;
 }
 
 export function createHttpSearchProvider(apiKey: string, config: HttpSearchConfig): SearchProvider {
   return {
     name: config.name,
     label: config.label,
+    filterSupport: config.filterSupport ?? UNSUPPORTED_SEARCH_FILTERS,
     async search(
       query: string,
       maxResults: number,

@@ -27,6 +27,7 @@ const EXEC_TIMEOUT_MS = 15_000;
 export class DuckDuckGoProvider implements SearchProvider {
   readonly name = "duckduckgo";
   readonly label = "DuckDuckGo";
+  readonly filterSupport = { domains: "post-filter", dates: "unsupported" } as const;
 
   private readonly execFile: ExecFileFn;
   private readonly ddgsOptions: DDGSOptions;

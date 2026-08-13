@@ -9,6 +9,7 @@ const DEFAULT_MODEL = "gpt-4.1-mini";
 class OpenAiWebSearchProvider implements SearchProvider {
   readonly name = "openai-web-search";
   readonly label = "OpenAI Web Search";
+  readonly filterSupport = { domains: "unsupported", dates: "unsupported" } as const;
 
   private readonly apiKey: string;
   private readonly model: string;

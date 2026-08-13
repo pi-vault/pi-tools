@@ -14,6 +14,7 @@ interface SearXNGOptions {
 export class SearXNGProvider implements SearchProvider {
   readonly name = "searxng";
   readonly label = "SearXNG";
+  readonly filterSupport = { domains: "unsupported", dates: "unsupported" } as const;
   readonly instanceUrl: string;
   private apiKey?: string;
 

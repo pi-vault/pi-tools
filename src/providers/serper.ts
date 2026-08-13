@@ -42,6 +42,7 @@ export const providerMeta: ProviderMeta = {
         return body;
       },
       extractResults: parseSerperResults,
+      filterSupport: { domains: "native", dates: "native" },
     }),
   }),
 };

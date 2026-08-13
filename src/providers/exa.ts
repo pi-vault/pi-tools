@@ -22,6 +22,7 @@ interface ExaContentsResponse {
 export class ExaProvider implements SearchProvider, FetchProvider, CodeSearchProvider {
   readonly name = "exa";
   readonly label = "Exa";
+  readonly filterSupport = { domains: "native", dates: "native" } as const;
   private apiKey: string;
 
   constructor(apiKey: string) {

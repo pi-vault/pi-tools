@@ -26,6 +26,7 @@ function validHttpUrl(value: unknown): value is string {
 export class TinyFishProvider implements SearchProvider, FetchProvider {
   readonly name = "tinyfish";
   readonly label = "TinyFish";
+  readonly filterSupport = { domains: "native", dates: "native" } as const;
 
   constructor(private readonly apiKey: string) {}
 

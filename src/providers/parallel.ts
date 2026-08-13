@@ -31,6 +31,7 @@ interface ParallelExtractResponse {
 export class ParallelProvider implements SearchProvider, FetchProvider {
   readonly name = "parallel";
   readonly label = "Parallel";
+  readonly filterSupport = { domains: "unsupported", dates: "unsupported" } as const;
   private apiKey: string;
 
   constructor(apiKey: string) {

@@ -32,6 +32,7 @@ export function isConnectionRefused(error: unknown): boolean {
 export class OllamaProvider implements SearchProvider, FetchProvider {
   readonly name = "ollama";
   readonly label = "Ollama";
+  readonly filterSupport = { domains: "unsupported", dates: "unsupported" } as const;
 
   private readonly baseUrl: string;
   private readonly apiKey?: string;

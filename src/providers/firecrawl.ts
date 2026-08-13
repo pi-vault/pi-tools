@@ -16,6 +16,7 @@ interface FirecrawlScrapeResponse {
 export class FirecrawlProvider implements SearchProvider, FetchProvider {
   readonly name = "firecrawl";
   readonly label = "Firecrawl";
+  readonly filterSupport = { domains: "unsupported", dates: "unsupported" } as const;
   private apiKey?: string;
 
   constructor(apiKey?: string) {

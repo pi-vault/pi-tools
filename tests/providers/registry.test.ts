@@ -13,6 +13,7 @@ import type {
   SearchProvider,
   UsageCost,
 } from "../../src/providers/types.ts";
+import { UNSUPPORTED_SEARCH_FILTERS } from "../../src/providers/types.ts";
 
 const managed: ProviderBudget = { mode: "managed" };
 const hard = (
@@ -26,6 +27,7 @@ function search(name: string): SearchProvider {
   return {
     name,
     label: name,
+    filterSupport: UNSUPPORTED_SEARCH_FILTERS,
     search: vi
       .fn()
       .mockResolvedValue([{ title: name, url: `https://${name}.test`, snippet: name }]),
@@ -358,6 +360,21 @@ describe("ProviderRegistry capability wrappers", () => {
       "third",
     ]);
     expect(registry.selectSearchCandidates("first")[0].name).toBe("first");
+  });
+
+  it("preserves search filter support through the budget wrapper", () => {
+    const { registry } = memory();
+    const support = { domains: "post-filter", dates: "unsupported" } as const;
+    register(registry, "duckduckgo", managed, {
+      search: {
+        name: "duckduckgo",
+        label: "DuckDuckGo",
+        filterSupport: support,
+        search: vi.fn().mockResolvedValue([]),
+      },
+    });
+
+    expect(registry.selectSearchCandidates("duckduckgo")[0].filterSupport).toEqual(support);
   });
 
   it("selects by performance without treating budget use as an outcome", () => {

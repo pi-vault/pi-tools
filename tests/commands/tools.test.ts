@@ -9,6 +9,7 @@ import { activityMonitor } from "../../src/monitor/activity-monitor.ts";
 import type { ProviderBudget } from "../../src/config.ts";
 import { ProviderRegistry } from "../../src/providers/registry.ts";
 import type { ProviderTier, SearchProvider } from "../../src/providers/types.ts";
+import { UNSUPPORTED_SEARCH_FILTERS } from "../../src/providers/types.ts";
 import { makeCtx } from "../helpers.ts";
 
 vi.mock("node:fs");
@@ -120,6 +121,7 @@ function mockProvider(name: string, label: string): SearchProvider {
   return {
     name,
     label,
+    filterSupport: UNSUPPORTED_SEARCH_FILTERS,
     search: vi.fn().mockResolvedValue([]),
   };
 }

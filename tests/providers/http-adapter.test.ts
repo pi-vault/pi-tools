@@ -33,6 +33,7 @@ describe("createHttpSearchProvider", () => {
 
     expect(provider.name).toBe("example");
     expect(provider.label).toBe("Example");
+    expect(provider.filterSupport).toEqual({ domains: "unsupported", dates: "unsupported" });
     const results = await provider.search("test query", 5);
     expect(results).toHaveLength(1);
     expect(results[0].title).toBe("Test");

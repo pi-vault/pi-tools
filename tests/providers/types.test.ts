@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type {
-  CodeSearchResult,
-  FetchResult,
-  ProviderMeta,
-  SearchFilters,
-  SearchProvider,
-  SearchResult,
+import {
+  UNSUPPORTED_SEARCH_FILTERS,
+  type CodeSearchResult,
+  type FetchResult,
+  type ProviderMeta,
+  type SearchFilters,
+  type SearchProvider,
+  type SearchResult,
 } from "../../src/providers/types.ts";
 
 describe("provider types", () => {
@@ -48,6 +49,7 @@ describe("provider types", () => {
     const mockSearch: SearchProvider = {
       name: "brave",
       label: "Brave Search",
+      filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       search: async () => [],
     };
     const meta: ProviderMeta = {
@@ -78,6 +80,7 @@ describe("SearchFilters type", () => {
     const provider: SearchProvider = {
       name: "test",
       label: "Test",
+      filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       async search(
         query: string,
         maxResults: number,
@@ -95,6 +98,7 @@ describe("SearchFilters type", () => {
     const provider: SearchProvider = {
       name: "legacy",
       label: "Legacy",
+      filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       async search(
         query: string,
         maxResults: number,

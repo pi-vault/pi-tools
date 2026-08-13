@@ -7,6 +7,7 @@ import {
 import type { ActivityEntry } from "../../src/monitor/activity-monitor.ts";
 import type { ProviderRegistry } from "../../src/providers/registry.ts";
 import type { ProviderTier, SearchProvider, SearchResult } from "../../src/providers/types.ts";
+import { UNSUPPORTED_SEARCH_FILTERS } from "../../src/providers/types.ts";
 import { noTheme } from "../../src/tui/dashboard-theme.ts";
 
 const searchResult: SearchResult = {
@@ -24,11 +25,13 @@ function searchRegistry(
     {
       name: "brave",
       label: "Brave",
+      filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       search: vi.fn().mockResolvedValue([searchResult]),
     },
     {
       name: "duckduckgo",
       label: "DuckDuckGo",
+      filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       search: vi.fn().mockResolvedValue([]),
     },
   ],
@@ -454,6 +457,7 @@ describe("ToolsDashboardComponent", () => {
     const provider: SearchProvider = {
       name: "brave",
       label: "Brave",
+      filterSupport: UNSUPPORTED_SEARCH_FILTERS,
       search: vi.fn(() => new Promise<SearchResult[]>((r) => (resolveSearch = r))),
     };
     const { component } = dashboard({
