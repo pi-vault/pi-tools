@@ -31,8 +31,6 @@ import {
 } from "./frames.ts";
 import { extractWithUrlContext, extractWithGeminiWeb } from "./gemini-url-context.ts";
 import { activityMonitor } from "../monitor/activity-monitor.ts";
-
-
 /**
  * Error thrown when the HTTP fetch fails in a way that a different fetch
  * provider might succeed (network errors, 5xx, 429).
@@ -43,9 +41,6 @@ export class RetryableExtractionError extends Error {
     this.name = "RetryableExtractionError";
   }
 }
-
-
-
 const BINARY_CONTENT_TYPES = [
   "image/",
   "audio/",
@@ -71,23 +66,18 @@ const MAX_REDIRECTS = 10;
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
-async function tryRegisteredFallback(params: {
-  adapter: ReturnType<typeof createFetchProviderFallback>[];
-  chain: string[];
-  signal: AbortSignal | undefined;
-}): Promise<ExtractedContent | null> {
-  if (params.adapter.length === 0) return null;
-  params.signal?.throwIfAborted();
-  const result = await runExtractionFallbacks(params.adapter, params.chain, params.signal);
-  return result ?? null;
-}
-
-function describeTransportFailure(error: unknown): string {
-  return sanitizeError(error).slice(0, 120);
+async function tryRegisteredFallback(
+  adapter: ReturnType<typeof createFetchProviderFallback>[],
+  chain: string[],
+  signal: AbortSignal | undefined,
+): Promise<ExtractedContent | null> {
+  if (adapter.length === 0) return null;
+  signal?.throwIfAborted();
+  return runExtractionFallbacks(adapter, chain, signal);
 }
 
 function throwRetryableFromTransport(originalError: unknown): never {
-  throw new RetryableExtractionError(describeTransportFailure(originalError));
+  throw new RetryableExtractionError(sanitizeError(originalError).slice(0, 120));
 }
 
 async function fetchValidated(
@@ -313,7 +303,7 @@ export async function extractContent(
     activityMonitor.logError(fetchEntryId, err instanceof Error ? err.message : String(err));
     if (err instanceof SSRFError) throw err;
     signal?.throwIfAborted();
-    const fallback = await tryRegisteredFallback({ adapter: fetchAdapter, chain: [], signal });
+    const fallback = await tryRegisteredFallback(fetchAdapter, [], signal);
     if (fallback) return fallback;
     throwRetryableFromTransport(err);
   }
@@ -336,7 +326,7 @@ export async function extractContent(
       activityMonitor.logError(retryEntryId, err instanceof Error ? err.message : String(err));
       if (err instanceof SSRFError) throw err;
       signal?.throwIfAborted();
-      const fallback = await tryRegisteredFallback({ adapter: fetchAdapter, chain: [], signal });
+      const fallback = await tryRegisteredFallback(fetchAdapter, [], signal);
       if (fallback) return fallback;
       throwRetryableFromTransport(err);
     }
@@ -348,7 +338,7 @@ export async function extractContent(
     const status = response.status;
     // 429 and 5xx are retryable — a different provider might succeed
     if (status === 429 || status >= 500) {
-      const fallback = await tryRegisteredFallback({ adapter: fetchAdapter, chain: [], signal });
+      const fallback = await tryRegisteredFallback(fetchAdapter, [], signal);
       if (fallback) return fallback;
       throw new RetryableExtractionError(`HTTP ${status}: ${response.statusText}`);
     }

@@ -21,21 +21,13 @@ function isAbortError(error: unknown): boolean {
   return name === "AbortError";
 }
 
-class InsufficientFetchContentError extends Error {
-  constructor(public readonly providerName: string) {
-    super(`${providerName} returned empty content`);
-    this.name = "InsufficientFetchContentError";
-  }
-}
-
 export function createFetchProviderFallback(
   options: CreateFetchProviderFallbackOptions,
 ): ExtractionFallback {
   const { url, providers, signal, hooks } = options;
-  const name = "fetch-provider";
 
   return {
-    name,
+    name: "fetch-provider",
     async run(): Promise<ExtractedContent> {
       if (providers.length === 0) {
         throw new Error("No fetch providers configured");
@@ -47,8 +39,8 @@ export function createFetchProviderFallback(
             name: provider.name,
             execute: async () => {
               const fetched = await provider.fetch(url, signal);
-              const text = fetched.text?.trim() ?? "";
-              if (!text) throw new InsufficientFetchContentError(provider.name);
+              const text = fetched.text.trim();
+              if (!text) throw new Error(`${provider.name} returned empty content`);
               return { ...fetched, text };
             },
           })),
@@ -71,17 +63,10 @@ export function createFetchProviderFallback(
         if (isAbortError(error)) throw error;
         // Rethrow ordinary errors so runExtractionFallbacks records :error.
         // Surface a sanitized summary, never raw provider messages with credentials.
-        throw new FetchProvidersFailedError(sanitizeError(error));
+        throw new Error(sanitizeError(error));
       }
     },
   };
-}
-
-class FetchProvidersFailedError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "FetchProvidersFailedError";
-  }
 }
 
 export async function runExtractionFallbacks(

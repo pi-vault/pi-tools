@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createFetchProviderFallback,
   runExtractionFallbacks,
@@ -220,28 +220,20 @@ describe("createFetchProviderFallback", () => {
 });
 
 describe("runExtractionFallbacks", () => {
-  let fallback1Run = vi.fn();
-  let fallback2Run = vi.fn();
   let chain: string[];
 
   beforeEach(() => {
-    fallback1Run = vi.fn();
-    fallback2Run = vi.fn();
     chain = [];
-  });
-
-  afterEach(() => {
-    vi.clearAllMocks();
   });
 
   it("returns the first non-null result and appends its chain marker", async () => {
     const fallbackA: ExtractionFallback = {
       name: "a",
-      run: fallback1Run.mockResolvedValue(null),
+      run: vi.fn().mockResolvedValue(null),
     };
     const fallbackB: ExtractionFallback = {
       name: "b",
-      run: fallback2Run.mockResolvedValue({
+      run: vi.fn().mockResolvedValue({
         text: "Body",
         url: "https://example.com",
         extractionChain: ["html:gemini-url-context"],
