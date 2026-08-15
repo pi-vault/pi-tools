@@ -5,7 +5,6 @@ import type { ContentStore } from "../storage.ts";
 import type { FetchProvider } from "../providers/types.ts";
 import {
   extractContent,
-  RetryableExtractionError,
   collectImageBlocks,
   type ExtractedContent,
   type ImageBlock,
@@ -13,7 +12,7 @@ import {
 import { truncateContent } from "../utils/truncate.ts";
 import { fetchWithConcurrencyLimit } from "../utils/concurrency.ts";
 import { sanitizeError } from "../utils/errors.ts";
-import { executeWithFallback, type ExecutionHooks } from "../providers/execute.ts";
+import type { ExecutionHooks } from "../providers/execute.ts";
 import type { ContentCache } from "../cache.ts";
 import type { GuidanceOverride } from "../config.ts";
 
@@ -101,53 +100,17 @@ export function createWebFetchTool(
       if (cached) return cached;
     }
 
-    let extracted: ExtractedContent;
-    try {
-      extracted = await extractContent(url, signal, {
-        raw: params.raw,
-        prompt: params.prompt,
-        timestamp: params.timestamp,
-        frames: params.frames,
-        model: params.model,
-        ctx,
-      });
-    } catch (pipelineError) {
-      if (!(pipelineError instanceof RetryableExtractionError)) {
-        throw pipelineError;
-      }
-
-      const candidates = resolveFetchCandidates?.() ?? [];
-      if (candidates.length === 0) {
-        throw pipelineError;
-      }
-
-      try {
-        const { result, providerName } = await executeWithFallback({
-          candidates: candidates.map((provider) => ({
-            name: provider.name,
-            execute: () => provider.fetch(url, signal),
-          })),
-          operation: "fetch",
-          signal,
-          onSuccess: executionHooks?.onSuccess,
-          onFailure: executionHooks?.onFailure,
-        });
-        extracted = {
-          text: result.text,
-          title: result.title,
-          url,
-          extractionChain: [`fetch-provider:${providerName}`],
-          chars: result.text.length,
-          truncated: false,
-        };
-      } catch (fallbackError) {
-        const pipelineMessage = sanitizeError(pipelineError).slice(0, 120);
-        const fallbackMessage = sanitizeError(fallbackError).slice(0, 120);
-        throw new Error(
-          `Pipeline failed: ${pipelineMessage}; provider fallback failed: ${fallbackMessage}`,
-        );
-      }
-    }
+    const candidates = resolveFetchCandidates?.();
+    const extracted = await extractContent(url, signal, {
+      raw: params.raw,
+      prompt: params.prompt,
+      timestamp: params.timestamp,
+      frames: params.frames,
+      model: params.model,
+      ctx,
+      fetchProviders: candidates,
+      executionHooks,
+    });
 
     cache?.set(url, extracted);
     return extracted;

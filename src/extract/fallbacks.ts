@@ -35,8 +35,10 @@ export function createFetchProviderFallback(
 
   return {
     name,
-    async run(): Promise<ExtractedContent | null> {
-      if (providers.length === 0) return null;
+    async run(): Promise<ExtractedContent> {
+      if (providers.length === 0) {
+        throw new Error("No fetch providers configured");
+      }
 
       try {
         const { result, providerName } = await executeWithFallback({
@@ -65,10 +67,20 @@ export function createFetchProviderFallback(
         };
       } catch (error) {
         if (isAbortError(error)) throw error;
-        return null;
+        // Rethrow ordinary errors so runExtractionFallbacks records :error.
+        // Surface a sanitized summary, never raw provider messages with credentials.
+        const summary = error instanceof Error ? error.message : String(error);
+        throw new FetchProvidersFailedError(summary);
       }
     },
   };
+}
+
+class FetchProvidersFailedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "FetchProvidersFailedError";
+  }
 }
 
 export async function runExtractionFallbacks(

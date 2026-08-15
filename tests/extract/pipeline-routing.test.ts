@@ -288,7 +288,7 @@ describe("extractContent — Gemini HTML fallback", () => {
       async () => {
         const result = await extractContent("https://example.com/article");
         expect(result.extractionChain).toContain("readability:thin");
-        expect(result.extractionChain).toContain("jina-reader:fail");
+        expect(result.extractionChain).toContain("fetch-provider:skipped");
         expect(result.extractionChain).toContain("html:gemini-url-context");
         expect(result.text).toContain("Full Article");
       },
@@ -313,7 +313,7 @@ describe("extractContent — Gemini HTML fallback", () => {
       }),
       async () => {
         const result = await extractContent("https://example.com/page");
-        expect(result.extractionChain).toContain("jina-reader:fail");
+        expect(result.extractionChain).toContain("fetch-provider:skipped");
         expect(result.extractionChain).toContain("html:gemini-web");
       },
     );
@@ -330,7 +330,7 @@ describe("extractContent — Gemini HTML fallback", () => {
       }),
       async () => {
         const result = await extractContent("https://example.com/raw");
-        expect(result.extractionChain).toContain("jina-reader:fail");
+        expect(result.extractionChain).toContain("fetch-provider:skipped");
         expect(result.extractionChain).toContain("raw-text");
         expect(result.extractionChain).not.toContain("html:gemini-url-context");
       },

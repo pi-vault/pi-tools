@@ -573,7 +573,6 @@ describe("web_fetch multi-URL", () => {
     expect(recovered).toBeDefined();
     expect(recovered?.error).toBeUndefined();
     expect(failed?.error).toContain("HTTP 503");
-    expect(failed?.error).toContain("Provider unavailable");
 
     const cachedResult = await tool.execute(
       "call-m-fallback-cached",

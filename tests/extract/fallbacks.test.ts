@@ -19,12 +19,12 @@ function ok(text: string, title?: string): FetchResult {
 }
 
 describe("createFetchProviderFallback", () => {
-  it("returns null without invoking when providers list is empty", async () => {
+  it("throws without invoking when providers list is empty", async () => {
     const fallback = createFetchProviderFallback({
       url: "https://example.com",
       providers: [],
     });
-    expect(await fallback.run()).toBeNull();
+    await expect(fallback.run()).rejects.toThrow();
   });
 
   it("calls providers in supplied order through executeWithFallback", async () => {
@@ -103,7 +103,7 @@ describe("createFetchProviderFallback", () => {
     expect(result?.chars).toBe(LONG_TEXT.length);
   });
 
-  it("returns null when all providers fail", async () => {
+  it("throws when all providers fail", async () => {
     const failing = makeProvider("nope", vi.fn(async () => {
       throw new Error("kaboom");
     }));
@@ -112,7 +112,7 @@ describe("createFetchProviderFallback", () => {
       providers: [failing],
     });
 
-    expect(await fallback.run()).toBeNull();
+    await expect(fallback.run()).rejects.toThrow();
   });
 
   it("passes signal through to providers", async () => {
