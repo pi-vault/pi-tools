@@ -171,4 +171,29 @@ describe("web_fetch — video parameters and ImageContent", () => {
     expect(imageBlocks).toHaveLength(1);
     expect(imageBlocks[0]).toEqual({ type: "image", data: "frameData", mimeType: "image/jpeg" });
   });
+
+  it("forwards resolved fetch candidates and execution hooks to extractContent", async () => {
+    const provider = { name: "jina", fetch: vi.fn() };
+    const hooks = { onSuccess: vi.fn(), onFailure: vi.fn() };
+    const store = new ContentStore(() => {});
+    const tool = createWebFetchTool(store, () => [provider], undefined, undefined, hooks);
+    const ctx = makeCtx();
+
+    await tool.execute(
+      "call-vid-seam",
+      { url: "https://example.com/page" },
+      undefined,
+      undefined,
+      ctx,
+    );
+
+    expect(extractContent).toHaveBeenCalledWith(
+      "https://example.com/page",
+      undefined,
+      expect.objectContaining({
+        fetchProviders: [provider],
+        executionHooks: hooks,
+      }),
+    );
+  });
 });

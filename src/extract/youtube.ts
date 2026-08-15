@@ -2,7 +2,8 @@ import { DEFAULT_YOUTUBE_CONFIG, loadConfig } from "../config.ts";
 import { isGeminiApiAvailable, queryGeminiApi } from "./gemini-api.ts";
 import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.ts";
 import { isPerplexityAvailable, queryPerplexity } from "./perplexity.ts";
-import type { ExtractedContent, ExtractOptions } from "./pipeline.ts";
+import type { ExtractedContent } from "./types.ts";
+import type { ExtractOptions } from "./pipeline.ts";
 
 // ---------------------------------------------------------------------------
 // Constants

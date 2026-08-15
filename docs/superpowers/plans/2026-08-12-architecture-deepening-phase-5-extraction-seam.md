@@ -2,417 +2,206 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make registered fetch providers part of one content-extraction fallback seam and remove the duplicate direct Jina Reader implementation.
+## Readiness decision
 
-**Architecture:** Keep routing and trust-sensitive HTTP handling in `src/extract/pipeline.ts`. Move shared result types into `src/extract/types.ts`. Add `src/extract/fallbacks.ts` as the seam that adapts registered `FetchProvider`s and Gemini extractors to the ordered extraction chain. `web_fetch` supplies the already registered, budget-wrapped fetch candidates and phase 3 execution hooks. The Jina transport remains only in `src/providers/jina.ts`.
+The previous plan was not ready against the clean post-Phase-4 repository. The current branch is `20260814-architecture-deepening-phase-5-extraction-seam` at `74d988c`; `pnpm check` passes 89 test files and 1,465 tests. The environment still reports Node 23.11.0 versus the package requirement of Node >=24.15.0, and the repository has its existing Biome warnings.
 
-**Tech Stack:** TypeScript, native `fetch`, existing `executeWithFallback`, SSRF utilities, Gemini extractors, Vitest.
+The gaps were:
 
----
+- `pipeline.ts` has no registered-provider options, while `web-fetch.ts` owns a second fallback path only for retryable transport failures. The plan did not specify how the shared adapter handles network/429/5xx failures without accidentally entering Gemini/raw extraction.
+- The current pipeline wraps caller cancellation as `RetryableExtractionError`; the plan only described cancellation inside the new adapter. The GET, probe, Cloudflare retry, and transport-fallback boundaries need explicit cancellation checks.
+- The draft chain behavior omitted the no-provider marker and claimed to record per-provider failure plus success labels even though `executeWithFallback` returns only the winning provider. Attempt details already belong in activity/metrics; the extraction chain will record only tier-level failure and the winning provider.
+- Moving result types without updating type-only consumers would leave the new seam coupled to `pipeline.ts`. The type-only imports need to move while `pipeline.ts` keeps compatibility re-exports.
+- Existing Jina tests use content shorter than the planned 100-character provider contract, and existing web-fetch fallback tests cover the old outer path rather than the new in-pipeline path.
+
+## Goal
+
+Make registered fetch providers part of one content-extraction fallback seam and remove the duplicate direct Jina Reader implementation.
 
 ## Atomic result
 
-After this phase, the normal HTML path is:
+For a validated HTML response, the normal path is:
 
 ```text
 validated HTTP response
   → Readability
   → RSC
   → registered fetch-provider fallback
-  → Gemini URL context
-  → Gemini Web
+  → Gemini URL context, then Gemini Web
   → raw text
 ```
 
-The structured routes (GitHub, PDF, YouTube, local video, raw mode), SSRF validation, per-hop redirect validation, cancellation, cache/storage behavior, and retryable transport errors remain intact. A provider fallback is budgeted and instrumented through the registry wrapper and shared execution policy. `src/extract/jina-reader.ts` and its duplicate tests are removed.
+For a retryable direct transport failure (network error, 429, or 5xx), the pipeline tries only the registered fetch-provider fallback and then preserves `RetryableExtractionError` if no provider succeeds. It never enters the Gemini/raw HTML path without a response body.
+
+Structured routes (GitHub, PDF, YouTube, local video, raw mode), SSRF validation, per-hop redirect validation, cancellation, cache/storage behavior, and sanitized tool errors remain intact. `src/extract/jina-reader.ts` and its duplicate tests are deleted; `src/providers/jina.ts` owns the only `r.jina.ai` request.
+
+## Locked contracts
+
+### Fallback seam
+
+Create `src/extract/fallbacks.ts` with the smallest reusable interface:
+
+```ts
+export interface ExtractionFallback {
+  name: string;
+  run(): Promise<ExtractedContent | null>;
+}
+```
+
+`createFetchProviderFallback()` adapts the already selected, registry-wrapped `FetchProvider[]`. It must:
+
+- call providers in supplied order through `executeWithFallback({ operation: "fetch" })`;
+- trim provider text and treat empty text as a failed attempt;
+- return normalized `ExtractedContent` with `fetch-provider:<providerName>`, the original URL, title, chars, and `truncated: false`;
+- pass the supplied `AbortSignal` and `ExecutionHooks` to the shared executor; and
+- keep provider errors out of the returned content and extraction chain.
+
+`runExtractionFallbacks()` checks the caller signal before and after each adapter. A caller-aborted signal is rethrown and never converted into a fallback failure or sent to a later adapter. Ordinary adapter errors advance the chain:
+
+- `null` result: `<name>:fail`;
+- thrown result: `<name>:error`; and
+- successful result: append the result’s first extraction-chain marker and return.
+
+When no fetch providers are supplied, `pipeline.ts` appends `fetch-provider:skipped` and does not create an adapter. When providers are supplied but all fail, the chain contains `fetch-provider:error`; individual attempt failures remain in shared activity/metrics. A first-provider failure followed by a successful second provider records only `fetch-provider:<second>` in the extraction chain.
+
+Gemini URL context and Gemini Web are one `gemini-html` adapter that tries URL context first and Web second. This preserves the existing high-level markers: the successful adapter contributes `html:gemini-url-context` or `html:gemini-web`, and an all-null result contributes `gemini-html:fail`.
+
+### Pipeline and transport behavior
+
+In `extractContent()`:
+
+1. Check `signal?.throwIfAborted()` before routing and retain the existing frame, video, YouTube, original-URL SSRF, GitHub, probe, direct HTTP, Cloudflare retry, binary, PDF, raw, Readability, and RSC ordering.
+2. After original `validateUrl()` succeeds, create the fetch adapter from `options.fetchProviders` but do not invoke it before validation.
+3. On a network error from the GET or Cloudflare retry, check caller cancellation, then run only the fetch adapter. On 429/5xx, do the same after the status is known. A successful transport fallback returns its provider-normalized result with its provider-only chain marker, matching the former `web_fetch` fallback result.
+4. If no provider succeeds, throw `RetryableExtractionError` based on the original transport failure. An optional provider summary must use `sanitizeError`; it must not expose credentials or raw provider errors. A provider budget rejection is not a failure metric and must not replace the original retryable classification.
+5. For a successful non-PDF response whose Readability and RSC tiers fail, run the registered fetch adapter, then the combined Gemini adapter, then raw text. Do not invoke registered providers for raw mode, binary/oversized responses, PDFs, GitHub structured results, YouTube, or local video results.
+
+The direct GET/Cloudflare catches and the probe catch must rethrow caller cancellation before wrapping ordinary transport errors. SSRF errors remain `SSRFError`; redirect hops remain validated by `fetchValidated()`.
+
+### Type ownership
+
+`src/extract/types.ts` owns `ExtractedContent`, `VideoFrame`, and `ImageBlock`. `pipeline.ts` re-exports those types so existing imports remain valid. Type-only consumers move to the new module: `gemini-url-context.ts`, `cache.ts`, `youtube.ts`, `video.ts`, and `frames.ts`. `ExtractOptions` stays in `pipeline.ts` because it describes pipeline routing inputs rather than the extracted result contract.
+
+### Jina provider
+
+`JinaProvider.fetch()` remains the only `r.jina.ai` transport. It trims its response and throws `Jina reader returned insufficient content` when the result is shorter than 100 characters. Authorization and search behavior remain unchanged.
 
 ## File map
 
 Create:
 
-- `src/extract/types.ts` — shared `ExtractedContent`, `VideoFrame`, and `ImageBlock` types.
-- `src/extract/fallbacks.ts` — ordered extraction fallback adapter and registered-fetch adapter.
-- `tests/extract/fallbacks.test.ts` — fallback ordering, empty-result, cancellation, and provider-adapter tests.
+- `src/extract/types.ts` — shared result types.
+- `src/extract/fallbacks.ts` — registered-fetch adapter and ordered fallback runner.
+- `tests/extract/fallbacks.test.ts` — seam ordering, normalization, cancellation, hooks, and budget behavior.
 
 Modify:
 
-- `src/extract/pipeline.ts` — use shared types and fallback seam; remove direct Jina Reader call.
-- `src/providers/jina.ts` — keep one Jina Reader transport and normalize empty/short content for the provider seam.
-- `src/tools/web-fetch.ts` — pass registered fetch candidates and execution hooks into `extractContent`; remove the outer duplicate fallback.
-- `tests/extract/pipeline.test.ts` — preserve normal, retryable, raw, PDF, and HTTP behavior with the new options.
-- `tests/extract/pipeline-routing.test.ts` — replace direct Jina markers with registered-fetch seam markers and test ordering.
-- `tests/extract/pipeline-ssrf.test.ts` — verify provider fallback is reached only after original URL validation.
-- `tests/extract/cloudflare-retry.test.ts` — preserve challenge retry behavior.
-- `tests/providers/jina.test.ts` — test the single Jina provider fetch path.
-- `tests/tools/web-fetch.test.ts` — verify provider fallback, ordering, hooks, and error behavior through the pipeline.
+- `src/extract/pipeline.ts` — shared types/options, transport fallback, ordered HTML seam, and cancellation checks.
+- `src/extract/gemini-url-context.ts` — import result types from `types.ts`.
+- `src/extract/youtube.ts` — import result types from `types.ts`; retain `ExtractOptions` from `pipeline.ts`.
+- `src/extract/video.ts` — import result types from `types.ts`; retain `ExtractOptions` from `pipeline.ts`.
+- `src/extract/frames.ts` — import `VideoFrame` from `types.ts`.
+- `src/cache.ts` — import `ExtractedContent` from `extract/types.ts`.
+- `src/providers/jina.ts` — normalize and reject insufficient fetch content.
+- `src/tools/web-fetch.ts` — pass candidates/hooks into `extractContent` and remove the outer fallback.
+- `tests/extract/pipeline.test.ts` — transport fallback, cancellation, and chain contracts.
+- `tests/extract/pipeline-routing.test.ts` — registered-provider ordering before Gemini.
+- `tests/extract/pipeline-ssrf.test.ts` — provider never runs before original URL validation.
+- `tests/extract/cloudflare-retry.test.ts` — preserve challenge/retry and retryable fallback behavior.
+- `tests/providers/jina.test.ts` — fetch success, short-content, non-2xx, and authorization behavior.
+- `tests/tools/web-fetch.test.ts` — one pipeline fallback path, hooks, errors, cache, and multi-URL behavior.
+- `tests/tools/web-fetch-video.test.ts` — preserve extraction options while passing seam inputs.
 
 Delete:
 
-- `src/extract/jina-reader.ts` — duplicate direct Jina Reader transport.
-- `tests/extract/jina-reader.test.ts` — tests for the deleted duplicate module; equivalent coverage moves to `fallbacks.test.ts` and `providers/jina.test.ts`.
+- `src/extract/jina-reader.ts` — duplicate direct Jina transport.
+- `tests/extract/jina-reader.test.ts` — tests for the deleted module.
+
+No changes are required in `src/index.ts` or `tests/helpers.ts`: Phase 3 already supplies registry-wrapped fetch candidates and hooks, and Phase 4’s mock host already replaces same-name tools.
 
 ## Tasks
 
-### Task 1: Define the extraction fallback seam without changing routing
+### Task 1: Move result types and build the fallback seam
 
-**Files:**
+Files: `src/extract/types.ts`, `src/extract/fallbacks.ts`, `tests/extract/fallbacks.test.ts`, plus the listed type-only consumers.
 
-- Create: `src/extract/types.ts`
-- Create: `src/extract/fallbacks.ts`
-- Create: `tests/extract/fallbacks.test.ts`
-- Modify: `src/extract/pipeline.ts`
-- Modify: `src/tools/web-fetch.ts`
-
-- [ ] **Step 1: Move shared extraction result types.**
-
-Create `src/extract/types.ts` with the data currently declared in `pipeline.ts`:
-
-```ts
-import type { PdfPageImage } from "./pdf-ocr.ts";
-
-export interface VideoFrame {
-  data: string;
-  mimeType: string;
-  timestamp: string;
-}
-
-export interface ExtractedContent {
-  text: string;
-  title?: string;
-  url: string;
-  extractionChain: string[];
-  chars: number;
-  truncated: boolean;
-  contentId?: string;
-  thumbnail?: { data: string; mimeType: string };
-  frames?: VideoFrame[];
-  images?: PdfPageImage[];
-  duration?: number;
-}
-
-export type ImageBlock = { type: "image"; data: string; mimeType: string };
-```
-
-In `pipeline.ts`, import these types and re-export them:
-
-```ts
-export type { ExtractedContent, ImageBlock, VideoFrame } from "./types.ts";
-```
-
-This keeps existing tool/test imports working while allowing the new fallback module to depend on the result contract without importing pipeline runtime code.
-
-- [ ] **Step 2: Define an ordered fallback adapter.**
-
-Create `src/extract/fallbacks.ts`:
-
-```ts
-import type { ExecutionHooks } from "../providers/execute.ts";
-import { executeWithFallback } from "../providers/execute.ts";
-import type { FetchProvider } from "../providers/types.ts";
-import type { ExtractedContent } from "./types.ts";
-
-export interface ExtractionFallback {
-  name: string;
-  run(): Promise<ExtractedContent | null>;
-}
-
-export function createFetchProviderFallback(
-  providers: readonly FetchProvider[],
-  url: string,
-  signal: AbortSignal | undefined,
-  hooks?: ExecutionHooks,
-): ExtractionFallback | undefined {
-  if (providers.length === 0) return undefined;
-
-  return {
-    name: "fetch-provider",
-    async run() {
-      const { result, providerName } = await executeWithFallback({
-        candidates: providers.map((provider) => ({
-          name: provider.name,
-          execute: async () => {
-            const fetched = await provider.fetch(url, signal);
-            const text = fetched.text.trim();
-            if (text.length === 0) throw new Error(`${provider.name} returned empty content`);
-            return { fetched, providerName: provider.name };
-          },
-        })),
-        operation: "fetch",
-        signal,
-        ...hooks,
-      });
-
-      const text = result.fetched.text.trim();
-      return {
-        text,
-        title: result.fetched.title,
-        url,
-        extractionChain: [`fetch-provider:${result.providerName}`],
-        chars: text.length,
-        truncated: false,
-      };
-    },
-  };
-}
-
-export async function runExtractionFallbacks(
-  fallbacks: readonly ExtractionFallback[],
-  chain: string[],
-  signal?: AbortSignal,
-): Promise<ExtractedContent | undefined> {
-  for (const fallback of fallbacks) {
-    signal?.throwIfAborted();
-    try {
-      const result = await fallback.run();
-      signal?.throwIfAborted();
-      if (!result) {
-        chain.push(`${fallback.name}:fail`);
-        continue;
-      }
-
-      chain.push(result.extractionChain[0] ?? fallback.name);
-      return { ...result, extractionChain: chain };
-    } catch (error) {
-      signal?.throwIfAborted();
-      chain.push(`${fallback.name}:error`);
-      // The next adapter gets a chance. executeWithFallback has already
-      // aggregated and instrumented individual registered provider failures.
-    }
-  }
-  return undefined;
-}
-```
-
-The implementation may use a narrower internal return type, but it must preserve these rules:
-
-- empty provider text advances to the next provider;
-- `AbortError`/caller cancellation is rethrown, never converted into a fallback failure;
-- registered provider attempts use `executeWithFallback` so budgets, activity, metrics, and aggregate errors remain centralized; and
-- a failed adapter adds a chain marker but does not expose raw provider credentials or unsanitized errors.
-
-- [ ] **Step 3: Add seam tests before pipeline wiring.**
-
-In `tests/extract/fallbacks.test.ts`, add tests that prove:
-
-1. providers are tried in the supplied order;
-2. an empty first result advances to the second provider;
-3. a successful provider returns `fetch-provider:<name>` and preserves title/chars/url;
-4. all provider failures allow the next Gemini-style adapter to run;
-5. a caller abort rejects with the abort error and does not call later adapters; and
-6. execution hooks receive provider success/failure while `BudgetExceededError` remains excluded from failure metrics.
-
-Mock `executeWithFallback` only if needed for deterministic adapter tests; retain at least one test with real registered-style provider functions so the budget/execution boundary is exercised by the phase gate.
-
-- [ ] **Step 4: Add provider candidates and hooks to `ExtractOptions`.**
-
-Extend the existing options in `pipeline.ts`:
-
-```ts
-import type { ExecutionHooks } from "../providers/execute.ts";
-import type { FetchProvider } from "../providers/types.ts";
-
-export interface ExtractOptions {
-  // existing fields...
-  fetchProviders?: readonly FetchProvider[];
-  executionHooks?: ExecutionHooks;
-}
-```
-
-Do not make the extraction module select raw provider registry entries. It receives already selected, registry-wrapped candidates from `web_fetch`.
-
-- [ ] **Step 5: Pass the seam inputs from `web_fetch`.**
-
-In `src/tools/web-fetch.ts`:
-
-- keep `resolveFetchCandidates` as the existing resolver boundary;
-- resolve candidates immediately before calling `extractContent`;
-- pass `fetchProviders: resolveFetchCandidates?.() ?? []` and the phase 3 execution hooks; and
-- remove the `RetryableExtractionError` catch that separately calls `executeWithFallback`.
-
-The `fetchUrl()` body should have one extraction call and one cache write. Keep the current cache key, content store writes, multi-URL concurrency, image blocks, and sanitized `errorResult` behavior.
+- [ ] **Step 1: Move and re-export result types.** Create `types.ts` with the current `ExtractedContent`, `VideoFrame`, and `ImageBlock` definitions. Remove their definitions from `pipeline.ts`, import them there, and re-export them. Update the type-only consumers listed in the file map.
+- [ ] **Step 2: Implement the registered-fetch adapter.** Use `executeWithFallback` for every registered attempt. Trim text, reject empty results, preserve title/URL/chars, and pass signal/hooks.
+- [ ] **Step 3: Implement the ordered runner.** Enforce signal checks and the `fail`/`error`/success chain contract. Do not expose aggregate provider messages through extraction content.
+- [ ] **Step 4: Add seam tests.** Prove supplied ordering, empty-result advancement, normalization, title/chars/url, second-provider success, all-provider failure, caller cancellation stopping later adapters, success/failure hooks, and `BudgetExceededError` exclusion from failure hooks.
 
 Run:
 
 ```bash
-pnpm exec vitest run tests/extract/fallbacks.test.ts tests/tools/web-fetch.test.ts
+pnpm exec vitest run tests/extract/fallbacks.test.ts
 ```
 
-Expected: the new seam and existing provider fallback tests pass after the initial pipeline integration.
+### Task 2: Wire the seam into the pipeline and remove duplicate Jina
 
-### Task 2: Wire the ordered seam into the pipeline and remove duplicate Jina
+Files: `src/extract/pipeline.ts`, `src/providers/jina.ts`, `src/extract/jina-reader.ts`, `tests/extract/jina-reader.test.ts`, and the focused pipeline/provider tests.
 
-**Files:**
+- [ ] **Step 1: Add options and a single fetch adapter instance.** Extend `ExtractOptions` with `fetchProviders?: readonly FetchProvider[]` and `executionHooks?: ExecutionHooks`. Create the adapter only after original URL validation so transport and HTML paths share the same registry-wrapped candidates.
+- [ ] **Step 2: Preserve direct routes and validation.** Keep the existing route order, HEAD probe, binary/size checks, manual redirect validation, PDF/OCR, raw mode, and Cloudflare retry. Add caller-signal checks at pipeline entry, probe error handling, and GET/Cloudflare catches.
+- [ ] **Step 3: Handle retryable transport failures.** On network errors, 429, and 5xx, invoke only the registered fetch adapter. Return its normalized result on success; otherwise preserve `RetryableExtractionError` based on the original failure and sanitize any provider summary.
+- [ ] **Step 4: Replace direct Jina/Gemini calls for thin HTML.** After `rsc:no-match`, append `fetch-provider:skipped` when appropriate, run registered providers, then the combined Gemini adapter, then raw text. Remove the `jina-reader` import and markers.
+- [ ] **Step 5: Move Jina ownership.** Delete the duplicate extraction module and test. Keep `JinaProvider.fetch()` as the only Reader request, trim successful content, and reject content shorter than 100 characters.
 
-- Modify: `src/extract/pipeline.ts`
-- Modify: `src/providers/jina.ts`
-- Delete: `src/extract/jina-reader.ts`
-- Delete: `tests/extract/jina-reader.test.ts`
-- Modify: `tests/extract/pipeline.test.ts`
-- Modify: `tests/extract/pipeline-routing.test.ts`
-- Modify: `tests/providers/jina.test.ts`
+### Task 3: Update extraction and tool tests around the new boundary
 
-- [ ] **Step 1: Preserve all pre-fallback validation and direct routes.**
+Files: `tests/extract/pipeline.test.ts`, `tests/extract/pipeline-routing.test.ts`, `tests/extract/pipeline-ssrf.test.ts`, `tests/extract/cloudflare-retry.test.ts`, `tests/providers/jina.test.ts`, `tests/tools/web-fetch.test.ts`, and `tests/tools/web-fetch-video.test.ts`.
 
-Keep these pipeline sections in their current order and behavior:
-
-1. frame extraction options;
-2. local video routing;
-3. YouTube routing;
-4. original URL SSRF validation;
-5. GitHub structured extraction;
-6. HEAD probe and binary/size checks;
-7. validated HTTP GET with per-hop redirect validation;
-8. Cloudflare retry; and
-9. raw/PDF/direct HTML/RSC extraction.
-
-Do not pass unvalidated URLs to a registered fetch provider. The original `validateUrl()` must still run before any provider fallback, and `fetchValidated()` must continue validating every redirect hop for direct HTTP requests.
-
-- [ ] **Step 2: Replace the direct Jina tier with registered adapters.**
-
-After `chain.push("rsc:no-match")`, construct the fallback list:
-
-```ts
-const fallbacks = [
-  createFetchProviderFallback(
-    options?.fetchProviders ?? [],
-    url,
-    signal,
-    options?.executionHooks,
-  ),
-  {
-    name: "gemini-url-context",
-    run: () => extractWithUrlContext(url, signal),
-  },
-  {
-    name: "gemini-web",
-    run: () => extractWithGeminiWeb(url, signal),
-  },
-].filter((fallback): fallback is NonNullable<typeof fallback> => Boolean(fallback));
-
-const fallbackResult = await runExtractionFallbacks(fallbacks, chain, signal);
-if (fallbackResult) return fallbackResult;
-```
-
-Then keep the existing raw-text fallback and final error, using the accumulated `chain`. Remove `extractViaJinaReader` import and all `jina-reader` chain markers. For a call with no registered providers, the chain should identify the skipped provider group consistently (for example `fetch-provider:skipped`) before Gemini; choose one marker and update tests to assert that exact contract.
-
-- [ ] **Step 3: Preserve retryable transport fallback semantics.**
-
-When the initial validated GET or Cloudflare retry fails with a network error, 429, or 5xx, call only the registered fetch-provider fallback with the original URL before throwing. If a provider succeeds, return its normalized `ExtractedContent`. If all providers fail, throw a `RetryableExtractionError` so callers and tests can still distinguish retryable transport failure from a permanent HTTP error.
-
-Do not use the raw/Gemini HTML path when there is no response body. Preserve SSRF errors as `SSRFError`, preserve caller cancellation, and do not turn `BudgetExceededError` into a retryable network error. The error message may include a short sanitized fallback summary, but the error class and URL redaction rules must remain intact.
-
-- [ ] **Step 4: Make the provider own Jina Reader transport.**
-
-Keep `JinaProvider.fetch()` as the only `r.jina.ai` request. Normalize its text before returning:
-
-```ts
-const text = (await response.text()).trim();
-if (text.length < 100) {
-  throw new Error("Jina reader returned insufficient content");
-}
-return { text };
-```
-
-Retain its authorization header behavior and existing search behavior. Do not add a second direct fetch helper in the extraction module. The provider is already wrapped by `ProviderRegistry`, so its fetch budget and outcome hooks apply automatically.
-
-- [ ] **Step 5: Update extraction-chain and Jina tests.**
-
-Replace direct Jina-reader unit tests with:
-
-- fallback seam tests for adapter ordering and normalized `fetch-provider:<name>` output;
-- provider tests for Jina success, non-2xx error, short-content rejection, and authorization; and
-- pipeline routing tests that inject a mock registered fetch provider and assert it runs before Gemini.
-
-Keep the existing thin HTML, Gemini URL context, Gemini Web, raw text, 4xx, 429, 5xx, and cancellation assertions. Only change assertions that named the deleted direct `jina-reader` implementation.
+- [ ] **Step 1: Test normal HTML ordering.** With thin HTML and mocked Gemini adapters, assert Readability/RSC precede registered providers, providers precede Gemini, a successful provider stops the chain, and all-failure markers are sanitized/high-level only.
+- [ ] **Step 2: Test retryable transport behavior.** Cover network, 429, and 5xx success through a registered provider; all-provider failure as `RetryableExtractionError`; no Gemini/raw attempt without a response body; and budget rejection without a failure metric.
+- [ ] **Step 3: Test cancellation.** Abort before and during direct transport and during provider fallback. Assert the caller’s abort is preserved, no later provider runs, and no provider failure hook records cancellation.
+- [ ] **Step 4: Test security and structured routes.** Verify the provider is not called for an invalid original URL, redirect-to-private-IP, binary/oversized response, PDF, GitHub, YouTube, local video, or raw mode. Keep per-hop redirect validation assertions.
+- [ ] **Step 5: Preserve web-fetch behavior.** Verify the single extraction call receives resolved candidates/hooks, provider fallback results use the same cache/content-store/rendering path, and multi-URL deduplication, concurrency, partial failures, fresh mode, image blocks, and sanitized errors remain unchanged.
+- [ ] **Step 6: Update Jina tests.** Use a valid long fetch fixture, assert trim and title-independent text, short-content rejection, non-2xx errors, and authorization headers for both search and Reader fetches.
 
 Run:
 
 ```bash
-pnpm exec vitest run tests/extract/fallbacks.test.ts tests/extract/pipeline.test.ts tests/extract/pipeline-routing.test.ts tests/providers/jina.test.ts tests/tools/web-fetch.test.ts
+pnpm exec vitest run \
+  tests/extract/fallbacks.test.ts \
+  tests/extract/pipeline.test.ts \
+  tests/extract/pipeline-routing.test.ts \
+  tests/extract/pipeline-ssrf.test.ts \
+  tests/extract/cloudflare-retry.test.ts \
+  tests/providers/jina.test.ts \
+  tests/tools/web-fetch.test.ts \
+  tests/tools/web-fetch-video.test.ts
 ```
 
-Expected: focused extraction and provider tests pass, with no import or request path left for `src/extract/jina-reader.ts`.
+### Task 4: Complete the phase gate
 
-### Task 3: Prove security, structured-route, and multi-URL invariants
-
-**Files:**
-
-- Modify: `tests/extract/pipeline-ssrf.test.ts`
-- Modify: `tests/extract/cloudflare-retry.test.ts`
-- Modify: `tests/tools/web-fetch.test.ts`
-- Modify: `tests/tools/web-fetch-video.test.ts`
-- Modify: `tests/extract/pipeline.test.ts`
-
-- [ ] **Step 1: Test SSRF and redirect boundaries with provider candidates.**
-
-Add a test that supplies a mock fetch provider while requesting a private, link-local, or disallowed URL. Assert `extractContent` rejects with `SSRFError` before the provider’s `fetch` function is called. Keep the existing tests for redirect-to-private-IP and redirect-loop rejection; direct HTTP requests must still validate every hop.
-
-- [ ] **Step 2: Test fallback ordering and no duplicate Jina request.**
-
-For thin HTML, provide a mock provider and mocked Gemini adapters. Assert:
-
-1. Readability and RSC are attempted first;
-2. the registered provider is called before either Gemini adapter;
-3. Gemini is not called after a successful provider; and
-4. there is no direct `r.jina.ai` request outside the Jina provider mock.
-
-For a provider failure, assert the next provider/Gemini adapter runs and the final extraction chain records the failure and success labels in order.
-
-- [ ] **Step 3: Test retryable HTTP and budget behavior.**
-
-For 429/5xx/network failure, assert a successful registered provider result is returned. When all registered providers fail, assert `RetryableExtractionError`. When the registry wrapper throws `BudgetExceededError`, assert no provider failure metric is recorded and the retryable class remains intact where no provider can serve the request.
-
-- [ ] **Step 4: Test structured routes bypass generic fallbacks.**
-
-Keep tests proving provider candidates are not called for successful YouTube, local video, GitHub, PDF, and raw-mode routes. Existing video frame and PDF OCR behavior must remain unchanged. Do not make provider fetch adapters handle binary content, frames, or PDFs.
-
-- [ ] **Step 5: Test cache and multi-URL behavior.**
-
-Keep the existing `web_fetch` tests for cache hits, `fresh`, duplicate URLs, concurrency limit, content IDs, image blocks, and partial failures. Assert the resolver is called for each actual uncached URL and the provider fallback result is stored exactly like direct extraction content.
-
-Run:
+- [ ] **Step 1: Confirm no duplicate transport/outer fallback remains.** Search `src` and tests for `extractViaJinaReader`, `jina-reader`, `r.jina.ai`, and `executeWithFallback`. `r.jina.ai` must remain only in `src/providers/jina.ts` and its provider tests; `web-fetch.ts` must not execute a second fetch fallback.
+- [ ] **Step 2: Run the full gate.**
 
 ```bash
-pnpm exec vitest run tests/extract/pipeline-ssrf.test.ts tests/extract/cloudflare-retry.test.ts tests/extract/pipeline.test.ts tests/tools/web-fetch.test.ts tests/tools/web-fetch-video.test.ts
-```
-
-Expected: security and structured-route tests pass without weakening validation or changing cache/storage contracts.
-
-### Task 4: Complete the phase gate and commit
-
-- [ ] **Step 1: Search for duplicate Jina and outer fallback paths.**
-
-Run:
-
-```bash
-rg -n "extractViaJinaReader|jina-reader|r\.jina\.ai|executeWithFallback|RetryableExtractionError" src/extract src/tools/web-fetch.ts
-```
-
-Expected: `r.jina.ai` appears only in `src/providers/jina.ts` and its provider tests; `web-fetch.ts` no longer owns a second provider fallback; `executeWithFallback` appears in the shared extraction adapter and provider execution policy.
-
-- [ ] **Step 2: Run the complete phase gate.**
-
-```bash
-pnpm exec vitest run tests/extract/fallbacks.test.ts tests/extract/pipeline.test.ts tests/extract/pipeline-routing.test.ts tests/extract/pipeline-ssrf.test.ts tests/extract/cloudflare-retry.test.ts tests/providers/jina.test.ts tests/tools/web-fetch.test.ts tests/tools/web-fetch-video.test.ts
 pnpm check
 git diff --check
+git status --short
 ```
 
-Expected: focused tests and the full suite pass with only the documented pre-existing Biome and Node-engine warnings.
+Expected: the focused tests and full suite pass with only the documented Biome and Node-engine warnings. `git status --short` contains only the intended Phase 5 files.
 
 - [ ] **Step 3: Commit the atomic phase.**
 
 ```bash
-git add src/extract src/providers/jina.ts src/tools/web-fetch.ts tests
+git add \
+  src/cache.ts \
+  src/extract/types.ts src/extract/fallbacks.ts src/extract/pipeline.ts \
+  src/extract/gemini-url-context.ts src/extract/youtube.ts src/extract/video.ts src/extract/frames.ts \
+  src/extract/jina-reader.ts src/providers/jina.ts src/tools/web-fetch.ts \
+  tests/extract/fallbacks.test.ts tests/extract/pipeline.test.ts tests/extract/pipeline-routing.test.ts \
+  tests/extract/pipeline-ssrf.test.ts tests/extract/cloudflare-retry.test.ts tests/extract/jina-reader.test.ts \
+  tests/providers/jina.test.ts tests/tools/web-fetch.test.ts tests/tools/web-fetch-video.test.ts
 git commit -m "refactor: unify content extraction fallbacks"
 ```
-
-The commit may delete `src/extract/jina-reader.ts` and its test, but must not change provider catalog, configuration lifecycle, or unrelated extraction routes.
 
 ## Phase completion gate
 
 - Registered fetch providers are the only provider-backed extraction adapters.
 - Direct Jina Reader transport is deleted from `src/extract`.
-- Fallback order, retryable error class, budgets, activity, cancellation, SSRF, and structured routes are covered by tests.
-- Cache, content storage, multi-URL, and rendering behavior remain intact.
+- Fallback order, retryable transport behavior, budgets, hooks, cancellation, SSRF, redirects, and structured routes are covered by tests.
+- Cache, content storage, multi-URL, image, and rendering behavior remain intact.
 - Focused tests, `pnpm check`, and `git diff --check` pass.

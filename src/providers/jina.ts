@@ -63,7 +63,10 @@ export class JinaProvider implements SearchProvider, FetchProvider {
       throw new Error(`Jina reader error: ${response.status} ${response.statusText}`);
     }
 
-    const text = await response.text();
+    const text = (await response.text()).trim();
+    if (text.length < 100) {
+      throw new Error("Jina reader returned insufficient content");
+    }
     return { text };
   }
 }

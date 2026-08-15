@@ -1,6 +1,6 @@
 import { getApiKey, getVersionedApiBase } from "./gemini-api.ts";
 import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.ts";
-import type { ExtractedContent } from "./pipeline.ts";
+import type { ExtractedContent } from "./types.ts";
 
 const MIN_CONTENT_LENGTH = 100;
 

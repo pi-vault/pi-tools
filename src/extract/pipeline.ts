@@ -9,11 +9,17 @@ import {
   rasterizePdfPages,
   modelSupportsImages,
   extractTextWithGeminiVision,
-  type PdfPageImage,
 } from "./pdf-ocr.ts";
+import { collectImageBlocks, type ExtractedContent, type ImageBlock } from "./types.ts";
+import { createFetchProviderFallback, runExtractionFallbacks } from "./fallbacks.ts";
+import type { FetchProvider } from "../providers/types.ts";
+import type { ExecutionHooks } from "../providers/execute.ts";
+import { sanitizeError } from "../utils/errors.ts";
+
+export type { ExtractedContent, ImageBlock, VideoFrame } from "./types.ts";
+export { collectImageBlocks } from "./types.ts";
 import { getApiKey as getGeminiApiKey } from "./gemini-api.ts";
 import { extractRsc } from "./rsc.ts";
-import { extractViaJinaReader } from "./jina-reader.ts";
 import { isYouTubeURL, extractYouTube, isYouTubeEnabled } from "./youtube.ts";
 import { isVideoFile, extractVideo, isVideoEnabled } from "./video.ts";
 import {
@@ -25,7 +31,6 @@ import {
 } from "./frames.ts";
 import { extractWithUrlContext, extractWithGeminiWeb } from "./gemini-url-context.ts";
 import { activityMonitor } from "../monitor/activity-monitor.ts";
-
 /**
  * Error thrown when the HTTP fetch fails in a way that a different fetch
  * provider might succeed (network errors, 5xx, 429).
@@ -36,51 +41,6 @@ export class RetryableExtractionError extends Error {
     this.name = "RetryableExtractionError";
   }
 }
-
-export interface VideoFrame {
-  data: string;
-  mimeType: string;
-  timestamp: string;
-}
-
-export interface ExtractedContent {
-  text: string;
-  title?: string;
-  url: string;
-  extractionChain: string[];
-  chars: number;
-  truncated: boolean;
-  contentId?: string;
-  thumbnail?: { data: string; mimeType: string };
-  frames?: VideoFrame[];
-  images?: PdfPageImage[];
-  duration?: number;
-}
-
-export type ImageBlock = { type: "image"; data: string; mimeType: string };
-
-export function collectImageBlocks(extracted: ExtractedContent): ImageBlock[] {
-  const blocks: ImageBlock[] = [];
-  if (extracted.thumbnail) {
-    blocks.push({
-      type: "image",
-      data: extracted.thumbnail.data,
-      mimeType: extracted.thumbnail.mimeType,
-    });
-  }
-  if (extracted.frames) {
-    for (const frame of extracted.frames) {
-      blocks.push({ type: "image", data: frame.data, mimeType: frame.mimeType });
-    }
-  }
-  if (extracted.images) {
-    for (const img of extracted.images) {
-      blocks.push({ type: "image", data: img.data, mimeType: img.mimeType });
-    }
-  }
-  return blocks;
-}
-
 const BINARY_CONTENT_TYPES = [
   "image/",
   "audio/",
@@ -105,6 +65,20 @@ const HEAD_TIMEOUT_MS = 5_000;
 const MAX_REDIRECTS = 10;
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+async function tryRegisteredFallback(
+  adapter: ReturnType<typeof createFetchProviderFallback>[],
+  chain: string[],
+  signal: AbortSignal | undefined,
+): Promise<ExtractedContent | null> {
+  if (adapter.length === 0) return null;
+  signal?.throwIfAborted();
+  return runExtractionFallbacks(adapter, chain, signal);
+}
+
+function throwRetryableFromTransport(originalError: unknown): never {
+  throw new RetryableExtractionError(sanitizeError(originalError).slice(0, 120));
+}
 
 async function fetchValidated(
   url: string,
@@ -159,6 +133,7 @@ export async function probeUrl(
     );
   } catch (error) {
     if (error instanceof SSRFError) throw error;
+    signal?.throwIfAborted();
     return { skip: false };
   }
 
@@ -197,6 +172,8 @@ export interface ExtractOptions {
   frames?: number;
   model?: string;
   ctx?: import("@earendil-works/pi-coding-agent").ExtensionContext;
+  fetchProviders?: readonly FetchProvider[];
+  executionHooks?: ExecutionHooks;
 }
 
 export async function extractContent(
@@ -204,6 +181,7 @@ export async function extractContent(
   signal?: AbortSignal,
   options?: ExtractOptions,
 ): Promise<ExtractedContent> {
+  signal?.throwIfAborted();
   const { github, ssrf, pdf, gemini } = loadMergedConfig(process.cwd());
 
   // --- Frame extraction mode (timestamp/frames params present) ---
@@ -276,6 +254,20 @@ export async function extractContent(
   // --- SSRF validation (after video/YouTube routing, before HTTP fetch) ---
   validateUrl(url, { allowRanges: ssrf.allowRanges });
 
+  // Built after SSRF validation so transport and HTML paths share the same
+  // registry-wrapped candidates.
+  const fetchAdapter =
+    options?.fetchProviders && options.fetchProviders.length > 0
+      ? [
+          createFetchProviderFallback({
+            url,
+            providers: options.fetchProviders,
+            signal,
+            hooks: options.executionHooks,
+          }),
+        ]
+      : [];
+
   // GitHub interception: try structured extraction before HTML scraping.
   // Only fires for content URLs (blob, tree, root, raw).
   // Returns null for non-content URLs (issues, PRs, etc.) -> falls through.
@@ -310,7 +302,10 @@ export async function extractContent(
   } catch (err) {
     activityMonitor.logError(fetchEntryId, err instanceof Error ? err.message : String(err));
     if (err instanceof SSRFError) throw err;
-    throw new RetryableExtractionError(err instanceof Error ? err.message : String(err));
+    signal?.throwIfAborted();
+    const fallback = await tryRegisteredFallback(fetchAdapter, [], signal);
+    if (fallback) return fallback;
+    throwRetryableFromTransport(err);
   }
 
   // Cloudflare bot challenge: retry once with honest User-Agent
@@ -330,7 +325,10 @@ export async function extractContent(
     } catch (err) {
       activityMonitor.logError(retryEntryId, err instanceof Error ? err.message : String(err));
       if (err instanceof SSRFError) throw err;
-      throw new RetryableExtractionError(err instanceof Error ? err.message : String(err));
+      signal?.throwIfAborted();
+      const fallback = await tryRegisteredFallback(fetchAdapter, [], signal);
+      if (fallback) return fallback;
+      throwRetryableFromTransport(err);
     }
   }
 
@@ -340,6 +338,8 @@ export async function extractContent(
     const status = response.status;
     // 429 and 5xx are retryable — a different provider might succeed
     if (status === 429 || status >= 500) {
+      const fallback = await tryRegisteredFallback(fetchAdapter, [], signal);
+      if (fallback) return fallback;
       throw new RetryableExtractionError(`HTTP ${status}: ${response.statusText}`);
     }
     throw new Error(`HTTP ${status}: ${response.statusText}`);
@@ -500,32 +500,37 @@ export async function extractContent(
   }
   chain.push("rsc:no-match");
 
-  // Tier 3: Jina Reader
-  const jinaText = await extractViaJinaReader(url, signal);
-  if (jinaText) {
-    chain.push("jina-reader");
-    return {
-      text: jinaText,
-      title: undefined,
-      url,
-      extractionChain: chain,
-      chars: jinaText.length,
-      truncated: false,
-    };
+  // Tier 3: registered fetch providers (skipped when no providers configured).
+  if (fetchAdapter.length === 0) {
+    chain.push("fetch-provider:skipped");
+  } else {
+    const providerResult = await runExtractionFallbacks(fetchAdapter, chain, signal);
+    if (providerResult) {
+      return { ...providerResult, extractionChain: chain };
+    }
   }
-  chain.push("jina-reader:fail");
 
-  // Tier 4: Gemini HTML fallback
-  const geminiResult =
-    (await extractWithUrlContext(url, signal)) ?? (await extractWithGeminiWeb(url, signal));
+  // Tier 4: combined Gemini HTML adapter (URL context, then Web).
+  const geminiResult = await runExtractionFallbacks(
+    [
+      {
+        name: "gemini-html",
+        run: async () => {
+          const urlContextResult = await extractWithUrlContext(url, signal);
+          signal?.throwIfAborted();
+          return urlContextResult ?? (await extractWithGeminiWeb(url, signal));
+        },
+      },
+    ],
+    chain,
+    signal,
+  );
   if (geminiResult) {
-    chain.push(geminiResult.extractionChain[0]);
     return {
       ...geminiResult,
       extractionChain: chain,
     };
   }
-  chain.push("gemini-html:fail");
 
   // Final fallback: raw text stripped of HTML
   const rawText = body
