@@ -7,9 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-15
+
 ### Added
 
-- Added TinyFish Search and Fetch provider support through `TINYFISH_API_KEY`.
+- TinyFish Search and Fetch provider support through `TINYFISH_API_KEY`.
+
+### Changed
+
+- Search filter support is now explicit and strictly enforced; `web_search` honors abort signals during filter resolution.
+- Provider catalog is centralized so registration order and metadata stay consistent across the registry.
+- Provider operation policy is unified behind a single execution hook shared by all providers.
+- Config refresh is aligned with the tool lifecycle; reload payloads are validated to prevent config corruption.
+- Content extraction has a fallback seam with simplified error handling and hardened cancellation propagation.
+- Updated Biome schema to `2.5.8`.
 
 ## [0.5.0] - 2026-07-21
 

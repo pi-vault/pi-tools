@@ -7,15 +7,11 @@
 
 Web search, content extraction, documentation lookup, and deep research tools for [Pi](https://github.com/earendil-works/pi).
 
-## What's new in 0.5.0
+## What's new in 0.5.1
 
-> **Dashboard replaces typed `/tools` subcommands.** Run `/tools` to open the interactive dashboard with three tabs: **Providers** (toggle, key, default, run tests), **Status** (budgets, session outcomes, latency), and **Activity** (recent provider events). Typed subcommands such as `/tools status`, `/tools enable`, `/tools key`, `/tools test`, `/tools default`, and `/tools monitor on|off` are no longer supported.
+> **TinyFish provider added.** `TINYFISH_API_KEY` enables keyless search and fetch through the new TinyFish provider — see the [provider table](#available-providers) for setup.
 >
-> **Provider budgets are enforceable.** Hard, managed, unlimited, and shared-pool policies replace the old `monthlyQuota` settings. Budget status is reported per provider in the Status tab.
->
-> **`openai-codex` requires Pi OAuth.** The `OPENAI_API_KEY` fallback is gone. Run `/login` and select `openai-codex` before using it. To search with `OPENAI_API_KEY` instead, configure `openai-web-search`.
->
-> **Usage persistence moved.** Provider usage now lives at `$PI_CODING_AGENT_DIR/cache/pi-tools/usage.json` using a version 2 UTC-period ledger.
+> **Internal architecture deepened.** Search filter enforcement, provider catalog, operation policy, runtime lifecycle, and content extraction now share clearer seams. No public API changes.
 
 ## Install
 
