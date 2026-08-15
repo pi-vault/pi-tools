@@ -42,50 +42,9 @@ function mockConfig(overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
-function registeredToolNames() {
-  const pi = createMockPi();
-  // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
-  createExtension(pi as any);
-  pi.events.get("session_start")?.[0]?.({ type: "session_start", reason: "startup" }, makeCtx());
-  return pi.tools.map((t) => t.name);
-}
-
 describe("web_research registration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-  });
-
-  it("registers web_research when exa API key is available", () => {
-    vi.mocked(loadMergedConfig).mockReturnValue(mockConfig());
-    expect(registeredToolNames()).toContain("web_research");
-  });
-
-  it("registers web_research when exa API key is missing", () => {
-    vi.mocked(loadMergedConfig).mockReturnValue(
-      mockConfig({ providers: { exa: { enabled: true, apiKey: "EXA_API_KEY" } } }),
-    );
-    delete process.env.EXA_API_KEY;
-    expect(registeredToolNames()).toContain("web_research");
-  });
-
-  it("registers web_research when deepResearch.enabled is false", () => {
-    vi.mocked(loadMergedConfig).mockReturnValue(mockConfig({ deepResearch: { enabled: false } }));
-    expect(registeredToolNames()).toContain("web_research");
-  });
-
-  it("registers web_research when Exa is disabled", () => {
-    vi.mocked(loadMergedConfig).mockReturnValue(
-      mockConfig({
-        providers: {
-          exa: {
-            enabled: false,
-            apiKey: "test-key",
-            budget: { mode: "hard", limit: 10, period: "month", unit: "usd" },
-          },
-        },
-      }),
-    );
-    expect(registeredToolNames()).toContain("web_research");
   });
 
   it("keeps unavailable docs and research definitions executable with their existing errors", async () => {

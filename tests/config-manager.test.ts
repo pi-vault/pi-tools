@@ -309,6 +309,25 @@ describe("ConfigManager", () => {
     expect(loadMergedConfig).toHaveBeenLastCalledWith("/cwd", true);
   });
 
+  it("keeps the previous config when a strict reload has malformed providers", () => {
+    const previous = makeConfig({ brave: entry(hard) });
+    vi.mocked(loadMergedConfig)
+      .mockReturnValueOnce(previous)
+      .mockReturnValueOnce({ ...makeConfig(), providers: null } as unknown as PiToolsConfig);
+    const registry = memory();
+    const unregister = vi.spyOn(registry, "unregisterAll");
+    const listener = vi.fn();
+    const manager = new ConfigManager("/cwd", registry, [meta("brave")], undefined, listener);
+
+    manager.expireTtlForTest();
+
+    expect(() => manager.refresh()).not.toThrow();
+    expect(manager.current).toBe(previous);
+    expect(registry.getSearchProviderNames()).toEqual(["brave"]);
+    expect(unregister).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it("skips disabled, unkeyed, and failing providers without affecting siblings", () => {
     vi.mocked(loadMergedConfig).mockReturnValue(
       makeConfig({

@@ -62,6 +62,15 @@ export function diffConfig(
 
 const CONFIG_TTL_MS = 30_000;
 
+function isConfigRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isReloadableConfig(value: unknown): value is PiToolsConfig {
+  if (!isConfigRecord(value) || !isConfigRecord(value.providers)) return false;
+  return Object.values(value.providers).every((entry) => isConfigRecord(entry));
+}
+
 function configWithoutProviderApiKeys(config: PiToolsConfig): PiToolsConfig {
   return {
     ...config,
@@ -112,6 +121,11 @@ export class ConfigManager {
     try {
       nextConfig = loadMergedConfig(this.cwd, true);
     } catch {
+      // Malformed config — keep previous, reset TTL to retry next cycle
+      this.cacheTime = now;
+      return;
+    }
+    if (!isReloadableConfig(nextConfig)) {
       // Malformed config — keep previous, reset TTL to retry next cycle
       this.cacheTime = now;
       return;

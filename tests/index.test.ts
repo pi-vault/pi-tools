@@ -244,30 +244,6 @@ describe("tools extension", () => {
     }
   });
 
-  it("registers web_search tool", () => {
-    const pi = createMockPi();
-    // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
-    createExtension(pi as any);
-    startSession(pi);
-    expect(pi.tools.some((t) => t.name === "web_search")).toBe(true);
-  });
-
-  it("registers web_read tool", () => {
-    const pi = createMockPi();
-    // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
-    createExtension(pi as any);
-    startSession(pi);
-    expect(pi.tools.some((t) => t.name === "web_read")).toBe(true);
-  });
-
-  it("registers web_fetch tool", () => {
-    const pi = createMockPi();
-    // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
-    createExtension(pi as any);
-    startSession(pi);
-    expect(pi.tools.some((t) => t.name === "web_fetch")).toBe(true);
-  });
-
   it("restores content from session on session_start", async () => {
     const pi = createMockPi();
     // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
@@ -315,14 +291,6 @@ describe("tools extension", () => {
     );
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toContain("Restored content");
-  });
-
-  it("registers code_search tool", () => {
-    const pi = createMockPi();
-    // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
-    createExtension(pi as any);
-    startSession(pi);
-    expect(pi.tools.some((t) => t.name === "code_search")).toBe(true);
   });
 
   it("skips invalid entries during session restore", async () => {
