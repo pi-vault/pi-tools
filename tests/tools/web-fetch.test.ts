@@ -5,6 +5,16 @@ import { ContentCache } from "../../src/cache.ts";
 import { makeCtx, stubFetch } from "../helpers.ts";
 import type { FetchProvider, FetchResult } from "../../src/providers/types.ts";
 
+// These tests exercise web_fetch routing, not Gemini or the developer's browser profile.
+vi.mock("../../src/extract/gemini-url-context.ts", () => ({
+  extractWithUrlContext: vi.fn().mockResolvedValue(null),
+  extractWithGeminiWeb: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock("../../src/extract/chrome-cookies.ts", () => ({
+  getGoogleCookies: vi.fn().mockResolvedValue(null),
+}));
+
 const GOOD_HTML = `
 <!DOCTYPE html><html><head><title>Test</title></head><body>
 <article><h1>Article Title</h1>

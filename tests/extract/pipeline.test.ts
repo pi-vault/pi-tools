@@ -8,6 +8,11 @@ vi.mock("../../src/extract/gemini-url-context.ts", () => ({
   extractWithGeminiWeb: vi.fn().mockResolvedValue(null),
 }));
 
+// Keep pipeline tests independent of the developer's browser profile/keychain.
+vi.mock("../../src/extract/chrome-cookies.ts", () => ({
+  getGoogleCookies: vi.fn().mockResolvedValue(null),
+}));
+
 const GOOD_HTML = `
 <!DOCTYPE html><html><head><title>Article</title></head><body>
 <article><h1>Real Article</h1>
