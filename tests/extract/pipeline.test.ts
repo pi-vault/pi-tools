@@ -3,6 +3,11 @@ import * as configModule from "../../src/config.ts";
 import { RetryableExtractionError, extractContent } from "../../src/extract/pipeline.ts";
 import { stubFetch } from "../helpers.ts";
 
+vi.mock("../../src/extract/gemini-url-context.ts", () => ({
+  extractWithUrlContext: vi.fn().mockResolvedValue(null),
+  extractWithGeminiWeb: vi.fn().mockResolvedValue(null),
+}));
+
 const GOOD_HTML = `
 <!DOCTYPE html><html><head><title>Article</title></head><body>
 <article><h1>Real Article</h1>
