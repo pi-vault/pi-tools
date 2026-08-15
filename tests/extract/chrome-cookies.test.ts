@@ -83,6 +83,19 @@ describe("chrome-cookies", () => {
 
     // Reset all mocks to their starting state.
     vi.clearAllMocks();
+    // Fail closed if a test forgets to provide a fake keychain response.
+    // The real macOS `security` command is never invoked by this suite.
+    execFileMock.mockReset();
+    execFileMock.mockImplementation(
+      (
+        _command: string,
+        _args: string[],
+        _options: unknown,
+        callback: (error: Error | null, stdout: string) => void,
+      ) => {
+        callback(new Error("test keychain access disabled"), "");
+      },
+    );
     osMock.platform.mockReturnValue("darwin");
     osMock.homedir.mockReturnValue("/Users/test");
     osMock.tmpdir.mockReturnValue("/tmp");

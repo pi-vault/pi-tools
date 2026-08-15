@@ -1,5 +1,6 @@
 import { executeWithFallback, type ExecutionHooks } from "../providers/execute.ts";
 import type { FetchProvider } from "../providers/types.ts";
+import { sanitizeError } from "../utils/errors.ts";
 import type { ExtractedContent } from "./types.ts";
 
 export interface ExtractionFallback {
@@ -66,11 +67,11 @@ export function createFetchProviderFallback(
           truncated: false,
         };
       } catch (error) {
+        signal?.throwIfAborted();
         if (isAbortError(error)) throw error;
         // Rethrow ordinary errors so runExtractionFallbacks records :error.
         // Surface a sanitized summary, never raw provider messages with credentials.
-        const summary = error instanceof Error ? error.message : String(error);
-        throw new FetchProvidersFailedError(summary);
+        throw new FetchProvidersFailedError(sanitizeError(error));
       }
     },
   };
@@ -95,11 +96,13 @@ export async function runExtractionFallbacks(
     try {
       result = await fallback.run();
     } catch (error) {
+      signal?.throwIfAborted();
       if (isAbortError(error)) throw error;
       chain.push(`${fallback.name}:error`);
       continue;
     }
 
+    signal?.throwIfAborted();
     if (result == null) {
       chain.push(`${fallback.name}:fail`);
       continue;

@@ -198,6 +198,25 @@ describe("createFetchProviderFallback", () => {
 
     await expect(fallback.run()).rejects.toThrow();
   });
+
+  it("rethrows a custom caller abort reason from a provider", async () => {
+    const controller = new AbortController();
+    const reason = new Error("caller stopped");
+    const provider: FetchProvider = {
+      name: "aborting",
+      fetch: vi.fn(async () => {
+        controller.abort(reason);
+        return ok(LONG_TEXT);
+      }),
+    };
+    const fallback = createFetchProviderFallback({
+      url: "https://example.com",
+      providers: [provider],
+      signal: controller.signal,
+    });
+
+    await expect(fallback.run()).rejects.toBe(reason);
+  });
 });
 
 describe("runExtractionFallbacks", () => {
@@ -293,6 +312,22 @@ describe("runExtractionFallbacks", () => {
     ).rejects.toThrow();
     // First check throws before invoking A, so neither runs.
     expect(seen).toEqual([]);
+  });
+
+  it("checks caller cancellation after the final adapter completes", async () => {
+    const controller = new AbortController();
+    const reason = new Error("caller stopped");
+    const fallback: ExtractionFallback = {
+      name: "a",
+      run: vi.fn(async () => {
+        controller.abort(reason);
+        return null;
+      }),
+    };
+
+    await expect(
+      runExtractionFallbacks([fallback], chain, controller.signal),
+    ).rejects.toBe(reason);
   });
 
   it("returns null when no fallbacks are supplied", async () => {

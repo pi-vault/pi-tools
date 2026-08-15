@@ -183,7 +183,7 @@ describe("extractContent — retryable transport fallback", () => {
       const result = await extractContent("https://example.com/broken", undefined, {
         fetchProviders: [providerA],
       });
-      expect(result.extractionChain).toContain("fetch-provider:jina");
+      expect(result.extractionChain).toEqual(["fetch-provider:jina"]);
       expect(providerA.fetch).toHaveBeenCalledOnce();
     } finally {
       globalThis.fetch = orig;
@@ -393,6 +393,31 @@ describe("extractContent — caller cancellation propagation", () => {
     ).rejects.toThrow();
   });
 
+  it("stops after an aborted HEAD probe instead of continuing to GET", async () => {
+    const controller = new AbortController();
+    const reason = new Error("caller stopped");
+    const orig = globalThis.fetch;
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        controller.abort(reason);
+        throw reason;
+      }
+      return new Response("GET should not run", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    try {
+      await expect(
+        extractContent("https://example.com/article", controller.signal),
+      ).rejects.toBe(reason);
+      expect(fetchMock).toHaveBeenCalledOnce();
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
+
   it("stops later providers when aborted during provider fallback", async () => {
     const controller = new AbortController();
     const abortingProvider: FetchProvider = {
@@ -423,6 +448,38 @@ describe("extractContent — caller cancellation propagation", () => {
         }),
       ).rejects.toThrow();
       expect(laterProvider.fetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = orig;
+    }
+  });
+
+  it("does not call Gemini Web after URL context observes cancellation", async () => {
+    const controller = new AbortController();
+    const reason = new Error("caller stopped");
+    vi.mocked(extractWithUrlContext).mockImplementation(async () => {
+      controller.abort(reason);
+      return null;
+    });
+    vi.mocked(extractWithGeminiWeb).mockResolvedValue({
+      text: "Gemini content",
+      url: "https://example.com/article",
+      extractionChain: ["html:gemini-web"],
+      chars: 15,
+      truncated: false,
+    });
+
+    const orig = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => {
+      return new Response("<html><body>thin</body></html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      });
+    }) as unknown as typeof fetch;
+    try {
+      await expect(
+        extractContent("https://example.com/article", controller.signal),
+      ).rejects.toBe(reason);
+      expect(extractWithGeminiWeb).not.toHaveBeenCalled();
     } finally {
       globalThis.fetch = orig;
     }

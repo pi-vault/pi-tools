@@ -143,6 +143,7 @@ export async function probeUrl(
     );
   } catch (error) {
     if (error instanceof SSRFError) throw error;
+    signal?.throwIfAborted();
     return { skip: false };
   }
 
@@ -312,8 +313,8 @@ export async function extractContent(
     activityMonitor.logError(fetchEntryId, err instanceof Error ? err.message : String(err));
     if (err instanceof SSRFError) throw err;
     signal?.throwIfAborted();
-    const fallback = await tryRegisteredFallback({ adapter: fetchAdapter, chain, signal });
-    if (fallback) return { ...fallback, extractionChain: chain };
+    const fallback = await tryRegisteredFallback({ adapter: fetchAdapter, chain: [], signal });
+    if (fallback) return fallback;
     throwRetryableFromTransport(err);
   }
 
@@ -335,8 +336,8 @@ export async function extractContent(
       activityMonitor.logError(retryEntryId, err instanceof Error ? err.message : String(err));
       if (err instanceof SSRFError) throw err;
       signal?.throwIfAborted();
-      const fallback = await tryRegisteredFallback({ adapter: fetchAdapter, chain, signal });
-      if (fallback) return { ...fallback, extractionChain: chain };
+      const fallback = await tryRegisteredFallback({ adapter: fetchAdapter, chain: [], signal });
+      if (fallback) return fallback;
       throwRetryableFromTransport(err);
     }
   }
@@ -347,8 +348,8 @@ export async function extractContent(
     const status = response.status;
     // 429 and 5xx are retryable — a different provider might succeed
     if (status === 429 || status >= 500) {
-      const fallback = await tryRegisteredFallback({ adapter: fetchAdapter, chain, signal });
-      if (fallback) return { ...fallback, extractionChain: chain };
+      const fallback = await tryRegisteredFallback({ adapter: fetchAdapter, chain: [], signal });
+      if (fallback) return fallback;
       throw new RetryableExtractionError(`HTTP ${status}: ${response.statusText}`);
     }
     throw new Error(`HTTP ${status}: ${response.statusText}`);
@@ -520,16 +521,26 @@ export async function extractContent(
   }
 
   // Tier 4: combined Gemini HTML adapter (URL context, then Web).
-  const geminiResult =
-    (await extractWithUrlContext(url, signal)) ?? (await extractWithGeminiWeb(url, signal));
+  const geminiResult = await runExtractionFallbacks(
+    [
+      {
+        name: "gemini-html",
+        run: async () => {
+          const urlContextResult = await extractWithUrlContext(url, signal);
+          signal?.throwIfAborted();
+          return urlContextResult ?? (await extractWithGeminiWeb(url, signal));
+        },
+      },
+    ],
+    chain,
+    signal,
+  );
   if (geminiResult) {
-    chain.push(geminiResult.extractionChain[0]);
     return {
       ...geminiResult,
       extractionChain: chain,
     };
   }
-  chain.push("gemini-html:fail");
 
   // Final fallback: raw text stripped of HTML
   const rawText = body
