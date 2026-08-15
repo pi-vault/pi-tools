@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as nodePath from "node:path";
 import { promisify } from "node:util";
 import { DEFAULT_GITHUB_CONFIG, type GitHubConfig } from "../config.ts";
-import type { ExtractedContent } from "./pipeline.ts";
+import type { ExtractedContent } from "./types.ts";
 
 const execFileAsync = promisify(execFile);
 

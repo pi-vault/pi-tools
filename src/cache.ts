@@ -1,4 +1,4 @@
-import type { ExtractedContent } from "./extract/pipeline.ts";
+import type { ExtractedContent } from "./extract/types.ts";
 
 interface CacheEntry {
   content: ExtractedContent;

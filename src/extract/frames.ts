@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import type { VideoFrame } from "./pipeline.ts";
+import type { VideoFrame } from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
