@@ -27,10 +27,24 @@ export default function createExtension(pi: ExtensionAPI): void {
   let configManager: ConfigManager;
 
   const initializeSession = (ctx: ExtensionContext): void => {
-    configManager = new ConfigManager(ctx.cwd, registry, allProviders, ctx.modelRegistry);
+    let registerTools = () => {};
+    configManager = new ConfigManager(
+      ctx.cwd,
+      registry,
+      allProviders,
+      ctx.modelRegistry,
+      () => registerTools(),
+    );
 
     const executionHooks = registry.getExecutionHooks();
-
+    const getCombineConfig = () => {
+      configManager.refresh();
+      return configManager.current.combine;
+    };
+    const getDeepResearchConfig = () => {
+      configManager.refresh();
+      return configManager.current.deepResearch;
+    };
     const resolveCandidates = (name?: string, combine?: boolean) => {
       configManager.refresh();
       const resolved = name ?? configManager.current.defaultProvider;
@@ -46,52 +60,54 @@ export default function createExtension(pi: ExtensionAPI): void {
       }
       return registry.selectSearchCandidates(resolved);
     };
+    const selectDocs = () => {
+      configManager.refresh();
+      return registry.selectDocsByStrategy(configManager.current.selectionStrategy);
+    };
+    const resolveResearch = () => {
+      configManager.refresh();
+      if (configManager.current.deepResearch.enabled === false) return [];
+      return registry.selectResearchCandidates(configManager.current.selectionStrategy);
+    };
 
-    // Guidance values are evaluated once at registration time; changing guidance
-    // mid-session requires a restart (dynamic guidance would need 6 factory changes).
-    pi.registerTool(
-      createWebSearchTool(
-        resolveCandidates,
-        executionHooks.onSuccess,
-        configManager.current.guidance?.web_search,
-        executionHooks.onFailure,
-        (providerName, resultCount, requestedCount) => {
-          registry.recordResultQuality(providerName, resultCount, requestedCount);
-        },
-        configManager.current.combine,
-      ),
-    );
-    pi.registerTool(
-      createWebFetchTool(
-        store,
-        () => {
-          configManager.refresh();
-          return registry.selectFetchCandidates(configManager.current.selectionStrategy);
-        },
-        fetchCache,
-        buildAugmentedGuidance(configManager.current.guidance?.web_fetch, caps),
-        executionHooks,
-      ),
-    );
-    pi.registerTool(createWebReadTool(store, configManager.current.guidance?.web_read));
-    pi.registerTool(
-      createCodeSearchTool(
-        () => {
-          configManager.refresh();
-          return registry.selectCodeSearch(configManager.current.selectionStrategy);
-        },
-        undefined,
-        configManager.current.guidance?.code_search,
-        executionHooks,
-      ),
-    );
-
-    // Register docs tools when Context7 provider is available
-    if (registry.selectDocs()) {
-      const selectDocs = () => {
-        configManager.refresh();
-        return registry.selectDocsByStrategy(configManager.current.selectionStrategy);
-      };
+    registerTools = () => {
+      pi.registerTool(
+        createWebSearchTool(
+          resolveCandidates,
+          executionHooks.onSuccess,
+          configManager.current.guidance?.web_search,
+          executionHooks.onFailure,
+          (providerName, resultCount, requestedCount) => {
+            registry.recordResultQuality(providerName, resultCount, requestedCount);
+          },
+          configManager.current.combine,
+          getCombineConfig,
+        ),
+      );
+      pi.registerTool(
+        createWebFetchTool(
+          store,
+          () => {
+            configManager.refresh();
+            return registry.selectFetchCandidates(configManager.current.selectionStrategy);
+          },
+          fetchCache,
+          buildAugmentedGuidance(configManager.current.guidance?.web_fetch, caps),
+          executionHooks,
+        ),
+      );
+      pi.registerTool(createWebReadTool(store, configManager.current.guidance?.web_read));
+      pi.registerTool(
+        createCodeSearchTool(
+          () => {
+            configManager.refresh();
+            return registry.selectCodeSearch(configManager.current.selectionStrategy);
+          },
+          undefined,
+          configManager.current.guidance?.code_search,
+          executionHooks,
+        ),
+      );
       pi.registerTool(
         createWebDocsSearchTool(
           selectDocs,
@@ -107,19 +123,6 @@ export default function createExtension(pi: ExtensionAPI): void {
           executionHooks,
         ),
       );
-    }
-
-    // Register web_research when any research provider is registered
-    const researchEnabled = configManager.current.deepResearch?.enabled !== false;
-    const researchProviders = researchEnabled
-      ? registry.selectResearchCandidates(configManager.current.selectionStrategy)
-      : [];
-    if (researchProviders.length > 0) {
-      const resolveResearch = () => {
-        configManager.refresh();
-        if (configManager.current.deepResearch.enabled === false) return [];
-        return registry.selectResearchCandidates(configManager.current.selectionStrategy);
-      };
       pi.registerTool(
         createWebResearchTool(
           resolveResearch,
@@ -127,9 +130,11 @@ export default function createExtension(pi: ExtensionAPI): void {
           (customType, data) => pi.appendEntry(customType, data),
           configManager.current.deepResearch?.guidance,
           executionHooks,
+          getDeepResearchConfig,
         ),
       );
-    }
+    };
+    registerTools();
   };
 
   // Session lifecycle — delegated to session.ts
@@ -138,7 +143,10 @@ export default function createExtension(pi: ExtensionAPI): void {
     recordProjectTrust(ctx);
   });
   pi.on("before_provider_request", (event, ctx) =>
-    handleProviderRequest(event, ctx, () => configManager.current),
+    handleProviderRequest(event, ctx, () => {
+      configManager.refresh();
+      return configManager.current;
+    }),
   );
 
   // Build tier map for status display

@@ -170,19 +170,162 @@ describe("ConfigManager", () => {
     expect(registry.getBudgetStatus("brave")).toEqual({ mode: "managed" });
   });
 
+  it("notifies after provider changes update the registry", () => {
+    const next = makeConfig({ brave: entry(managed) });
+    vi.mocked(loadMergedConfig)
+      .mockReturnValueOnce(makeConfig({ brave: entry(hard) }))
+      .mockReturnValueOnce(next);
+    const registry = memory();
+    let manager: ConfigManager;
+    const listener = vi.fn((config: PiToolsConfig) => {
+      expect(config).toBe(next);
+      expect(manager.current).toBe(next);
+      expect(registry.getBudgetStatus("brave")).toEqual({ mode: "managed" });
+    });
+
+    manager = new ConfigManager("/cwd", registry, [meta("brave")], undefined, listener);
+    manager.expireTtlForTest();
+    manager.refresh();
+
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it("notifies for non-provider config changes", () => {
+    const next = {
+      ...makeConfig({ brave: entry() }),
+      defaultProvider: "brave",
+      selectionStrategy: "best-performing" as const,
+      guidance: { search: { promptSnippet: "prefer primary sources" } },
+      combine: { enabled: true, mode: "all" as const, targetBackends: 4, k: 20 },
+      deepResearch: { enabled: false },
+    };
+    vi.mocked(loadMergedConfig)
+      .mockReturnValueOnce(makeConfig({ brave: entry() }))
+      .mockReturnValueOnce(next);
+    const listener = vi.fn();
+    const manager = new ConfigManager("/cwd", memory(), [meta("brave")], undefined, listener);
+
+    manager.expireTtlForTest();
+    manager.refresh();
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(listener).toHaveBeenCalledWith(next);
+  });
+
+  it("notifies and re-registers when an environment-backed key changes", () => {
+    const config = makeConfig({ brave: entry(managed, { apiKey: "BRAVE_API_KEY" }) });
+    vi.mocked(loadMergedConfig).mockReturnValueOnce(config).mockReturnValueOnce({ ...config });
+    vi.mocked(resolveApiKey).mockReturnValueOnce("old-key").mockReturnValue("new-key");
+    const registry = memory();
+    const register = vi.spyOn(registry, "registerProvider");
+    const listener = vi.fn();
+    const manager = new ConfigManager("/cwd", registry, [meta("brave")], undefined, listener);
+
+    manager.expireTtlForTest();
+    manager.refresh();
+
+    expect(register).toHaveBeenCalledTimes(2);
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it("does not notify or re-register when api key representations resolve equally", () => {
+    vi.mocked(loadMergedConfig)
+      .mockReturnValueOnce(makeConfig({ brave: entry(managed, { apiKey: "OLD" }) }))
+      .mockReturnValueOnce(makeConfig({ brave: entry(managed, { apiKey: "NEW" }) }));
+    vi.mocked(resolveApiKey).mockReturnValue("same-key");
+    const registry = memory();
+    const register = vi.spyOn(registry, "registerProvider");
+    const listener = vi.fn();
+    const manager = new ConfigManager("/cwd", registry, [meta("brave")], undefined, listener);
+
+    manager.expireTtlForTest();
+    manager.refresh();
+
+    expect(register).toHaveBeenCalledOnce();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("notifies when a disabled provider's configuration changes", () => {
+    vi.mocked(loadMergedConfig)
+      .mockReturnValueOnce(makeConfig({ brave: { ...entry(managed), enabled: false, depth: "standard" } }))
+      .mockReturnValueOnce(makeConfig({ brave: { ...entry(managed), enabled: false, depth: "deep" } }));
+    const listener = vi.fn();
+    const manager = new ConfigManager("/cwd", memory(), [meta("brave")], undefined, listener);
+
+    manager.expireTtlForTest();
+    manager.refresh();
+
+    expect(listener).toHaveBeenCalledOnce();
+  });
+
+  it("ignores reordered equal provider entries", () => {
+    const reordered: ProviderBudget = { unit: "usd", period: "month", limit: 5, mode: "hard" };
+    vi.mocked(loadMergedConfig)
+      .mockReturnValueOnce(makeConfig({ brave: entry(hard) }))
+      .mockReturnValueOnce(makeConfig({ brave: entry(reordered) }));
+    const registry = memory();
+    const register = vi.spyOn(registry, "registerProvider");
+    const listener = vi.fn();
+    const manager = new ConfigManager("/cwd", registry, [meta("brave")], undefined, listener);
+
+    manager.expireTtlForTest();
+    manager.refresh();
+
+    expect(register).toHaveBeenCalledOnce();
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("does not notify for identical reloads or TTL hits", () => {
+    const config = makeConfig({ brave: entry() });
+    vi.mocked(loadMergedConfig).mockReturnValue(config);
+    const listener = vi.fn();
+    const manager = new ConfigManager("/cwd", memory(), [meta("brave")], undefined, listener);
+
+    manager.refresh();
+    manager.refresh(true);
+
+    expect(loadMergedConfig).toHaveBeenCalledTimes(2);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
   it("keeps the previous config when reload parsing fails", () => {
     vi.mocked(loadMergedConfig)
       .mockReturnValueOnce(makeConfig({ brave: entry(hard) }))
       .mockImplementationOnce(() => {
         throw new Error("invalid config");
       });
-    const manager = new ConfigManager("/cwd", memory(), [meta("brave")]);
+    const registry = memory();
+    const unregister = vi.spyOn(registry, "unregisterAll");
+    const listener = vi.fn();
+    const manager = new ConfigManager("/cwd", registry, [meta("brave")], undefined, listener);
 
     manager.expireTtlForTest();
     manager.refresh();
 
     expect(manager.current.providers.brave.budget).toEqual(hard);
+    expect(registry.getBudgetStatus("brave")).toEqual(expect.objectContaining(hard));
+    expect(unregister).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
     expect(loadMergedConfig).toHaveBeenLastCalledWith("/cwd", true);
+  });
+
+  it("keeps the previous config when a strict reload has malformed providers", () => {
+    const previous = makeConfig({ brave: entry(hard) });
+    vi.mocked(loadMergedConfig)
+      .mockReturnValueOnce(previous)
+      .mockReturnValueOnce({ ...makeConfig(), providers: null } as unknown as PiToolsConfig);
+    const registry = memory();
+    const unregister = vi.spyOn(registry, "unregisterAll");
+    const listener = vi.fn();
+    const manager = new ConfigManager("/cwd", registry, [meta("brave")], undefined, listener);
+
+    manager.expireTtlForTest();
+
+    expect(() => manager.refresh()).not.toThrow();
+    expect(manager.current).toBe(previous);
+    expect(registry.getSearchProviderNames()).toEqual(["brave"]);
+    expect(unregister).not.toHaveBeenCalled();
+    expect(listener).not.toHaveBeenCalled();
   });
 
   it("skips disabled, unkeyed, and failing providers without affecting siblings", () => {

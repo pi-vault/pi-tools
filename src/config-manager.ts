@@ -1,4 +1,5 @@
 import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { isDeepStrictEqual } from "node:util";
 import type { PiToolsConfig, ProviderConfigEntry } from "./config.ts";
 import { loadMergedConfig, resolveApiKey, clearCredentialCache } from "./config.ts";
 import type { ProviderRegistry } from "./providers/registry.ts";
@@ -9,6 +10,8 @@ interface ConfigChangeSet {
   removed: string[];
   changed: string[];
 }
+
+type ConfigChangeListener = (config: PiToolsConfig) => void;
 
 function isEnabled(entry: ProviderConfigEntry | undefined): boolean {
   return entry !== undefined && entry.enabled !== false;
@@ -23,6 +26,7 @@ export function diffConfig(
   prev: PiToolsConfig,
   next: PiToolsConfig,
   resolveKey: (apiKey: string | undefined) => string | undefined,
+  previousResolvedKeys?: ReadonlyMap<string, string | undefined>,
 ): ConfigChangeSet {
   const added: string[] = [];
   const removed: string[] = [];
@@ -41,14 +45,13 @@ export function diffConfig(
     } else if (wasPrevEnabled && !isNextEnabled) {
       removed.push(name);
     } else if (wasPrevEnabled && isNextEnabled) {
-      const prevResolved = resolveKey(prevEntry?.apiKey);
+      const prevResolved = previousResolvedKeys?.has(name)
+        ? previousResolvedKeys.get(name)
+        : resolveKey(prevEntry?.apiKey);
       const nextResolved = resolveKey(nextEntry?.apiKey);
       const { apiKey: _prevKey, ...prevStructure } = prevEntry;
       const { apiKey: _nextKey, ...nextStructure } = nextEntry;
-      if (
-        prevResolved !== nextResolved ||
-        JSON.stringify(prevStructure) !== JSON.stringify(nextStructure)
-      ) {
+      if (prevResolved !== nextResolved || !isDeepStrictEqual(prevStructure, nextStructure)) {
         changed.push(name);
       }
     }
@@ -59,6 +62,24 @@ export function diffConfig(
 
 const CONFIG_TTL_MS = 30_000;
 
+function isConfigRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isReloadableConfig(value: unknown): value is PiToolsConfig {
+  if (!isConfigRecord(value) || !isConfigRecord(value.providers)) return false;
+  return Object.values(value.providers).every((entry) => isConfigRecord(entry));
+}
+
+function configWithoutProviderApiKeys(config: PiToolsConfig): PiToolsConfig {
+  return {
+    ...config,
+    providers: Object.fromEntries(
+      Object.entries(config.providers).map(([name, { apiKey: _apiKey, ...entry }]) => [name, entry]),
+    ),
+  };
+}
+
 export class ConfigManager {
   private _config: PiToolsConfig;
   private cacheTime: number;
@@ -66,17 +87,21 @@ export class ConfigManager {
   private readonly registry: ProviderRegistry;
   private readonly metaByName: Map<string, ProviderMeta>;
   private readonly modelRegistry?: ModelRegistry;
+  private readonly onChange?: ConfigChangeListener;
+  private readonly resolvedKeys = new Map<string, string | undefined>();
 
   constructor(
     cwd: string,
     registry: ProviderRegistry,
     providerMetas: readonly ProviderMeta[],
     modelRegistry?: ModelRegistry,
+    onChange?: ConfigChangeListener,
   ) {
     this.cwd = cwd;
     this.registry = registry;
     this.metaByName = new Map(providerMetas.map((m) => [m.name, m]));
     this.modelRegistry = modelRegistry;
+    this.onChange = onChange;
     this._config = loadMergedConfig(cwd);
     this.cacheTime = Date.now();
     this.registerFromConfig(this._config);
@@ -100,11 +125,26 @@ export class ConfigManager {
       this.cacheTime = now;
       return;
     }
+    if (!isReloadableConfig(nextConfig)) {
+      // Malformed config — keep previous, reset TTL to retry next cycle
+      this.cacheTime = now;
+      return;
+    }
 
-    const changeSet = diffConfig(this._config, nextConfig, resolveApiKey);
+    const previousConfig = this._config;
+    const changeSet = diffConfig(previousConfig, nextConfig, resolveApiKey, this.resolvedKeys);
+    const providerChanged =
+      changeSet.added.length > 0 || changeSet.removed.length > 0 || changeSet.changed.length > 0;
+    const configChanged =
+      providerChanged ||
+      !isDeepStrictEqual(
+        configWithoutProviderApiKeys(previousConfig),
+        configWithoutProviderApiKeys(nextConfig),
+      );
     this.applyChanges(changeSet, nextConfig);
     this._config = nextConfig;
     this.cacheTime = now;
+    if (configChanged) this.onChange?.(nextConfig);
   }
 
   private applyChanges(changeSet: ConfigChangeSet, nextConfig: PiToolsConfig): void {
@@ -126,6 +166,7 @@ export class ConfigManager {
 
     const providerConfig = config.providers[name];
     const resolvedKey = resolveApiKey(providerConfig?.apiKey);
+    this.resolvedKeys.set(name, resolvedKey);
     if (meta.requiresKey && !resolvedKey) return;
 
     // Inject global ssrf.allowRanges into the per-provider config passed to meta.create.

@@ -134,6 +134,7 @@ export function createWebSearchTool(
   onFailure?: (providerName: string) => void,
   onResult?: (providerName: string, resultCount: number, requestedCount: number) => void,
   combineConfig?: CombineConfig,
+  getCombineConfig?: () => CombineConfig,
 ): ToolDefinition<typeof WebSearchParams, WebSearchDetails> {
   return {
     name: "web_search",
@@ -147,7 +148,8 @@ export function createWebSearchTool(
     ],
     parameters: WebSearchParams,
     async execute(_toolCallId, params, signal, _onUpdate, _ctx) {
-      const combineActive = params.combine ?? combineConfig?.enabled === true;
+      const currentCombineConfig = getCombineConfig?.() ?? combineConfig;
+      const combineActive = params.combine ?? currentCombineConfig?.enabled === true;
       const allCandidates = resolveCandidates(params.provider, combineActive);
 
       if (allCandidates.length === 0) {
@@ -192,7 +194,7 @@ export function createWebSearchTool(
       }
 
       // Fusion path
-      if (combineActive && eligibleCandidates.length > 1 && combineConfig) {
+      if (combineActive && eligibleCandidates.length > 1 && currentCombineConfig) {
         try {
           const fusionResult = await executeWithFusion({
             candidates: eligibleCandidates.map((provider) => ({
@@ -201,9 +203,9 @@ export function createWebSearchTool(
                 executeSearch(provider, params.query, n, signal ?? undefined, filters),
             })),
             maxResults,
-            mode: combineConfig.mode,
-            targetBackends: combineConfig.targetBackends,
-            k: combineConfig.k,
+            mode: currentCombineConfig.mode,
+            targetBackends: currentCombineConfig.targetBackends,
+            k: currentCombineConfig.k,
             signal,
             onSuccess,
             onFailure,

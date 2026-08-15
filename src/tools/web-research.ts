@@ -120,6 +120,7 @@ export function createWebResearchTool(
   appendEntry: AppendEntryFn,
   guidance?: GuidanceOverride,
   executionHooks?: ExecutionHooks,
+  getDeepResearchConfig?: () => DeepResearchConfig,
 ): ToolDefinition<typeof WebResearchParams, WebResearchDetails> {
   return {
     name: "web_research",
@@ -141,14 +142,14 @@ export function createWebResearchTool(
         throw new Error("web_research is disabled or unavailable.");
       }
 
-      // Defense-in-depth: config is captured at registration time
-      if (!deepResearchConfig.enabled) {
+      const currentDeepResearchConfig = getDeepResearchConfig?.() ?? deepResearchConfig;
+      if (!currentDeepResearchConfig.enabled) {
         throw new Error("web_research is disabled via deepResearch.enabled config.");
       }
 
       const cwd = ctx.cwd;
       const prepared = await prepareResearchInput(cwd, params);
-      const mode = applyResearchMode(prepared, deepResearchConfig.modeDefaults);
+      const mode = applyResearchMode(prepared, currentDeepResearchConfig.modeDefaults);
 
       // Full mode runs multiple queries with deduplication
       const queryList =

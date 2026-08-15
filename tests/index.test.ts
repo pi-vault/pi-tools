@@ -2,6 +2,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import createExtension from "../src/index.ts";
+import { loadMergedConfig } from "../src/config.ts";
+import { allProviders } from "../src/providers/all.ts";
 import { ProviderRegistry } from "../src/providers/registry.ts";
 import { _resetTrustRegistry } from "../src/utils/trust.ts";
 import { createMockPi, makeCtx, type MockPi } from "./helpers.ts";
@@ -34,12 +36,62 @@ describe("tools extension", () => {
 
     startSession(pi);
 
-    expect(pi.tools.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(["web_search", "web_fetch", "web_read", "code_search"]),
-    );
+    expect(pi.tools.map((tool) => tool.name)).toEqual([
+      "web_search",
+      "web_fetch",
+      "web_read",
+      "code_search",
+      "web_docs_search",
+      "web_docs_fetch",
+      "web_research",
+    ]);
   });
 
-  it("uses trusted ctx.cwd config for conditional tools", () => {
+  it("replaces tool definitions without duplicates after a /tools refresh", async () => {
+    const oldSnippet = "Search with old guidance.";
+    const newSnippet = "Search with refreshed guidance.";
+    let refreshed = false;
+    vi.mocked(fs.readFileSync).mockImplementation(() =>
+      JSON.stringify({
+        guidance: { web_search: { promptSnippet: refreshed ? newSnippet : oldSnippet } },
+      }),
+    );
+
+    const pi = createMockPi();
+    createExtension(pi as never);
+    const ctx = makeCtx();
+    ctx.ui.custom = vi
+      .fn()
+      .mockResolvedValueOnce({ type: "reload", activeTab: "status" })
+      .mockResolvedValueOnce({ type: "close" }) as unknown as typeof ctx.ui.custom;
+    startSession(pi, ctx);
+    const initialWebSearch = pi.tools.find((tool) => tool.name === "web_search");
+    expect(initialWebSearch?.promptSnippet).toBe(oldSnippet);
+
+    refreshed = true;
+    const command = pi.commands.find(({ name }) => name === "tools");
+    if (!command) throw new Error("tools command not registered");
+    await command.options.handler("", ctx);
+
+    const names = pi.tools.map((tool) => tool.name);
+    expect(names).toEqual([
+      "web_search",
+      "web_fetch",
+      "web_read",
+      "code_search",
+      "web_docs_search",
+      "web_docs_fetch",
+      "web_research",
+    ]);
+    expect(new Set(names).size).toBe(names.length);
+    expect(pi.tools.filter((tool) => tool.name === "web_search")).toHaveLength(1);
+    const refreshedWebSearch = pi.tools.find((tool) => tool.name === "web_search");
+    expect(refreshedWebSearch).not.toBe(initialWebSearch);
+    expect(refreshedWebSearch?.promptSnippet).not.toBe(oldSnippet);
+    expect(refreshedWebSearch?.promptSnippet).toBe(newSnippet);
+  });
+
+  it("keeps optional tools stable while trust gates project credentials until reload", async () => {
     _resetTrustRegistry();
     vi.stubEnv("EXA_API_KEY", "");
     vi.stubEnv("CONTEXT7_API_KEY", "");
@@ -47,62 +99,149 @@ describe("tools extension", () => {
     try {
       const cwd = "/projects/trusted";
       const configPath = path.join(cwd, ".pi", "tools.json");
+      const duckduckgoConfig = { enabled: true, budget: { mode: "unlimited" } };
+      let trusted = false;
+      const exa = allProviders.find(({ name }) => name === "exa");
+      const context7 = allProviders.find(({ name }) => name === "context7");
+      const duckduckgo = allProviders.find(({ name }) => name === "duckduckgo");
+      if (!exa || !context7 || !duckduckgo) throw new Error("provider metadata not found");
+      const exaCreate = vi.spyOn(exa, "create");
+      const context7Create = vi.spyOn(context7, "create");
+      const duckduckgoCreate = vi.spyOn(duckduckgo, "create");
+      const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = String(input);
+        if (url.startsWith("https://context7.com/api/v2/libs/search")) {
+          return new Response(
+            JSON.stringify({
+              results: [
+                {
+                  id: "/facebook/react",
+                  title: "React",
+                  description: "A UI library",
+                  totalSnippets: 1,
+                  trustScore: 1,
+                  benchmarkScore: 1,
+                },
+              ],
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        }
+        if (url === "https://api.exa.ai/search") {
+          return new Response(JSON.stringify({ answer: "Trusted research result", results: [] }), {
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return new Response("Not Found", { status: 404 });
+      });
       vi.mocked(fs.existsSync).mockImplementation((candidate) => candidate === configPath);
       vi.mocked(fs.readFileSync).mockImplementation((candidate) => {
         const filePath = typeof candidate === "string" ? candidate : candidate.toString();
         if (filePath === configPath) {
           return JSON.stringify({
             providers: {
-              exa: { enabled: true, apiKey: "literal-exa-key" },
-              context7: { enabled: true, apiKey: "literal-context7-key" },
+              exa: { enabled: true, apiKey: "literal-exa-key", baseUrl: "https://private.exa" },
+              context7: {
+                enabled: true,
+                apiKey: "literal-context7-key",
+                baseUrl: "https://private.context7",
+              },
+              duckduckgo: { ...duckduckgoConfig, baseUrl: "https://private.duckduckgo" },
             },
+            gemini: { allowBrowserCookies: true, baseUrl: "https://private.gemini" },
+            ssrf: { allowRanges: ["10.0.0.0/8"] },
             deepResearch: { enabled: true },
           });
         }
         throw new Error("ENOENT");
       });
 
-      const untrustedPi = createMockPi();
-      createExtension(untrustedPi as never);
-      startSession(untrustedPi, makeCtx({ cwd, isProjectTrusted: () => false }));
-      expect(untrustedPi.tools.map((tool) => tool.name)).not.toContain("web_research");
-      expect(untrustedPi.tools.map((tool) => tool.name)).not.toContain("web_docs_search");
+      const pi = createMockPi();
+      createExtension(pi as never);
+      const ctx = makeCtx({ cwd, isProjectTrusted: () => trusted });
+      ctx.ui.custom = vi
+        .fn()
+        .mockResolvedValueOnce({ type: "reload", activeTab: "status" })
+        .mockResolvedValueOnce({ type: "close" }) as unknown as typeof ctx.ui.custom;
+      startSession(pi, ctx);
 
-      const trustedPi = createMockPi();
-      createExtension(trustedPi as never);
-      startSession(trustedPi, makeCtx({ cwd, isProjectTrusted: () => true }));
-      expect(trustedPi.tools.map((tool) => tool.name)).toEqual(
-        expect.arrayContaining(["web_research", "web_docs_search", "web_docs_fetch"]),
+      const untrustedConfig = loadMergedConfig(cwd);
+      expect(untrustedConfig.providers.duckduckgo).toEqual(duckduckgoConfig);
+      expect(untrustedConfig.gemini).toEqual({});
+      expect(untrustedConfig.ssrf.allowRanges).toEqual([]);
+      expect(duckduckgoCreate.mock.calls[0]?.slice(0, 2)).toEqual([
+        undefined,
+        { ...duckduckgoConfig, ssrfAllowRanges: [] },
+      ]);
+      expect(exaCreate).toHaveBeenCalledTimes(0);
+      expect(context7Create).toHaveBeenCalledTimes(0);
+
+      const docs = pi.tools.find((tool) => tool.name === "web_docs_search");
+      const research = pi.tools.find((tool) => tool.name === "web_research");
+      if (!docs || !research) throw new Error("stable optional tools not registered");
+      const unavailable = await docs.execute(
+        "docs-untrusted",
+        { libraryName: "react", query: "hooks" },
+        undefined,
+        undefined,
+        ctx,
+      );
+      expect((unavailable.content[0] as { text: string }).text).toContain("CONTEXT7_API_KEY");
+      await expect(
+        research.execute("research-untrusted", { query: "hooks" }, undefined, undefined, ctx),
+      ).rejects.toThrow("disabled or unavailable");
+      expect(fetch).not.toHaveBeenCalled();
+
+      trusted = true;
+      pi.events.get("model_select")?.[0]?.({ type: "model_select" }, ctx);
+      const command = pi.commands.find(({ name }) => name === "tools");
+      if (!command) throw new Error("tools command not registered");
+      await command.options.handler("", ctx);
+
+      expect(pi.tools.map((tool) => tool.name)).toEqual([
+        "web_search",
+        "web_fetch",
+        "web_read",
+        "code_search",
+        "web_docs_search",
+        "web_docs_fetch",
+        "web_research",
+      ]);
+      expect(exaCreate).toHaveBeenCalledTimes(1);
+      expect(context7Create).toHaveBeenCalledTimes(1);
+
+      const reloadedDocs = pi.tools.find((tool) => tool.name === "web_docs_search");
+      const reloadedResearch = pi.tools.find((tool) => tool.name === "web_research");
+      if (!reloadedDocs || !reloadedResearch) throw new Error("stable optional tools not registered");
+      const docsResult = await reloadedDocs.execute(
+        "docs-trusted",
+        { libraryName: "react", query: "hooks" },
+        undefined,
+        undefined,
+        ctx,
+      );
+      expect(docsResult.details).toMatchObject({ provider: "context7", resultCount: 1 });
+      const researchResult = await reloadedResearch.execute(
+        "research-trusted",
+        { query: "hooks" },
+        undefined,
+        undefined,
+        ctx,
+      );
+      expect((researchResult.content[0] as { text: string }).text).toContain("Trusted research result");
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining("context7.com/api/v2/libs/search"),
+        expect.objectContaining({ headers: { Authorization: "Bearer literal-context7-key" } }),
+      );
+      expect(fetch).toHaveBeenCalledWith(
+        "https://api.exa.ai/search",
+        expect.objectContaining({ headers: expect.objectContaining({ "x-api-key": "literal-exa-key" }) }),
       );
     } finally {
       vi.unstubAllEnvs();
       vi.restoreAllMocks();
       _resetTrustRegistry();
     }
-  });
-
-  it("registers web_search tool", () => {
-    const pi = createMockPi();
-    // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
-    createExtension(pi as any);
-    startSession(pi);
-    expect(pi.tools.some((t) => t.name === "web_search")).toBe(true);
-  });
-
-  it("registers web_read tool", () => {
-    const pi = createMockPi();
-    // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
-    createExtension(pi as any);
-    startSession(pi);
-    expect(pi.tools.some((t) => t.name === "web_read")).toBe(true);
-  });
-
-  it("registers web_fetch tool", () => {
-    const pi = createMockPi();
-    // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
-    createExtension(pi as any);
-    startSession(pi);
-    expect(pi.tools.some((t) => t.name === "web_fetch")).toBe(true);
   });
 
   it("restores content from session on session_start", async () => {
@@ -152,14 +291,6 @@ describe("tools extension", () => {
     );
     const text = (result.content[0] as { type: "text"; text: string }).text;
     expect(text).toContain("Restored content");
-  });
-
-  it("registers code_search tool", () => {
-    const pi = createMockPi();
-    // biome-ignore lint/suspicious/noExplicitAny: MockPi satisfies ExtensionAPI at runtime
-    createExtension(pi as any);
-    startSession(pi);
-    expect(pi.tools.some((t) => t.name === "code_search")).toBe(true);
   });
 
   it("skips invalid entries during session restore", async () => {
@@ -282,6 +413,41 @@ describe("before_provider_request rewrite handler", () => {
 
     // Returns undefined → no rewrite
     expect(result).toBeUndefined();
+  });
+
+  it("refreshes config in the handler when openai-web-search is disabled", () => {
+    let disabled = false;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-13T00:00:00Z"));
+    vi.mocked(fs.readFileSync).mockImplementation(() =>
+      disabled ? JSON.stringify({ providers: { "openai-web-search": { enabled: false } } }) : "{}",
+    );
+
+    try {
+      const pi = createMockPi();
+      createExtension(pi as never);
+      const ctx = makeCtx({ model: { provider: "openai" } as never });
+      startSession(pi, ctx);
+      const handler = pi.events.get("before_provider_request")?.[0];
+      const payload = () => ({
+        tools: [{ type: "function", function: { name: "web_search", parameters: {} } }],
+      });
+
+      expect(handler?.({ type: "before_provider_request", payload: payload() }, ctx)).toMatchObject(
+        {
+          tools: [{ type: "web_search", external_web_access: true }],
+        },
+      );
+
+      disabled = true;
+      vi.advanceTimersByTime(30_000);
+
+      expect(
+        handler?.({ type: "before_provider_request", payload: payload() }, ctx),
+      ).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not rewrite when openai-web-search is disabled in config", () => {
