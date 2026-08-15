@@ -59,13 +59,56 @@ describe("JinaProvider", () => {
 
   it("fetches content via Jina Reader", async () => {
     fetchStub.addResponse("r.jina.ai", {
-      body: "# Page Title\n\nPage content here",
+      body: "# Page Title\n\n" + "Page content here is long enough to clear the 100-char minimum. ".repeat(3),
       headers: { "content-type": "text/plain" },
     });
 
     const provider = new JinaProvider();
     const result = await provider.fetch("https://example.com");
     expect(result.text).toContain("Page content");
+  });
+
+  it("trims whitespace from the fetched body", async () => {
+    fetchStub.addResponse("r.jina.ai", {
+      body: "   \n\n# Real Content\n\nThis is a substantial amount of text returned by the Jina Reader API. It must be long enough to clear the minimum content threshold so that the trim does not affect validity. ".repeat(2),
+      headers: { "content-type": "text/plain" },
+    });
+
+    const provider = new JinaProvider();
+    const result = await provider.fetch("https://example.com");
+    expect(result.text.startsWith(" ")).toBe(false);
+    expect(result.text.endsWith(" ")).toBe(false);
+  });
+
+  it("throws when fetch returns fewer than 100 characters after trim", async () => {
+    fetchStub.addResponse("r.jina.ai", {
+      body: "   short   ",
+      headers: { "content-type": "text/plain" },
+    });
+
+    const provider = new JinaProvider();
+    await expect(provider.fetch("https://example.com")).rejects.toThrow(
+      "Jina reader returned insufficient content",
+    );
+  });
+
+  it("throws on non-2xx fetch responses", async () => {
+    fetchStub.addResponse("r.jina.ai", { status: 500, body: "Error" });
+    const provider = new JinaProvider();
+    await expect(provider.fetch("https://example.com")).rejects.toThrow();
+  });
+
+  it("sends Authorization header for fetch when API key is configured", async () => {
+    fetchStub.addResponse("r.jina.ai", {
+      body: "# Title\n\n" + "Long enough content from Jina Reader via authenticated request. ".repeat(4),
+      headers: { "content-type": "text/plain" },
+    });
+
+    const provider = new JinaProvider("secret-key");
+    await provider.fetch("https://example.com");
+
+    const fetchCall = (globalThis.fetch as any).mock.calls[0];
+    expect(fetchCall[1].headers).toHaveProperty("Authorization", "Bearer secret-key");
   });
 
   it("throws on non-2xx response", async () => {
