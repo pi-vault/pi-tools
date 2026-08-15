@@ -11,12 +11,15 @@ import {
   extractTextWithGeminiVision,
 } from "./pdf-ocr.ts";
 import { collectImageBlocks, type ExtractedContent, type ImageBlock } from "./types.ts";
+import { createFetchProviderFallback, runExtractionFallbacks } from "./fallbacks.ts";
+import type { FetchProvider } from "../providers/types.ts";
+import type { ExecutionHooks } from "../providers/execute.ts";
+import { sanitizeError } from "../utils/errors.ts";
 
 export type { ExtractedContent, ImageBlock, VideoFrame } from "./types.ts";
 export { collectImageBlocks } from "./types.ts";
 import { getApiKey as getGeminiApiKey } from "./gemini-api.ts";
 import { extractRsc } from "./rsc.ts";
-import { extractViaJinaReader } from "./jina-reader.ts";
 import { isYouTubeURL, extractYouTube, isYouTubeEnabled } from "./youtube.ts";
 import { isVideoFile, extractVideo, isVideoEnabled } from "./video.ts";
 import {
@@ -28,6 +31,7 @@ import {
 } from "./frames.ts";
 import { extractWithUrlContext, extractWithGeminiWeb } from "./gemini-url-context.ts";
 import { activityMonitor } from "../monitor/activity-monitor.ts";
+
 
 /**
  * Error thrown when the HTTP fetch fails in a way that a different fetch
@@ -66,6 +70,25 @@ const HEAD_TIMEOUT_MS = 5_000;
 const MAX_REDIRECTS = 10;
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+async function tryRegisteredFallback(params: {
+  adapter: ReturnType<typeof createFetchProviderFallback>[];
+  chain: string[];
+  signal: AbortSignal | undefined;
+}): Promise<ExtractedContent | null> {
+  if (params.adapter.length === 0) return null;
+  params.signal?.throwIfAborted();
+  const result = await runExtractionFallbacks(params.adapter, params.chain, params.signal);
+  return result ?? null;
+}
+
+function describeTransportFailure(error: unknown): string {
+  return sanitizeError(error).slice(0, 120);
+}
+
+function throwRetryableFromTransport(originalError: unknown): never {
+  throw new RetryableExtractionError(describeTransportFailure(originalError));
+}
 
 async function fetchValidated(
   url: string,
@@ -158,6 +181,8 @@ export interface ExtractOptions {
   frames?: number;
   model?: string;
   ctx?: import("@earendil-works/pi-coding-agent").ExtensionContext;
+  fetchProviders?: readonly FetchProvider[];
+  executionHooks?: ExecutionHooks;
 }
 
 export async function extractContent(
@@ -165,6 +190,7 @@ export async function extractContent(
   signal?: AbortSignal,
   options?: ExtractOptions,
 ): Promise<ExtractedContent> {
+  signal?.throwIfAborted();
   const { github, ssrf, pdf, gemini } = loadMergedConfig(process.cwd());
 
   // --- Frame extraction mode (timestamp/frames params present) ---
@@ -237,6 +263,20 @@ export async function extractContent(
   // --- SSRF validation (after video/YouTube routing, before HTTP fetch) ---
   validateUrl(url, { allowRanges: ssrf.allowRanges });
 
+  // Built after SSRF validation so transport and HTML paths share the same
+  // registry-wrapped candidates.
+  const fetchAdapter =
+    options?.fetchProviders && options.fetchProviders.length > 0
+      ? [
+          createFetchProviderFallback({
+            url,
+            providers: options.fetchProviders,
+            signal,
+            hooks: options.executionHooks,
+          }),
+        ]
+      : [];
+
   // GitHub interception: try structured extraction before HTML scraping.
   // Only fires for content URLs (blob, tree, root, raw).
   // Returns null for non-content URLs (issues, PRs, etc.) -> falls through.
@@ -271,7 +311,10 @@ export async function extractContent(
   } catch (err) {
     activityMonitor.logError(fetchEntryId, err instanceof Error ? err.message : String(err));
     if (err instanceof SSRFError) throw err;
-    throw new RetryableExtractionError(err instanceof Error ? err.message : String(err));
+    signal?.throwIfAborted();
+    const fallback = await tryRegisteredFallback({ adapter: fetchAdapter, chain, signal });
+    if (fallback) return { ...fallback, extractionChain: chain };
+    throwRetryableFromTransport(err);
   }
 
   // Cloudflare bot challenge: retry once with honest User-Agent
@@ -291,7 +334,10 @@ export async function extractContent(
     } catch (err) {
       activityMonitor.logError(retryEntryId, err instanceof Error ? err.message : String(err));
       if (err instanceof SSRFError) throw err;
-      throw new RetryableExtractionError(err instanceof Error ? err.message : String(err));
+      signal?.throwIfAborted();
+      const fallback = await tryRegisteredFallback({ adapter: fetchAdapter, chain, signal });
+      if (fallback) return { ...fallback, extractionChain: chain };
+      throwRetryableFromTransport(err);
     }
   }
 
@@ -301,6 +347,8 @@ export async function extractContent(
     const status = response.status;
     // 429 and 5xx are retryable — a different provider might succeed
     if (status === 429 || status >= 500) {
+      const fallback = await tryRegisteredFallback({ adapter: fetchAdapter, chain, signal });
+      if (fallback) return { ...fallback, extractionChain: chain };
       throw new RetryableExtractionError(`HTTP ${status}: ${response.statusText}`);
     }
     throw new Error(`HTTP ${status}: ${response.statusText}`);
@@ -461,22 +509,17 @@ export async function extractContent(
   }
   chain.push("rsc:no-match");
 
-  // Tier 3: Jina Reader
-  const jinaText = await extractViaJinaReader(url, signal);
-  if (jinaText) {
-    chain.push("jina-reader");
-    return {
-      text: jinaText,
-      title: undefined,
-      url,
-      extractionChain: chain,
-      chars: jinaText.length,
-      truncated: false,
-    };
+  // Tier 3: registered fetch providers (skipped when no providers configured).
+  if (fetchAdapter.length === 0) {
+    chain.push("fetch-provider:skipped");
+  } else {
+    const providerResult = await runExtractionFallbacks(fetchAdapter, chain, signal);
+    if (providerResult) {
+      return { ...providerResult, extractionChain: chain };
+    }
   }
-  chain.push("jina-reader:fail");
 
-  // Tier 4: Gemini HTML fallback
+  // Tier 4: combined Gemini HTML adapter (URL context, then Web).
   const geminiResult =
     (await extractWithUrlContext(url, signal)) ?? (await extractWithGeminiWeb(url, signal));
   if (geminiResult) {
